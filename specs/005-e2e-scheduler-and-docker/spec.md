@@ -2,7 +2,7 @@
 
 **Feature Directory**: `specs/005-e2e-scheduler-and-docker`
 **Created**: 2026-08-31
-**Status**: Implemented; production source/observation cutover pending
+**Status**: Implemented; production source/observation cutover completed 2026-09-20 (Spec 001 T020, verifier `VERIFIED`)
 **Input**: Pha 5 (E2E Scheduler, Docker & Documentation)
 **As-built amendment**: 2026-09-13 — optional worker runtime and fail-closed production cutover
 

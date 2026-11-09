@@ -9,6 +9,10 @@ description: "Dependency-ordered implementation tasks for the evidence-grounded 
 
 **Prerequisites**: `plan.md`, `spec.md`, `research.md`, `data-model.md`, `contracts/`, `quickstart.md`
 
+**Current status — 2026-11-09**: Implemented and released in `v0.8.0`. T085–T090 are parked with the
+frozen Market verdict and T092–T098 are closed; each line states how. Gate and dependency notes below
+that present those tasks as open are historical.
+
 **Tests**: Required. Every behavior change follows RED → GREEN, including SQLite/PostgreSQL parity,
 public MCP inventory, deterministic artifact, clean-bootstrap, and fail-closed negative controls.
 
@@ -237,32 +241,32 @@ deleted and no release has been prepared.
 separate implementation completion from owner-authorized migration, release, and deletion actions.
 
 - [X] T084 Add five reproducible pilot case definitions, decision outcomes, stop conditions, required channels, and comparison criteria in `specs/011-evidence-grounded-product-reset/pilot-protocol.md`
-- [ ] T085 OWNER GATE: obtain explicit bounded authorization before using any real TikTok, Threads, or Instagram session/token and record allowed accounts, surfaces, quotas, and expiry in `specs/011-evidence-grounded-product-reset/pilot-protocol.md`
-- [ ] T086 [P] Run the authorized sufficient multi-source Vietnam consumer-market pilot and record mission, Brief, frame, claims, limitations, and decision usefulness in `specs/011-evidence-grounded-product-reset/pilot-results.md`
-- [ ] T087 [P] Run the authorized required-channel authentication-block pilot and record the Gap Report and smallest next probe in `specs/011-evidence-grounded-product-reset/pilot-results.md`
-- [ ] T088 [P] Run the authorized high-volume low-relevance pilot and record qualification and refusal evidence in `specs/011-evidence-grounded-product-reset/pilot-results.md`
-- [ ] T089 [P] Run the authorized contradictory-signals pilot and record how counterevidence changes or conditions the claims in `specs/011-evidence-grounded-product-reset/pilot-results.md`
-- [ ] T090 [P] Run the authorized missing decision-critical metric pilot and record the absent forbidden outputs and next-best probe in `specs/011-evidence-grounded-product-reset/pilot-results.md`
+- [~] T085 OWNER GATE: obtain explicit bounded authorization before using any real TikTok, Threads, or Instagram session/token and record allowed accounts, surfaces, quotas, and expiry in `specs/011-evidence-grounded-product-reset/pilot-protocol.md` **Parked 2026-11-09 (owner)**: parked with the frozen Market verdict; runs only for a real market question with a named person who needs the answer.
+- [~] T086 [P] Run the authorized sufficient multi-source Vietnam consumer-market pilot and record mission, Brief, frame, claims, limitations, and decision usefulness in `specs/011-evidence-grounded-product-reset/pilot-results.md` **Parked 2026-11-09 (owner)**: parked with the frozen Market verdict; runs only for a real market question with a named person who needs the answer.
+- [~] T087 [P] Run the authorized required-channel authentication-block pilot and record the Gap Report and smallest next probe in `specs/011-evidence-grounded-product-reset/pilot-results.md` **Parked 2026-11-09 (owner)**: parked with the frozen Market verdict; runs only for a real market question with a named person who needs the answer.
+- [~] T088 [P] Run the authorized high-volume low-relevance pilot and record qualification and refusal evidence in `specs/011-evidence-grounded-product-reset/pilot-results.md` **Parked 2026-11-09 (owner)**: parked with the frozen Market verdict; runs only for a real market question with a named person who needs the answer.
+- [~] T089 [P] Run the authorized contradictory-signals pilot and record how counterevidence changes or conditions the claims in `specs/011-evidence-grounded-product-reset/pilot-results.md` **Parked 2026-11-09 (owner)**: parked with the frozen Market verdict; runs only for a real market question with a named person who needs the answer.
+- [~] T090 [P] Run the authorized missing decision-critical metric pilot and record the absent forbidden outputs and next-best probe in `specs/011-evidence-grounded-product-reset/pilot-results.md` **Parked 2026-11-09 (owner)**: parked with the frozen Market verdict; runs only for a real market question with a named person who needs the answer.
 - T091 **TRANSFERRED, NOT EXECUTED** (owner approved 2026-10-02): competitor comparison is now
   `RES-001` in `BACKLOG.md`, outside Spec 011's implementation-completion gate. T085–T090 and
   the pilot's integrity/usefulness measurements remain required; no benchmark result is claimed.
-- [ ] T092 Run `quickstart.md`, the full unit suite, full dual-backend integration suite, ruff, `git diff --check`, `uv lock --check`, package build, wheel smoke, and fresh Compose init; record exact commands, skips, negative controls, and cleanup in `.handoff/011-final-verification.handoff.md` **Status 2026-11-09**: superseded by the v0.8.0 and v0.9.0 release gates; no separate `quickstart.md` record exists.
-- [ ] T093 Run the read-only legacy inventory, present explicit archive/deletion candidates, and record the owner's disposition decision without changing data in `specs/011-evidence-grounded-product-reset/legacy-disposition.md`
+- ~~T092 Run `quickstart.md`, the full unit suite, full dual-backend integration suite, ruff, `git diff --check`, `uv lock --check`, package build, wheel smoke, and fresh Compose init; record exact commands, skips, negative controls, and cleanup in `.handoff/011-final-verification.handoff.md`~~ **Status 2026-11-09**: superseded by the v0.8.0 and v0.9.0 release gates; no separate `quickstart.md` record exists. **Retired 2026-11-09 (owner)**: closed as superseded; see Clarifications, Session 2026-11-09.
+- ~~T093 Run the read-only legacy inventory, present explicit archive/deletion candidates, and record the owner's disposition decision without changing data in `specs/011-evidence-grounded-product-reset/legacy-disposition.md`~~ **Retired 2026-11-09 (owner)**: it targets the Supabase development store, which Ignis no longer uses; no row was changed or deleted, and that store was not re-read.
 - [X] T094 Update `BACKLOG.md` and this ledger with implementation evidence, unresolved owner gates, and explicit shipped/not-shipped state without claiming release from local tests
-- [ ] T095 OWNER GATE: obtain explicit decisions for persistent-database migration application, exact baseline archive/deletion targets, release version, tag, push, and GitHub Release; record each answer in `specs/011-evidence-grounded-product-reset/spec.md`
+- ~~T095 OWNER GATE: obtain explicit decisions for persistent-database migration application, exact baseline archive/deletion targets, release version, tag, push, and GitHub Release; record each answer in `specs/011-evidence-grounded-product-reset/spec.md`~~ **Retired 2026-11-09 (owner)**: the release decisions were settled by v0.8.0 and v0.9.0; the migration and baseline decisions targeted the Supabase store, which Ignis no longer uses.
   - 2026-10-02: Owner approved the `v0.8.0` target and user-visible MINOR/internal PATCH beta
     criterion. This settles version selection only; metadata preparation, merge, tag, push of
     release artifacts, publication, baseline disposition, and pilot gates remain separate.
   - Later on 2026-10-02: "Merge và publish đi" authorizes merge and the v0.8.0 release workflow.
     Real social credentials and legacy deletion remain outside this authorization. Publication
     before the unexecuted real pilots needs a distinct owner exception; that question is open.
-- [ ] T096 Apply only the owner-approved persistent migration and baseline disposition with pre-action manifest, recovery path, post-action readback, and evidence in `.handoff/011-owner-authorized-operations.handoff.md`
+- ~~T096 Apply only the owner-approved persistent migration and baseline disposition with pre-action manifest, recovery path, post-action readback, and evidence in `.handoff/011-owner-authorized-operations.handoff.md`~~ **Retired 2026-11-09 (owner)**: it targets the Supabase development store, which Ignis no longer uses; no row was changed or deleted, and that store was not re-read.
   - 2026-10-02: Supabase development operations explicitly authorized; canonical migrations
     023–025 applied and verified with unchanged corpus counts/digests and owner-only RLS.
     Baseline disposition remains parked for value assessment/recovery export, not database permission.
     T095's release/version/tag/push questions remain separate from the settled dev authorization.
-- [ ] T097 Prepare the owner-approved breaking release by synchronizing `pyproject.toml`, `openclaw.json`, `server.json`, `CITATION.cff`, `.openclaw/config.yaml`, `BACKLOG.md`, and regenerated `uv.lock` in one atomic change **Status 2026-11-09**: superseded: the shipped version is 0.9.0.
-- [ ] T098 Merge, tag, push, and publish only the owner-approved release, then record the PR, merge commit, tag, public package/container checks, and anonymous clean-install evidence in `BACKLOG.md` and `specs/011-evidence-grounded-product-reset/tasks.md` **Status 2026-11-09**: superseded: v0.8.0 and v0.9.0 were tagged and published.
+- ~~T097 Prepare the owner-approved breaking release by synchronizing `pyproject.toml`, `openclaw.json`, `server.json`, `CITATION.cff`, `.openclaw/config.yaml`, `BACKLOG.md`, and regenerated `uv.lock` in one atomic change~~ **Status 2026-11-09**: superseded: the shipped version is 0.9.0. **Retired 2026-11-09 (owner)**: closed as superseded; see Clarifications, Session 2026-11-09.
+- ~~T098 Merge, tag, push, and publish only the owner-approved release, then record the PR, merge commit, tag, public package/container checks, and anonymous clean-install evidence in `BACKLOG.md` and `specs/011-evidence-grounded-product-reset/tasks.md`~~ **Status 2026-11-09**: superseded: v0.8.0 and v0.9.0 were tagged and published. **Retired 2026-11-09 (owner)**: closed as superseded; see Clarifications, Session 2026-11-09.
   - Implementation PR 43 merged on 2026-10-02 (Vietnam time) at
     `7e089a37447b42a2c35aee25874020bcec94016a`, following 7/7 required checks on `ee8e194`.
     Post-merge CI is pending at this checkpoint. No v0.8.0 tag or publication exists;
@@ -302,7 +306,7 @@ separate implementation completion from owner-authorized migration, release, and
   erase a needed consumer.
 - **Phase 8** depends on the locally complete US1–US5 implementation. T085 blocks only pilots that
   use real restricted sessions. T095 blocks migration application, deletion, versioning, tagging,
-  pushing, and release.
+  pushing, and release. (Historical: T095 was retired on 2026-11-09.)
 
 ### User Story Dependency Graph
 

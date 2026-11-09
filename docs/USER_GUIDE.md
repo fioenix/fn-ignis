@@ -283,11 +283,11 @@ PyPI publication is not advertised. Run the branch's
 `.venv/bin/pytest tests/` (the CI scope; PostgreSQL cases skip unless `IGNIS_TEST_POSTGRES_DSN`
 names a disposable test database) and `uv lock --check` for local checks. The test suite
 replaces credentials with inert values; to also keep the checkout's `.env` out of a run, use the
-[isolated-settings pattern](../specs/014-evidence-factory/quickstart.md#isolated-settings). Consult
-[the Spec 011 task ledger](../specs/011-evidence-grounded-product-reset/tasks.md) for its outstanding
-PostgreSQL, pilot, integration, and owner-controlled release gates, and
-[the Spec 014 task ledger](../specs/014-evidence-factory/tasks.md) for the Mission Relay,
-research-work and follow-up gates that remain open.
+[isolated-settings pattern](../specs/014-evidence-factory/quickstart.md#isolated-settings).
+[The Spec 011 task ledger](../specs/011-evidence-grounded-product-reset/tasks.md) records the pilots
+parked with the frozen Market verdict, and
+[the Spec 014 task ledger](../specs/014-evidence-factory/tasks.md) records the Mission Relay,
+research-work and follow-up requirements that remain unmet.
 
 ### Explicit host-browser TikTok and Threads search
 

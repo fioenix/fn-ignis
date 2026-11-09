@@ -40,7 +40,7 @@
   the provider's security settings instead
 - [x] T014 Gate the wording with contracts that permit a denial and an instruction to revoke at the
   provider, and fail only an affirmative claim that Ignis revoked something
-- [ ] T015 [FUTURE — OUT OF CURRENT SPEC SCOPE] Implement an actual provider-side revocation **Status 2026-11-09**: remains out of scope; confirmed against FR-010.
+- ~~T015 [FUTURE — OUT OF CURRENT SPEC SCOPE] Implement an actual provider-side revocation~~ **Status 2026-11-09**: remains out of scope; confirmed against FR-010. **Retired 2026-11-09 (owner)**: closed as out of scope under FR-010.
   request, behaviourally tested, before any surface is allowed to claim revocation. FR-010
   currently defines local deletion plus provider instructions as the supported contract.
 
