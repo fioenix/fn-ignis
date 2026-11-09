@@ -649,6 +649,7 @@ PostgreSQL (`timescale/timescaledb-ha:pg16`, trust auth, no credentials):
   opens, guest/hyphenated TikTok video paths canonicalised). Coordinator rerun: 711 passed, 93
   skipped (PostgreSQL DSN absent); ruff and diff checks clean. Live browser behaviour unverified:
   Reels `/api/v1/tags/web_info/` binding and TikTok comment redirect containment.
+- [X] T059 Replace per-locale TikTok name removal with `tiktok-public-grid-v3`, which removes the poster's name by its own page element in any interface language, owner-approved 09/11/2026 (`research.md` R15). Acceptance: the name never appears in an answer; a missing name element or boundary drops the record; hashtags are kept; interface language no longer gates records
 
 ## Dependencies and execution order
 

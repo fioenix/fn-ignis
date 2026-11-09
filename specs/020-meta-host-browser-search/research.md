@@ -365,3 +365,9 @@ T058 review hardening: reject TikTok alt labels longer than 2000 before extracti
 attribution tail before sanitation could leave the poster name. This conservative card drop is
 covered by a synthetic long-vi-label test; live label length reachability remains unverified.
 Matching-tag malformed Reels responses poison the capture even if another bound response is empty.
+
+## R15. TikTok name removal by element (T059, owner-approved 09/11/2026)
+
+Measured on one Vietnamese-interface account, query `son môi`, counts only: 28 of 28 tiles on `/search/video` and `/search` had `search-card-video-caption` and `search-card-user-unique-id` as children of the tile's parent. The caption never contained the name or the handle. On 12 of 12 `/search/video` tiles the name element's text equalled the name inside the image label. Among 12 `/search` video tiles the caption equalled the label's text before the attribution on 7, omitted only hashtags on 4, and lost 60 or more other characters on 1.
+
+Per-locale templates cannot separate a name containing the lead words from the attribution, and a stricter rule would drop any Vietnamese caption containing the common word `do`. Removing the known name needs neither. The first token-bounded occurrence is the cut point because sound text often repeats the name. A short name such as `V` cannot cut inside a word. A caption that includes the poster's own name loses text after it; that is accepted because it keeps the name out. The name stays in the browser and never enters the answer. A selector change drops records rather than leaking; the extractor version changes so watchlist periods report the collection-path change.

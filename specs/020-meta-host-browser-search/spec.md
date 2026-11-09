@@ -95,6 +95,10 @@ that hides automation, or is reported unavailable when the platform blocks it.
   reject action labels colliding under casefold, and cap normalized Threads excerpts at 2000 before
   caching. (agent decided; basis: parser/model bounds and case-insensitive action matching.)
 
+### Session 2026-11-09
+
+- Q: How is the TikTok poster's name removed now that a real page shows it has its own element? → A: Extractor v3 reads the name from `search-card-user-unique-id` beside the tile, removes that exact token-bounded text and everything after it from the image label, in any interface language, and drops the record when the name element is missing or the boundary cannot be found. The caption element is not used because it omitted hashtags on 4 of 12 tiles and truncated 1 of 12. Interface language no longer gates records; templates only trim the leftover wording. (owner approved 09/11/2026; basis: measured 28 of 28 tiles.)
+
 ## Context: current state (observed 27/10/2026 on `main` at `8a816fb`)
 
 - The `threads` and `reels` channels collect through Playwright with session cookies captured by

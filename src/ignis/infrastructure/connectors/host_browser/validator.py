@@ -11,7 +11,7 @@ from ignis.infrastructure.connectors.host_browser.attribution_locales import see
 from ignis.domain.host_browser_search import HostSearchAnswer, HostSearchRequest
 from ignis.domain.self_content import is_self_authored
 from ignis.domain.source_identity import identity_free_source_url
-from ignis.infrastructure.security.pii_sanitizer import mask_author_identity_text, sanitize_pii_text, strip_platform_attribution
+from ignis.infrastructure.security.pii_sanitizer import mask_author_identity_text, sanitize_pii_text, strip_platform_attribution, strip_trailing_attribution_lead
 
 
 def collection_path(source, version, limit):
@@ -106,11 +106,6 @@ def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
         templates = attribution_templates
         if request.source == "tiktok":
             templates = attribution_locales.get(item.locale, ()) if re.fullmatch(r"[a-z]{2,8}", item.locale or "") else ()
-            if not templates:
-                outcomes.append(dict(query_id=query.query_id, query=query.query, status="DEGRADED",
-                    signals_collected=0, queried_window=None, search_verified=False,
-                    note="TikTok attribution locale is unseeded or unsupported; absence and content unmeasured"))
-                continue
         seen, count = set(), 0
         path = collection_path(request.source, request.extractor_version, query.result_limit)
         for record in item.records:
@@ -120,7 +115,10 @@ def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
             # Match the transient author-bearing URL before destroying it. Never stage it.
             if is_self_authored(SimpleNamespace(platform=request.source, source_url=record.source_url, metadata={}), self_identities):
                 continue
-            policy_excerpt = sanitize_pii_text(strip_platform_attribution(record.excerpt, templates))
+            stripped = strip_platform_attribution(record.excerpt, templates)
+            if request.source == "tiktok":
+                stripped = strip_trailing_attribution_lead(stripped, templates)
+            policy_excerpt = sanitize_pii_text(stripped)
             excerpt = mask_author_identity_text(policy_excerpt)
             if not excerpt.strip():
                 continue

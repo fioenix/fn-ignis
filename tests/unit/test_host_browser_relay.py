@@ -141,10 +141,10 @@ def test_html_escapes_task_content_and_does_not_load_external_resources():
 
 
 SEARCH_FIXTURE = (
-    '<html><body><div data-e2e="search_top-item">'
+    '<html><body><div><p data-e2e="search-card-user-unique-id">Fixture Poster</p><div data-e2e="search_top-item">'
     '<a href="https://www.tiktok.com/@fixture/video/7417820067028536584">'
     '<img alt="Túi đi làm siêu gọn do Fixture Poster tạo với bản nhạc gốc" width="10" height="10" '
-    'src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></a></div></body></html>'
+    'src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></a></div></div></body></html>'
 )
 
 

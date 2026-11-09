@@ -135,6 +135,21 @@ def strip_platform_attribution(text: Any, templates: Iterable[str]) -> Any:
     return text
 
 
+def strip_trailing_attribution_lead(text: Any, templates: Iterable[str]) -> Any:
+    """Text without the wording a template puts before the author, when only that wording remains.
+
+    TikTok's extractor removes the name and everything after it, which leaves this lead behind.
+    """
+    if not text or not isinstance(text, str):
+        return text
+    for template in templates:
+        lead, slot, _ = str(template).partition("{author}")
+        lead = lead.strip()
+        if slot and lead:
+            text = re.sub(rf"(?:^|\s+){re.escape(lead)}\s*\Z", "", text, flags=re.IGNORECASE).rstrip()
+    return text
+
+
 def render_mention_tokens(text: str, declared_names: Mapping[str, str]) -> str:
     """Show a declared token as "@<declared name>", and as @[user] once it is withdrawn.
 
