@@ -465,13 +465,16 @@ def test_source_policy_uses_original_capture_not_publication_or_read_clock(recor
     policy = row["source_policy"]
     assert row["observation_id"] == str(OBSERVATION) and row["source_id"] == str(SOURCE)
     assert policy["status"] == "REFRESH_OR_DELETE_REQUIRED"
+    assert policy["policy_url"] == "https://developers.google.com/youtube/terms/developer-policies"
     assert policy["captured_at"] == capture.isoformat() and policy["boundary_at"] == NOW.isoformat()
     assert policy["age_seconds"] == 30 * 86400 and policy["automatic_action"] is False
     earlier, _ = _projection(kind, evidence, run, read_at=NOW-timedelta(microseconds=1))
     assert _observation(kind, earlier)["source_policy"]["status"] == "WITHIN_30_DAY_WINDOW"
+    assert _observation(kind, earlier)["source_policy"]["policy_url"] == policy["policy_url"]
 
 
 @pytest.mark.parametrize("case,reason", [("historical", "UNKNOWN_SOURCE_SCOPE"),
+    ("threads", "UNKNOWN_SOURCE_SCOPE"), ("tiktok", "UNKNOWN_SOURCE_SCOPE"),
     ("unregistered", "UNKNOWN_SOURCE_SCOPE"), ("missing_time", "UNKNOWN_COLLECTION_TIME"),
     ("future", "FUTURE_COLLECTION_TIME")])
 def test_source_policy_preserves_unknown_provenance_without_invented_age(records, case, reason):
@@ -480,6 +483,8 @@ def test_source_policy_preserves_unknown_provenance_without_invented_age(records
     outcome = replace(evidence.outcomes[0], connector_surface="youtube")
     if case == "historical":
         signal = replace(signal, metadata={})
+    if case in ("threads", "tiktok"):
+        signal = replace(signal, platform=PlatformType(case))
     if case == "unregistered":
         outcome = replace(outcome, connector_surface="youtube.search")
     if case == "missing_time":
@@ -489,4 +494,5 @@ def test_source_policy_preserves_unknown_provenance_without_invented_age(records
     payload, _ = _projection("snapshot", replace(evidence, signals=(signal,), outcomes=(outcome,)), run)
     policy = payload["evidence"][0]["source_policy"]
     assert policy["status"] == "UNKNOWN" and policy["reason_code"] == reason
+    assert policy["policy_url"] is None
     assert policy["age_seconds"] is None and policy["boundary_at"] is None
