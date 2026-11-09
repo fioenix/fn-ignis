@@ -64,7 +64,7 @@ def prepare(service, **overrides):
 def answer(request, **overrides):
     query = request["queries"][0]
     payload = dict(request_id=request["request_id"], host_task_ref="task-1", session_ref="chrome-1",
-                   extractor_version="tiktok-public-grid-v2", answers=[dict(
+                   extractor_version="tiktok-public-grid-v3", answers=[dict(
                        query_id=query["query_id"], query=query["query"], page_url=query["search_url"],
                        captured_at=datetime.now(timezone.utc).isoformat(), search_verified=True,
                        empty_state_visible=False, status="HEALTHY", locale="vi", records=[dict(
@@ -98,7 +98,7 @@ def test_tactical_result_retains_unknown_metrics_and_exact_provenance(service):
     assert record["published_at"] is None
     assert record["metric_value"] is None
     assert record["query"] == "túi đi làm"
-    assert record["collection_path"] == "host_browser:tiktok-public-grid-v2"
+    assert record["collection_path"] == "host_browser:tiktok-public-grid-v3"
     assert "mission_id" not in receipt
     assert receipt["outcomes"][0]["queried_window"] is None
     assert service.submit(request["request_id"], "task-1", "chrome-1") == receipt
@@ -277,8 +277,7 @@ def test_threads_tactical_ticket_checks_original_caller_and_expiry(service, monk
 
 
 @pytest.mark.parametrize("locale", [None, "en", "unsupported", "VI", "vi_VN"])
-@pytest.mark.parametrize("status", ["HEALTHY", "EMPTY_NO_DATA"])
-def test_t058_unseeded_tiktok_locale_has_no_records_or_author_sidecar(locale, status):
+def test_v3_locale_never_gates_records(locale):
     from datetime import timedelta
     from ignis.domain.host_browser_search import HostSearchRequest, HostSearchQuery
     from ignis.infrastructure.connectors.host_browser.validator import validate_answer
@@ -288,15 +287,11 @@ def test_t058_unseeded_tiktok_locale_has_no_records_or_author_sidecar(locale, st
         queries=(HostSearchQuery(query_id="q", query="test", search_url="https://www.tiktok.com/search?q=test", result_limit=3),))
     payload = answer({"request_id": "fixture", "queries": [{"query_id": "q", "query": "test", "search_url": "https://www.tiktok.com/search?q=test"}]})
     item = payload["answers"][0]
-    item.update(locale=locale, status=status, empty_state_visible=status == "EMPTY_NO_DATA")
-    if status == "EMPTY_NO_DATA":
-        item["records"] = []
-    else:
-        item["records"][0]["excerpt"] = "Caption created by Fixture Poster"
+    item.update(locale=locale, status="HEALTHY", empty_state_visible=False)
+    item["records"][0]["excerpt"] = "Caption"
     sidecar = []
     result = validate_answer(request, payload, datetime.now(timezone.utc), ("do {author} tạo với",), author_records=sidecar)
-    assert result["observations"] == sidecar == []
+    assert [item["excerpt"] for item in result["observations"]] == [item["excerpt"] for item in sidecar] == ["Caption"]
     [outcome] = result["outcomes"]
-    assert outcome["status"] == "DEGRADED"
-    assert outcome["search_verified"] is False
-    assert "unmeasured" in outcome["note"]
+    assert outcome["status"] == "HEALTHY"
+

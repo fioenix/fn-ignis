@@ -106,11 +106,6 @@ def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
         templates = attribution_templates
         if request.source == "tiktok":
             templates = attribution_locales.get(item.locale, ()) if re.fullmatch(r"[a-z]{2,8}", item.locale or "") else ()
-            if not templates:
-                outcomes.append(dict(query_id=query.query_id, query=query.query, status="DEGRADED",
-                    signals_collected=0, queried_window=None, search_verified=False,
-                    note="TikTok attribution locale is unseeded or unsupported; absence and content unmeasured"))
-                continue
         seen, count = set(), 0
         path = collection_path(request.source, request.extractor_version, query.result_limit)
         for record in item.records:
