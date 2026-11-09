@@ -74,6 +74,69 @@ class Schema:
             self.execute('RELEASE SAVEPOINT refusal')
 
 
+@pytest.mark.asyncio
+async def test_sqlite_initial_research_install_preserves_nonempty_canonical_data(tmp_path, record_property):
+    repository = SqliteTrendRepository(str(tmp_path / 'research-schema.db'))
+    conn = None
+    research_tables = {
+        'research_assignments', 'research_work_items', 'research_input_sets',
+        'research_input_observations', 'research_input_findings', 'research_work_dependencies',
+        'research_handoffs', 'research_handoff_references', 'research_handoff_observations',
+        'research_finding_revisions', 'research_finding_observations', 'research_activity_receipts',
+        'research_handoff_acknowledgements', 'research_recorded_metadata', 'research_work_commands',
+    }
+    canonical = ('research_missions', 'sources', 'observations', 'mission_evidence')
+    try:
+        await repository._ensure_schema()
+        await repository._ensure_progress_schema()
+        conn = repository._get_connection()
+        conn.row_factory = None
+
+        def tables():
+            return {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+
+        def snapshot():
+            return {table: conn.execute(f'SELECT * FROM {table} ORDER BY 1, 2').fetchall()
+                    for table in canonical}
+
+        def digests(snapshot_rows):
+            return {table: sha256(repr(rows).encode()).hexdigest()
+                    for table, rows in snapshot_rows.items()}
+
+        assert not research_tables & tables()
+        mission, source, observation, evidence = (str(uuid4()) for _ in range(4))
+        conn.execute("INSERT INTO research_missions(id,title,keywords,created_at) "
+                     "VALUES (?,'Preexisting mission','[\"control\"]','2026-10-08T00:00:00+00:00')",
+                     (mission,))
+        conn.execute("INSERT INTO sources(id,platform,external_id) VALUES (?,'youtube','existing')", (source,))
+        conn.execute("INSERT INTO observations(id,source_id,time_provenance,identity_source,published_at,observed_title) "
+                     "VALUES (?,?,'legacy_publish_only','metadata_external_id','2020-01-01T00:00:00Z','Preserved title')",
+                     (observation, source))
+        conn.execute('INSERT INTO mission_evidence(id,mission_id,observation_id,recorded_at) VALUES (?,?,?,?)',
+                     (evidence, mission, observation, '2026-10-08T00:00:00+00:00'))
+        conn.commit()
+        before = snapshot()
+        before_digests = digests(before)
+        assert {table: len(rows) for table, rows in before.items()} == dict.fromkeys(canonical, 1)
+        assert not research_tables & tables()
+        record_property('canonical_counts', json.dumps({table: len(rows) for table, rows in before.items()}))
+        record_property('before_sha256', json.dumps(before_digests, sort_keys=True))
+        for install_number in (1, 2):
+            await repository._ensure_research_schema()
+            assert research_tables <= tables()
+            after = snapshot()
+            after_digests = digests(after)
+            record_property(f'install_{install_number}_sha256', json.dumps(after_digests, sort_keys=True))
+            assert after == before
+            assert after_digests == before_digests
+            assert all(conn.execute(f'SELECT count(*) FROM {table}').fetchone()[0] == 0
+                       for table in research_tables)
+    finally:
+        if conn is not None:
+            conn.close()
+        await repository.close()
+
+
 @pytest_asyncio.fixture(params=('sqlite', 'postgres'))
 async def schema(request, tmp_path):
     if request.param == 'sqlite':

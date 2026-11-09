@@ -51,9 +51,7 @@ return a typed Gap Report; no Opportunity Index or recommendation is inferred fr
 Attention observations remain context and never silently become Market support.
 
 The beachhead pilot is Vietnamese consumer-market research for founders, operators, independent
-analysts, consultants, and small teams. This is a validation audience, not proof of market fit.
-
-`specs/011-evidence-grounded-product-reset/` is the governing contract for this model.
+analysts, consultants, and small teams. This is a validation audience, not proof of market fit. `specs/011-evidence-grounded-product-reset/` is the governing contract for this model.
 
 ## 🧭 2. Operating Modes
 
@@ -197,3 +195,5 @@ Session naming: when starting or switching a task, rename the session with the h
 ## Agent skills
 
 This repository uses the finolabs-vibecode skills. Routing on: use `fnl-coding-router`. Use Spec Kit. Pull requests follow `fnl-review-gate` "Pull requests"; reviewers may post code/security reviews. Help: `/fnl-ask`.
+
+Review relay approval (owner, chat, 9 November 2026): on `fioenix/fn-ignis` pull requests, when an independent Codex reviewer returns its finished comment with `cannot-post: no-network`, the coordinator may relay that comment once per review run through `post_review.py`, unchanged from its first-line marker, with a second line naming the reviewer, the coordinator and this approval. This covers code and security reviews; it grants no merge, deploy or other authority.

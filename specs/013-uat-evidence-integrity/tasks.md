@@ -20,7 +20,7 @@
 
 **Independent test**: Wrong/background/error/unknown responses authorize no observation or execution; exact valid public result and empty result are separately proven; non-search consumers retain behavior.
 
-- [ ] T006 [US1] Observe failing wrong-query/background/sibling-record tests in tests/unit/test_social_search_integrity.py and tests/unit/test_meta_browser_ingress.py.
+- [ ] T006 [US1] Observe failing wrong-query/background/sibling-record tests in tests/unit/test_social_search_integrity.py and tests/unit/test_meta_browser_ingress.py. **Status 2026-11-09**: superseded: the wrong-query test survives as `test_only_a_video_search_envelope_attests_execution`; the background and sibling tests were removed with Threads Playwright collection in `26ed2a8`.
 - [x] T007 [US1] Implement optional request-query capture restriction in src/ignis/infrastructure/connectors/meta_browser_ingress.py; targeted capture tests verified, broader outcome regressions remain T006/T010.
 - [x] T008 [US1] Add public post-envelope and valid-empty/fallback regressions in tests/unit/test_threads_direct_graphql.py; six observed behavioral failures before the direct-path change, then GREEN.
 - [x] T009 [US1] Apply the same proof before direct/browser extraction and attestation in src/ignis/infrastructure/connectors/threads/threads_plugin.py; known legacy envelopes supported, live current-envelope/navigation acceptance still pending.
@@ -37,7 +37,7 @@
 - [x] T015 [US2] Execute real typed qualification/replay/stale/foreign batch UAT using .handoff/ isolated MCP harness and record in uat-ledger.md; 47 actual TikTok observations reviewed/submitted, stale and foreign rejected, replay counts unchanged. Final repetition remains T021.
 - [x] T016 [US2] Execute confirmed core/alternatives/null/falsifier Market collection and honest sufficiency UAT using .handoff/ bounded harness; actual 153-observation two-channel frame fully assessed, real insufficient recommendation WITHHELD, maintained Gap export read back. Final repetition and visual inspection remain T018/T021/T022.
 - [x] T017 [US2] Execute separately controlled positive Claim Ledger and stale/foreign/idempotent negative paths through actual MCP; one PERMITTED controlled claim, identical replay ID, stale digest and foreign qualified-binding refusals recorded in uat-ledger.md. Final repetition remains T022.
-- [ ] T018 [US2] Inspect maintained report citations/limitations visually and reconcile final render proof in specs/013-uat-evidence-integrity/uat-ledger.md.
+- [ ] T018 [US2] Inspect maintained report citations/limitations visually and reconcile final render proof in specs/013-uat-evidence-integrity/uat-ledger.md. **Status 2026-11-09**: a real Attention report was inspected visually (full-width render of mission `32cfe1aa`): citations link to sources and the limitations show. It exposed one defect, a market stage on an Attention report, fixed in the same change. Market-path report not re-inspected.
 
 ## Phase 5: US3 — Lessons and Complete Second UAT
 
