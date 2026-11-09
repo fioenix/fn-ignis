@@ -1,6 +1,6 @@
 # 📋 FN-IGNIS BACKLOG & SYSTEM STATUS
 
-> - **Cập nhật lần cuối:** 09/11/2026 (dọn cấu trúc; nội dung quyết định không đổi)
+> - **Cập nhật lần cuối:** 09/11/2026 (dọn cấu trúc; ghi quyết định đóng băng Market verdict và đóng các mục đã kiểm)
 > - **Phiên bản:** `v0.9.0`
 > - **Kiến trúc:** Clean Architecture + Dual-Backend (Postgres TimescaleDB & Zero-Docker SQLite)
 >   + FastMCP Server (53 tools); watchlist có phiên bản, kế hoạch nghe và hai trục `seen` / `created`.
@@ -15,8 +15,8 @@
 
 ## Việc đang mở — đọc lại 09/11/2026
 
-Mục này là danh sách việc mở duy nhất; các phần bên dưới là lịch sử và bối cảnh. Trạng thái task lấy
-từ `specs/*/tasks.md` ngày 09/11/2026; từ `v0.9.0` (28/10) `main` chỉ nhận hai bản nâng dependabot (#105, #106).
+Mục này là các việc đang được chọn làm tính đến 09/11/2026; các phần bên dưới là lịch sử và bối cảnh. Spec 011, 012 và 013
+vẫn giữ ledger riêng với các dòng chưa tick, một số có thể đã cũ, chưa rà lại. Trạng thái Spec 014 và 017 lấy từ `tasks.md` cùng ngày; từ `v0.9.0` (28/10) `main` chỉ nhận hai bản nâng dependabot (#105, #106).
 
 ### Có task cụ thể, chưa nghiệm thu
 
@@ -27,9 +27,10 @@ từ `specs/*/tasks.md` ngày 09/11/2026; từ `v0.9.0` (28/10) `main` chỉ nh�
   loại. Giả thuyết: giao diện không phải tiếng Việt; chưa đo trực tiếp giá trị `lang`. Cần đo lại, rồi đổi ngôn ngữ giao
   diện của profile hoặc seed locale đó từ chữ thật TikTok hiển thị.
 - [ ] **Snapshot chưa chọn run hiển thị channel là "chưa đo"** dù outcome đã ghi (phát hiện ở T112).
+- [ ] **Chưa giải thích được (T112):** snapshot trả `frame_digest` null dù submit có trả digest; `research` và
+  `related_results_coverage` báo `SCHEMA_UNAVAILABLE` dù các bảng có trong store.
 - [ ] **Spec 017 — T006** nghiệm thu Claude Code Desktop theo `quickstart.md`; **T008** chạy một routine thật
-  14 ngày liên tiếp trên một watchlist golden set (có thể báo cáo riêng, không đặt ngưỡng). `spec.md` vẫn ghi
-  `Draft` dù 6/8 task xong; cần đồng bộ.
+  14 ngày liên tiếp trên một watchlist golden set (có thể báo cáo riêng, không đặt ngưỡng).
 - [ ] **Spec 019 (Shopee Affiliate)** — `Draft`, chưa có plan/tasks, chờ ba cổng kiểm tài khoản của chủ sở hữu.
 - [ ] **Pilot Việt Nam của Spec 011** chưa chạy.
 - [ ] **RES-001** benchmark đối thủ (xem mục "Nghiên cứu riêng"); chưa có ngân sách hay quyền dùng quota có phí.
@@ -223,8 +224,8 @@ Lịch sử nghiệm thu từng task T001–T030 (04–14/10/2026) đã chuyển
 [`acceptance-history.md`](specs/014-evidence-factory/acceptance-history.md). Nguồn sự thật về
 trạng thái hiện tại là ledger tại [`tasks.md`](specs/014-evidence-factory/tasks.md).
 
-**Trạng thái (đọc lại 09/11/2026): 110/116 task đã nghiệm thu; PR #51 đã merge ngày 20/10/2026.
-Còn mở T079, T082, T084, T087, T112, T113 — xem mục "Việc đang mở" ở đầu file.**
+**Trạng thái (đọc lại 09/11/2026): 115 task đã nghiệm thu, T079 đã rút, không còn task mở; PR #51 đã merge ngày 20/10/2026.
+Bốn yêu cầu còn UNMET — xem mục "Việc đang mở" ở đầu file.**
 
 ### Tích hợp — 20/10/2026
 
