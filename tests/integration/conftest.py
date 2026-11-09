@@ -79,6 +79,7 @@ SCHEMA_MIGRATIONS = (
     "036_threads_attribution.sql",
     "037_threads_action_labels.sql",
     "038_tiktok_attribution_locales.sql",
+    "039_tiktok_attribution_english.sql",
 )
 
 

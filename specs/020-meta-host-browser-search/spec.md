@@ -95,6 +95,12 @@ that hides automation, or is reported unavailable when the platform blocks it.
   reject action labels colliding under casefold, and cap normalized Threads excerpts at 2000 before
   caching. (agent decided; basis: parser/model bounds and case-insensitive action matching.)
 
+### Session 2026-11-09
+
+- Q: Should English TikTok attribution be seeded after the Finos profile failed closed? → A: Yes,
+  additively in `sql/039_tiktok_attribution_english.sql` with `created by {author} with`, observed
+  on 12 of 12 public search tiles while the page reported `lang=en`. (owner approved 09/11/2026.)
+
 ## Context: current state (observed 27/10/2026 on `main` at `8a816fb`)
 
 - The `threads` and `reels` channels collect through Playwright with session cookies captured by

@@ -12,7 +12,7 @@ diagnostic result for each connector; a configured client or synthetic check is 
 live social access. Supply credentials or browser sessions only for the exact source and
 research task you authorize. Never place a secret in a prompt, command transcript, or report.
 
-The source migration chain ends at `sql/038_tiktok_attribution_locales.sql`. Migration 038 seeds locale-qualified TikTok attribution templates; unseeded page locales produce record-free DEGRADED outcomes, with absence unmeasured. It rewrites no stored evidence. Migration 037 seeds the Threads action-button labels for each UI language that host-browser search uses to read counters; it rewrites no stored evidence. Migration 036 seeds the Threads author attribution wording that host-browser search removes from excerpts; it rewrites no stored evidence. Migration 035 adds append-only watchlist goals, comparison periods and snapshot cadences; it rewrites no stored evidence. Migration 034 seeds the TikTok
+The source migration chain ends at `sql/039_tiktok_attribution_english.sql`. Migration 039 adds the English TikTok attribution template observed on 12 of 12 public search tiles; it rewrites no stored evidence. Migration 038 seeds locale-qualified TikTok attribution templates; unseeded page locales produce record-free DEGRADED outcomes, with absence unmeasured. It rewrites no stored evidence. Migration 037 seeds the Threads action-button labels for each UI language that host-browser search uses to read counters; it rewrites no stored evidence. Migration 036 seeds the Threads author attribution wording that host-browser search removes from excerpts; it rewrites no stored evidence. Migration 035 adds append-only watchlist goals, comparison periods and snapshot cadences; it rewrites no stored evidence. Migration 034 seeds the TikTok
 author attribution wording that host-browser search removes from excerpts; it rewrites no stored
 evidence. Migration 033 adds a
 per-channel, per-day count of keyword searches for the daily request ceilings; it rewrites no
@@ -274,8 +274,8 @@ unchanged, and reading a snapshot confers no execution authority.
 
 The local MCP server exposes **53 tools**. Discover the running server's descriptions for exact
 signatures; removed daily-discovery and unguided-research tools are not part of this branch.
-For an existing PostgreSQL database on `035`, apply `036`, `037` and `038` in order as the
-table owner. Without `038`, every MISSION TikTok host-browser query fails closed as `DEGRADED`.
+For an existing PostgreSQL database on `035`, apply `036`, `037`, `038` and `039` in order as the
+table owner. Without `038`, every MISSION TikTok host-browser query fails closed as `DEGRADED`; without `039`, English-interface TikTok pages do the same.
 
 The release workflow builds `ghcr.io/fioenix/fn-ignis:0.9.0` when the `v0.9.0` tag is pushed.
 The v0.8.0 image does not contain the v0.9.0 host-browser contract described here.

@@ -4,7 +4,7 @@
 > - **Phiên bản:** `v0.9.0`
 > - **Kiến trúc:** Clean Architecture + Dual-Backend (Postgres TimescaleDB & Zero-Docker SQLite)
 >   + FastMCP Server (53 tools); watchlist có phiên bản, kế hoạch nghe và hai trục `seen` / `created`.
-> - **Schema:** Migration mới nhất là `sql/038_tiktok_attribution_locales.sql`.
+> - **Schema:** Migration mới nhất là `sql/039_tiktok_attribution_english.sql`.
 > - **Thu thập:** Threads và TikTok qua trình duyệt host; Reels dùng Playwright không có cờ che giấu tự động hóa.
 >   Ignis không có worker hay lịch khám phá hằng ngày; routine chạy trên host khi được yêu cầu.
 > - **Trạng thái:** `v0.9.0` đã tag và publish ngày 28/10/2026 qua source, GitHub Release và GHCR

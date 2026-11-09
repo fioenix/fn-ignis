@@ -24,13 +24,15 @@ def test_seed_is_additive_idempotent_and_excluded_from_market_terms():
         old = [tuple(row) for row in db.execute("SELECT * FROM market_lexicons")]
         db.execute("CREATE TABLE observations (excerpt TEXT)")
         db.execute("INSERT INTO observations VALUES ('unchanged')")
-        seed = (root / "sql/038_tiktok_attribution_locales.sql").read_text()
-        db.executescript(seed)
-        db.executescript(seed)
+        for name in ("038_tiktok_attribution_locales.sql", "039_tiktok_attribution_english.sql"):
+            seed = (root / "sql" / name).read_text()
+            db.executescript(seed)
+            db.executescript(seed)
         assert [tuple(row) for row in db.execute("SELECT * FROM market_lexicons WHERE domain='tiktok_attribution'")] == old
         assert db.execute("SELECT excerpt FROM observations").fetchone()[0] == "unchanged"
         rows = [dict(row) for row in db.execute("SELECT * FROM market_lexicons")]
-        assert attribution_locales_from_rows(rows) == seeded_attribution_locales() == {"vi": ("do {author} tạo với",)}
+        assert attribution_locales_from_rows(rows) == seeded_attribution_locales() == {
+            "vi": ("do {author} tạo với",), "en": ("created by {author} with",)}
 
 
 @pytest.mark.asyncio
@@ -44,6 +46,23 @@ async def test_locale_rows_never_enter_positive_vocabulary():
 def test_invalid_locale_vocabulary_fails_closed(domain, term):
     with pytest.raises(ValueError, match="Invalid"):
         attribution_locales_from_rows([dict(domain=domain, term=term, category="ui_attribution")])
+
+
+def test_tactical_packaged_seed_strips_observed_english_attribution(monkeypatch):
+    from ignis.application.use_cases import host_browser_search as module
+    monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
+    service = HostBrowserSearchService()
+    try:
+        request = service.prepare("task", "session", ["test"], 3, 60, True)
+        payload = host_answer(request)
+        payload["answers"][0]["locale"] = "en"
+        payload["answers"][0]["records"][0]["excerpt"] = "Caption created by Fixture Poster with music"
+        service.stage(request["request_id"], payload)
+        receipt = service.submit(request["request_id"], "task", "session")
+        assert [item["excerpt"] for item in receipt["observations"]] == ["Caption"]
+        assert "Fixture Poster" not in json.dumps(receipt)
+    finally:
+        service.close()
 
 
 def test_tactical_uses_packaged_seed_and_ticket_freezes_locale_templates(monkeypatch):
@@ -61,7 +80,7 @@ def test_tactical_uses_packaged_seed_and_ticket_freezes_locale_templates(monkeyp
         assert service.submit(request["request_id"], "task", "session")["observations"][0]["excerpt"] == "Caption"
         tactical = service.prepare("task", "session", ["test"], 3, 60, True)
         payload = host_answer(tactical)
-        payload["answers"][0]["locale"] = "en"
+        payload["answers"][0]["locale"] = "fr"
         service.stage(tactical["request_id"], payload)
         assert service.submit(tactical["request_id"], "task", "session")["observations"] == []
         assert "Fixture Poster" not in json.dumps(service._tickets[tactical["request_id"]]["receipt"])

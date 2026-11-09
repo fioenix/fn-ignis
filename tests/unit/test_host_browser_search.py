@@ -276,7 +276,7 @@ def test_threads_tactical_ticket_checks_original_caller_and_expiry(service, monk
         current_caller_storage.reset(token)
 
 
-@pytest.mark.parametrize("locale", [None, "en", "unsupported", "VI", "vi_VN"])
+@pytest.mark.parametrize("locale", [None, "fr", "unsupported", "VI", "vi_VN"])
 @pytest.mark.parametrize("status", ["HEALTHY", "EMPTY_NO_DATA"])
 def test_t058_unseeded_tiktok_locale_has_no_records_or_author_sidecar(locale, status):
     from datetime import timedelta

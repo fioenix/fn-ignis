@@ -25,12 +25,13 @@ def attribution_locales_from_rows(rows):
 
 def seeded_attribution_locales():
     """Tactical uses the packaged seed in memory without opening a caller store."""
-    seed = sql_seed_file("038_tiktok_attribution_locales.sql")
-    if seed is None:
+    seeds = [sql_seed_file(name) for name in ("038_tiktok_attribution_locales.sql", "039_tiktok_attribution_english.sql")]
+    if any(seed is None for seed in seeds):
         return {}
     with closing(sqlite3.connect(":memory:")) as connection:
         connection.row_factory = sqlite3.Row
         connection.execute("CREATE TABLE market_lexicons (domain TEXT, term TEXT, category TEXT, "
                            "created_by TEXT, UNIQUE(domain, term))")
-        connection.executescript(seed.read_text(encoding="utf-8"))
+        for seed in seeds:
+            connection.executescript(seed.read_text(encoding="utf-8"))
         return attribution_locales_from_rows([dict(row) for row in connection.execute("SELECT * FROM market_lexicons")])

@@ -649,6 +649,7 @@ PostgreSQL (`timescale/timescaledb-ha:pg16`, trust auth, no credentials):
   opens, guest/hyphenated TikTok video paths canonicalised). Coordinator rerun: 711 passed, 93
   skipped (PostgreSQL DSN absent); ruff and diff checks clean. Live browser behaviour unverified:
   Reels `/api/v1/tags/web_info/` binding and TikTok comment redirect containment.
+- [X] T059 Seed the observed English TikTok attribution template in `sql/039_tiktok_attribution_english.sql`, read it on both the tactical and SQLite paths, and update the migration consumers, owner-approved 09/11/2026
 
 ## Dependencies and execution order
 
