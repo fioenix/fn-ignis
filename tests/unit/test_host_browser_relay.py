@@ -151,7 +151,7 @@ SEARCH_FIXTURE = (
 def handoff_request():
     return {
         "request_id": "request-1", "host_task_ref": "task-1", "session_ref": "chrome-1",
-        "extractor_version": "tiktok-public-grid-v1",
+        "extractor_version": "tiktok-public-grid-v3",
         "queries": [{"query_id": "query-1", "query": "túi đi làm", "result_limit": 3,
                      "search_url": "https://www.tiktok.com/search?q=t%C3%BAi%20%C4%91i%20l%C3%A0m"}],
     }
@@ -193,7 +193,7 @@ def test_relay_opens_the_search_and_stages_the_answer_the_tab_posts_back():
         assert len(seen) == 1
         assert {key: seen[0][key] for key in ("request_id", "host_task_ref", "session_ref", "extractor_version")} == {
             "request_id": "request-1", "host_task_ref": "task-1", "session_ref": "chrome-1",
-            "extractor_version": "tiktok-public-grid-v1"}
+            "extractor_version": "tiktok-public-grid-v3"}
         assert [answer["query_id"] for answer in seen[0]["answers"]] == ["query-1"]
         assert seen[0]["answers"][0]["records"][0]["source_url"].endswith("/video/7417820067028536584")
     finally:

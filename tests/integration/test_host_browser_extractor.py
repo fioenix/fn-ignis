@@ -19,14 +19,15 @@ def extract(query="túi đi làm", page_query="túi đi làm", card_text="Túi �
     code = """
       const fs = require('fs'), vm = require('vm');
       const poster = JSON.parse(process.argv[8]);
+      const NAME = '[data-e2e="search-card-user-unique-id"]';
+      const shape = poster && typeof poster === 'object' ? poster : {names: poster === null ? [] : [poster], visible: true, cards: 1};
       const CARDS = 'div[data-e2e="search_top-item"], div[data-e2e="search_video-item"]';
       const makeCard = (url, text, visible) => { const card = ({
         getClientRects: () => visible ? [1] : [],
         innerText: text,
         parentElement: {
-          querySelector: selector => selector === '[data-e2e="search-card-user-unique-id"]' && poster !== null
-            ? {textContent: poster} : null,
-          querySelectorAll: selector => selector === CARDS ? [card] : []
+          querySelectorAll: selector => selector === CARDS ? Array(shape.cards).fill(card)
+            : selector === NAME ? shape.names.map(name => ({textContent: name, getClientRects: () => shape.visible ? [1] : []})) : []
         },
         querySelector: selector => selector === 'a[href*="/video/"]' ? {
           href: url,
@@ -126,6 +127,11 @@ def test_t058_oversized_alt_cannot_cut_attribution_before_validation():
     ("Caption do Aster   Birch tạo với nhạc", "Aster Birch", "Caption do"),
     ("Video review hay do V tạo với nhạc", "V", "Video review hay do"),
     ("Caption do A.b (c) tạo với nhạc", "A.b (c)", "Caption do"),
+    ("Caption #tag created by Fixture Alpha, with original sound - Fixture Alpha", "Fixture Alpha", "Caption #tag created by"),
+    ("Caption do Fixture\u200b Alpha tạo với nhạc - Fixture Alpha", "Fixture Alpha", "Caption do"),
+    ("Caption do Tra\u0300n tạo với nhạc - Tr\u00e0n", "Tr\u00e0n", "Caption do"),
+    ("Caption do Fixture Alpha🎵 tạo với nhạc - Fixture Alpha", "Fixture Alpha", "Caption do"),
+    ("Caption by public, nhạc - Fixture Alpha", "Fixture Alpha", "Caption by"),
 ])
 def test_v3_removes_the_poster_by_its_own_element_in_any_language(alt, poster, expected):
     result = extract(image_alt=alt, poster=poster)
@@ -138,6 +144,9 @@ def test_v3_removes_the_poster_by_its_own_element_in_any_language(alt, poster, e
     ("Caption do Fixture Poster tạo với nhạc", ""),
     ("Caption do Fixture Poster tạo với nhạc", "Someone Else"),
     ("Fixture Poster tạo video", "Fixture Poster"),
+    ("Caption do Alpha tạo với nhạc - Beta", {"names": ["Beta", "Alpha"], "visible": True, "cards": 1}),
+    ("Caption do Alpha tạo với nhạc - Beta", {"names": ["Beta"], "visible": False, "cards": 1}),
+    ("Caption do Alpha tạo với nhạc - Alpha", {"names": ["Alpha"], "visible": True, "cards": 2}),
 ])
 def test_v3_drops_a_record_when_the_poster_boundary_cannot_be_established(alt, poster):
     result = extract(image_alt=alt, poster=poster)

@@ -7,7 +7,7 @@ Proposed extension of Spec 012; no new table or persisted-evidence transformatio
 - Add frozen `source=tiktok|threads`, default TikTok, mapping to `tiktok_video`/`threads` surface.
   Retain task/session/request IDs, mode, exact finite query IDs/text/limits, issue/expiry and caller.
 - Browser descriptor: exact origin/route, packaged extractor/handoff; Threads `threads-search-top-v2`,
-  TikTok `tiktok-public-grid-v2` (T058). API descriptor: `threads-mcp-keyword-v1`, task-authorized approved external MCP;
+  TikTok `tiktok-public-grid-v3` (T059). API descriptor: `threads-mcp-keyword-v1`, task-authorized approved external MCP;
   not an Ignis API client or credential. Both are strict allowed variants for Threads only.
 - Freeze source-specific attribution templates; tactical uses packaged seed, mission its repository.
   Missing Threads vocabulary never falls back to TikTok templates. Missing/unusable page language fails closed; an unseeded usable locale retains records with unknown counters.
@@ -20,7 +20,7 @@ Proposed extension of Spec 012; no new table or persisted-evidence transformatio
 Common identity/source/path/version, one answer per exact approved query, current capture time,
 status/reason and bounded records. Strict union: browser variant uses page URL/search verification;
 API variant uses provider operation, executed keyword, public grant evidence and scope/limits, not
-pretend DOM attestation. TikTok v2 answers require the locale coverage gate below; legacy v1 answers cannot satisfy new tickets.
+pretend DOM attestation. TikTok v3 answers are not gated by locale (research R15); earlier answers cannot satisfy new tickets.
 
 Threads query answers require `locale`: a lowercase primary language subtag (`[a-z]{2,8}`),
 or `unsupported`. The latter is DEGRADED, unverified, zero records. Any other locale allows
@@ -109,6 +109,8 @@ raw API payload/errors, HTML, author identity or credentials. SQLite/PostgreSQL 
 036/037/038 add vocabulary rows idempotently, no schema/evidence/marker rewrite.
 
 ## T058 TikTok locale snapshot amendment
+
+Superseded for record admission by T059 (research R15): locale templates now only trim leftover wording.
 
 TikTok query answers report the primary language subtag, lowercase [a-z]{2,8}, else unsupported.
 The ticket freezes locale-to-attribution-template tuples from caller rows (MISSION) or packaged

@@ -82,7 +82,7 @@ and proves exact count 53, only prepare parameter delta, TikTok default parity; 
 ## T058 current behavior amendment (28/10/2026)
 
 The accepted implementation uses threads-search-top-v2. New default TikTok tickets/answers use
-`tiktok-public-grid-v2` and the locale gate in [tiktok-search.md](tiktok-search.md), superseding the
+`tiktok-public-grid-v3` and the name-element removal in [tiktok-search.md](tiktok-search.md), superseding the
 legacy TikTok version/answer-parity statements above. No MCP tool signature or tier changes.
 Reels keyword browser attestations require matching requested hashtag GET tag web_info provenance,
 an admitted response and exact landed `/explore/tags/<hashtag>/` path. Other or unbound responses

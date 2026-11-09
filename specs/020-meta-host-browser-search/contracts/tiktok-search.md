@@ -2,15 +2,16 @@
 
 ## Host-browser answer v2
 
-`extractor_version=tiktok-public-grid-v2` replaces v1 for new tickets/answers. Identity, exact query,
-page URL, lifetime, bounds, status/verification and sanitation checks remain. V1 answers cannot
-satisfy a v2 ticket; historical observations/path facts remain unchanged.
+`extractor_version=tiktok-public-grid-v3` replaces v1 and v2 for new tickets/answers. Identity, exact query,
+page URL, lifetime, bounds, status/verification and sanitation checks remain. Earlier answers cannot
+satisfy a v3 ticket; historical observations/path facts remain unchanged.
 
 Each query reports `locale` from `document.documentElement.lang`: validate the language tag,
-extract its primary subtag and lowercase it (`[a-z]{2,8}`), else `unsupported`. Missing, malformed,
-unsupported and unseeded locale answers yield no observations or mission author sidecar, status
-DEGRADED, search_verified=false and an explicit unmeasured note, including a claimed EMPTY_NO_DATA.
-No failure is measured absence. Otherwise only the matching locale templates strip attribution.
+extract its primary subtag and lowercase it (`[a-z]{2,8}`), else `unsupported`. Since v3 the locale
+does not gate records: the extractor removes the poster by the one visible
+`search-card-user-unique-id` beside the tile (research R15), and matching locale templates only
+trim leftover wording. A missing or ambiguous name element, or a name absent from the label,
+drops that record.
 
 Vocabulary lives in `market_lexicons`, domain `tiktok_attribution_<locale>`, category `ui_attribution`.
 038 adds observed vi wording without changing 034 or stored evidence. MISSION snapshots caller

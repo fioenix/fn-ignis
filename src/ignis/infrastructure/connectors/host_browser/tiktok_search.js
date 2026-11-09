@@ -14,17 +14,26 @@ arg => {
     return text && !text.split(/\s+/).every(part => /^[\d.,]+[KMB]?$/i.test(part)) ? text : '';
   };
   // The poster's name has its own element, so it is removed exactly in any interface language.
-  // The name and everything after it go; sound text often repeats the name. A record whose name
-  // cannot be located is dropped, and the name never leaves this function.
-  const beforePoster = (text, card) => {
+  // The earliest occurrence of the name or handle and everything after it go; sound text often
+  // repeats the name. A record whose name cannot be tied to this card is dropped, and the name
+  // never leaves this function.
+  const clean = value => (value || '').normalize('NFC').replace(/\p{Cf}/gu, '').trim();
+  const occurrence = (text, value) => {
+    if (!value) return -1;
+    const pattern = value.split(/\s+/).map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+');
+    const found = new RegExp('(?<![\\p{L}\\p{N}])' + pattern + '(?![\\p{L}\\p{N}])', 'iu').exec(text);
+    return found ? found.index : -1;
+  };
+  const beforePoster = (label, card, handle) => {
     const scope = card.parentElement;
     if (!scope || scope.querySelectorAll(CARD).length !== 1) return '';
-    const node = scope.querySelector('[data-e2e="search-card-user-unique-id"]');
-    const poster = node ? (node.textContent || '').trim() : '';
-    if (!poster) return '';
-    const pattern = poster.split(/\s+/).map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+');
-    const found = new RegExp('(?:^|\\s)' + pattern + '(?=\\s|$)', 'iu').exec(text);
-    return found ? text.slice(0, found.index).trim() : '';
+    const names = [...scope.querySelectorAll('[data-e2e="search-card-user-unique-id"]')];
+    if (names.length !== 1 || !names[0].getClientRects().length) return '';
+    const text = clean(label);
+    const at = occurrence(text, clean(names[0].textContent));
+    if (at < 0) return '';
+    const handleAt = occurrence(text, handle);
+    return text.slice(0, handleAt < 0 ? at : Math.min(at, handleAt)).trim();
   };
   for (const card of cards) {
     if (!card.getClientRects().length) continue;
@@ -39,7 +48,7 @@ arg => {
     const image = [...link.querySelectorAll('img[alt]')].find(image =>
       image.getClientRects().length && content(image.getAttribute('alt')));
     const label = image ? content(image.getAttribute('alt')) : '';
-    const excerpt = label ? beforePoster(label, card) : '';
+    const excerpt = label ? beforePoster(label, card, source.pathname.split('/')[1].slice(1)) : '';
     if (!excerpt) continue;
     seen.add(source_url);
     records.push({source_url, excerpt, published_at: null});
