@@ -165,3 +165,15 @@ def test_projection_does_not_read_credentials_and_covers_zero_counts(legacy):
 def test_projection_refuses_unsupported_scalars(value):
     with pytest.raises(retirement.RetirementError, match='UNSUPPORTED_VALUE'):
         retirement.digest(value)
+
+
+@pytest.mark.asyncio
+async def test_fresh_and_repeated_bootstrap_never_creates_taxonomy(tmp_path):
+    from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+    path = tmp_path / 'fresh.sqlite3'
+    for _ in range(2):
+        repo = SqliteTrendRepository(str(path))
+        await repo._ensure_schema()
+        await repo.close()
+        with sqlite3.connect(path) as conn:
+            assert conn.execute("SELECT name FROM sqlite_master WHERE name = 'industry_taxonomies'").fetchall() == []

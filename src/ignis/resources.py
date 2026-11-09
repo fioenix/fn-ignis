@@ -3,7 +3,7 @@
 A checkout keeps them in `sql/` at the repository root, which is what the bootstrap script and
 the Postgres migration flow read. A wheel cannot reach outside the package, so the same files are
 shipped inside it as `ignis/sql/` (see the force-include in pyproject.toml). Resolving the
-directory in one place keeps `pip install fn-ignis` seeding the same lexicons, taxonomies and
+directory in one place keeps `pip install fn-ignis` seeding the same lexicons and
 runtime configs a checkout does, instead of silently starting with an empty vocabulary.
 """
 

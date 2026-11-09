@@ -460,3 +460,30 @@ def test_review_synchronizer_cannot_receive_the_process_global_host_template_ser
     import inspect
     from ignis.infrastructure.config.vocabulary_loader import VocabularySynchronizer
     assert "host_browser_search" not in inspect.signature(VocabularySynchronizer).parameters
+
+
+@pytest.mark.asyncio
+async def test_synchronizer_never_reads_taxonomy_and_preserves_all_domain_terms(tmp_path, monkeypatch):
+    from ignis.infrastructure.config.vocabulary_loader import VocabularySynchronizer
+    repo = SqliteTrendRepository(str(tmp_path / 'retained.sqlite3'))
+    expected = sorted(row for row in re.findall(
+        r"\('([^']+)',\s*'([^']+)',\s*'([^']+)',\s*'system'\)",
+        (SQL / '003_market_lexicons.sql').read_text(),
+    ) if row[0] in ('fashion', 'tech', 'ecommerce', 'common_vi'))
+    assert len(expected) == 69
+    async def forbidden():
+        pytest.fail('taxonomy read is forbidden')
+    monkeypatch.setattr(repo, 'get_industry_taxonomies', forbidden, raising=False)
+    clusterer = SemanticClusterer()
+    detector = HeuristicLanguageDetector()
+    plugin = TikTokPlugin()
+    vocabulary = await VocabularySynchronizer(
+        repo, clusterer=clusterer, language_detector=detector, tiktok_plugin=plugin,
+    ).synchronize_vocabulary()
+    actual = {(row['domain'], row['term'], row['category']) for row in await repo.get_domain_lexicons()}
+    assert set(expected) <= actual
+    assert sorted(row for row in actual if row[0] in ('fashion', 'tech', 'ecommerce', 'common_vi')) == expected
+    assert clusterer._ambiguous_unigrams and clusterer._custom_stopwords
+    assert vocabulary.foreign_phrases and vocabulary.portuguese_words
+    assert plugin._ui_noise
+    await repo.close()

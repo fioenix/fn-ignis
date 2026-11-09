@@ -1,9 +1,6 @@
 import logging
-import math
 import re
-import unicodedata
 import uuid
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -56,17 +53,6 @@ class SemanticClusterer(IClusteringEngine):
     Sub-50ms deterministic execution without external LLM dependency.
     """
 
-    @dataclass(frozen=True)
-    class _Taxonomy:
-        """One vertical's terms with their compiled matchers, accented and folded."""
-
-        # Terms written with tones, matched against the title as written.
-        accented: Dict[str, "re.Pattern[str]"]
-        # Terms stored without tones, which can only ever be matched on folded text.
-        plain: Dict[str, "re.Pattern[str]"]
-        # Every term folded, used only when the title itself carries no tones.
-        folded: Dict[str, "re.Pattern[str]"]
-
     def __init__(
         self,
         similarity_threshold: float = 0.25,
@@ -77,7 +63,6 @@ class SemanticClusterer(IClusteringEngine):
         # Loaded from market_lexicons by whoever holds the repository. Empty until then, which
         # lets a single shared token pass; register_ambiguous_unigrams says why that is loud.
         self._ambiguous_unigrams: Set[str] = set()
-        self._taxonomies: List[Tuple[str, Set[str]]] = []
 
     def register_ambiguous_unigrams(self, terms: List[str]) -> None:
         """Register the generic single words that cannot identify a topic on their own.
@@ -103,57 +88,6 @@ class SemanticClusterer(IClusteringEngine):
             if clean:
                 self._custom_stopwords.add(clean)
 
-    def register_taxonomies(self, taxonomies: List[dict]) -> None:
-        """Load industry taxonomies from the database and compile their matchers.
-
-        A term written with Vietnamese tones is compared to the title as written, which is
-        exact. A term stored without tones can only be compared on folded text, so third-party
-        lexicons seeded that way keep working while accepting the ambiguity that choice carries.
-        Every pattern anchors on word boundaries: raw substring matching is what let "o to" fire
-        inside "cho toi".
-        """
-        loaded: List[Tuple[str, "SemanticClusterer._Taxonomy"]] = []
-        for item in taxonomies or []:
-            code = str(item.get("industry_code") or "").strip().lower()
-            terms = [str(k).strip().lower() for k in (item.get("keywords") or []) if str(k).strip()]
-            if not code or not terms:
-                continue
-            loaded.append((code, self._Taxonomy(
-                accented={
-                    t: re.compile(rf"\b{re.escape(t)}\b")
-                    for t in terms if self._has_diacritics(t)
-                },
-                plain={
-                    t: re.compile(rf"\b{re.escape(t)}\b")
-                    for t in terms if not self._has_diacritics(t)
-                },
-                folded={
-                    t: re.compile(rf"\b{re.escape(self._fold_accents(t))}\b") for t in terms
-                },
-            )))
-        self._taxonomies = loaded
-
-    @staticmethod
-    def _has_diacritics(text: str) -> bool:
-        """Whether the text carries Vietnamese tone marks, which decides how it is matched."""
-        if "đ" in text or "Đ" in text:
-            return True
-        return any(unicodedata.combining(ch) for ch in unicodedata.normalize("NFD", text))
-
-    @staticmethod
-    def _fold_accents(text: str) -> str:
-        """Fold Vietnamese diacritics so 'khóa học' matches the ASCII lexicon entry 'khoa hoc'."""
-        decomposed = unicodedata.normalize("NFD", text.replace("đ", "d").replace("Đ", "D"))
-        return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
-
-    # How many distinct taxonomy keywords a vertical needs before it may claim a cluster, when
-    # the evidence is bare single tokens rather than compounds.
-    MIN_CATEGORY_KEYWORD_HITS = 2
-    # The smallest share of a cluster's signals that must carry the evidence. Calibrated on the
-    # live corpus: a single hitting signal was a fair call up to a fifth of the cluster and wrong
-    # below it (1 of 9, 1 of 15).
-    MIN_CATEGORY_SIGNAL_SHARE = 0.2
-
     # A category shorter than this is an abbreviation or a stray fragment, not a label.
     MIN_CATEGORY_CHARS = 3
 
@@ -161,7 +95,7 @@ class SemanticClusterer(IClusteringEngine):
     def _is_usable_category(cls, raw: str) -> bool:
         """Whether a connector-provided category is a label rather than a number.
 
-        The category arrives in connector metadata and is trusted ahead of taxonomy matching,
+        The category arrives in connector metadata and supplies the display label,
         so a parser that mislabels a column poisons it: three live clusters were filed under
         "27.6k", "6.4k" and "28k", which are view counts. The Creative Center parser is fixed at
         source, but third-party plugins implement the same port and cannot all be relied on.
@@ -173,7 +107,7 @@ class SemanticClusterer(IClusteringEngine):
         return not re.fullmatch(r"[\d.,]+\s*[kKmMbB]?", text)
 
     def _classify_category(self, group: List[TrendSignal]) -> str:
-        """Resolve a cluster category: source-provided first, then taxonomy match, else unclassified."""
+        """Resolve a cluster category: usable source majority, otherwise unclassified."""
         source_categories: List[str] = []
         for s in group:
             raw = (s.metadata or {}).get("category")
@@ -181,54 +115,6 @@ class SemanticClusterer(IClusteringEngine):
                 source_categories.append(str(raw).strip().lower())
         if source_categories:
             return max(set(source_categories), key=source_categories.count)
-
-        if self._taxonomies:
-            # Matched per signal, and with diacritics. Vietnamese tones carry the word: folding
-            # them away makes "vang" (gold) and "vang" (resonant) the same string, which is how a
-            # bolero playlist reached finance. A title the author wrote without tones is matched
-            # on folded forms instead, so the ambiguity is the input's rather than ours.
-            per_signal = []
-            for signal in group:
-                text = self._clean_title(signal.raw_title or "").lower()
-                per_signal.append((text, self._fold_accents(text), self._has_diacritics(text)))
-
-            best_code, best_hits = "", 0
-            for code, taxonomy in self._taxonomies:
-                matched: List[str] = []
-                signals_hit = 0
-                for text, folded, accented in per_signal:
-                    if accented:
-                        # The title carries tones, so compare tones to tones: exact, and the
-                        # whole point. Terms stored without tones have nothing to compare
-                        # against but the folded text.
-                        hits_here = [
-                            t for t, pattern in taxonomy.accented.items() if pattern.search(text)
-                        ] + [
-                            t for t, pattern in taxonomy.plain.items() if pattern.search(folded)
-                        ]
-                    else:
-                        # The author wrote without tones. Folding is then the only option, and
-                        # the ambiguity belongs to the input rather than to this matcher.
-                        hits_here = [
-                            t for t, pattern in taxonomy.folded.items() if pattern.search(folded)
-                        ]
-                    if hits_here:
-                        signals_hit += 1
-                        matched.extend(t for t in hits_here if t not in matched)
-
-                if not matched:
-                    continue
-                # One term is enough only when it cannot have collided by accident. A compound
-                # qualifies; a bare token needs a second hit.
-                if len(matched) < self.MIN_CATEGORY_KEYWORD_HITS and not any(" " in t for t in matched):
-                    continue
-                # One signal out of fifteen is not what a cluster is about.
-                if signals_hit < max(1, math.ceil(len(group) * self.MIN_CATEGORY_SIGNAL_SHARE)):
-                    continue
-                if len(matched) > best_hits:
-                    best_code, best_hits = code, len(matched)
-            if best_code:
-                return best_code
 
         return "unclassified"
 

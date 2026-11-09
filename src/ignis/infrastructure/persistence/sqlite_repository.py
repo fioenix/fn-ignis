@@ -1683,14 +1683,6 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
                 UNIQUE(domain, term)
             );
 
-            CREATE TABLE IF NOT EXISTS industry_taxonomies (
-                id TEXT PRIMARY KEY,
-                industry_code TEXT NOT NULL UNIQUE,
-                industry_name TEXT NOT NULL,
-                keywords TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            );
-
             CREATE TABLE IF NOT EXISTS runtime_configs (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL,
@@ -2102,24 +2094,6 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
                         "INSERT OR IGNORE INTO market_lexicons (id, domain, term, category, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)",
                         (str(uuid4()), dom, term, cat, "system", now_str),
                     )
-
-        # Refreshed on every bootstrap rather than seeded once. Taxonomies are system-owned --
-        # no tool writes them -- so there is no user edit to preserve, and INSERT OR IGNORE meant
-        # a database created before a keyword set was widened kept the narrow one forever and
-        # classified differently from Postgres.
-        tax_path = sql_seed_file("003_market_lexicons.sql")
-        if tax_path:
-            now_str = datetime.now(timezone.utc).isoformat()
-            content = tax_path.read_text(encoding="utf-8")
-            tax_matches = re.findall(r"\('([^']+)',\s*'([^']+)',\s*ARRAY\[([^\]]+)\]\)", content)
-            for code, name, kw_blob in tax_matches:
-                keywords = re.findall(r"'([^']+)'", kw_blob)
-                cur.execute(
-                    "INSERT INTO industry_taxonomies (id, industry_code, industry_name, keywords, created_at) "
-                    "VALUES (?, ?, ?, ?, ?) ON CONFLICT(industry_code) DO UPDATE SET "
-                    "industry_name = excluded.industry_name, keywords = excluded.keywords",
-                    (str(uuid4()), code, name, json.dumps(keywords, ensure_ascii=False), now_str),
-                )
 
         # System-owned vocabulary that replaced hardcoded Python constants. Unlike the seeds
         # above it is re-applied on every bootstrap: no MCP tool writes these domains, so there
