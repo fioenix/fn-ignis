@@ -26,8 +26,10 @@ xóa và chưa đọc lại kho đó.
   `tiktok_attribution_en` chưa có mẫu, nên validator loại toàn bộ. Đã đổi giao diện profile sang Tiếng Việt (`vi-VN`);
   một lượt host-browser TACTICAL với truy vấn "son môi" trả `ACCEPTED`/`HEALTHY`, 12 observation, đã gỡ tên tác giả
   (18 thẻ, 6 thẻ không cho bản ghi). Chưa kiểm: thiết lập có giữ sau khi khởi động lại Chrome, và nhánh MISSION.
-- [ ] **Spec 017 — T006** nghiệm thu Claude Code Desktop theo `quickstart.md`; **T008** chạy một routine thật
-  14 ngày liên tiếp trên một watchlist golden set (có thể báo cáo riêng, không đặt ngưỡng).
+- [ ] **Spec 017 — T008** chạy một routine thật 14 ngày liên tiếp trên một watchlist golden set (có thể báo cáo riêng,
+  không đặt ngưỡng). Routine G3 chạy lần cuối ngày 04/11/2026; đọc ngày 09/11/2026 thì app không còn liệt kê scheduled
+  task nào, nguyên nhân chưa rõ. T006 đã đóng ngày 09/11/2026 theo kết quả 23/10; chưa kiểm việc xóa routine (FR-008) và
+  luồng tạo routine của guide sau 23/10.
 - [ ] **Spec 019 (Shopee Affiliate)** — `Draft`, chưa có plan/tasks, chờ ba cổng kiểm tài khoản của chủ sở hữu.
 - [ ] **RES-001** benchmark đối thủ (xem mục "Nghiên cứu riêng"); chưa có ngân sách hay quyền dùng quota có phí.
 
