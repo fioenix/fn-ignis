@@ -4,7 +4,7 @@
 
 **Created**: 2026-11-09
 
-**Status**: Draft
+**Status**: Implemented and merged (PR 125, 2026-11-10); not released. Open: T022 operator rehearsal and T029; no real store has been migrated.
 
 **Input**: Owner request (09/11/2026): "tao vẫn thấy là trong ignis không nên có các hardcode kiểu này", about the seeded industry taxonomy; followed by "Nhưng mà bộ taxonomy này có ý nghĩa với các nghiên cứu thị trường à" and, after the analysis, "OK làm đi". (Ignis should not carry this kind of hardcoding; the taxonomy adds little to market research; go ahead.)
 

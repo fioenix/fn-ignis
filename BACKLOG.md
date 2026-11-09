@@ -31,6 +31,8 @@ xóa và chưa đọc lại kho đó.
   scheduled task nào, nguyên nhân chưa rõ. Mở lại khi có người cần period view định kỳ cho một quyết định thật, trên watchlist
   của chủ đề đó; lượt dựng đó kiểm luôn việc xóa routine (FR-008) và luồng tạo routine của guide sau 23/10. T006 đã đóng
   ngày 09/11/2026 theo kết quả 23/10.
+- [ ] **Spec 021 — T022, T029**: code đã merge (PR #125, 10/11/2026), PostgreSQL và Compose đã qua CI; chưa áp lên store thật nào. Chủ sở hữu quyết khi nào chạy `scripts/retire_industry_taxonomy.py` trên các store được phép.
+- [ ] **69 từ miền trong `market_lexicons`** (`sql/003`: fashion, tech, ecommerce, common_vi) vẫn là hardcode kiểu taxonomy, có đi vào quality evaluator và strategic reasoner; cần đo riêng trước khi bỏ.
 - [ ] **Spec 019 (Shopee Affiliate)** — `Draft`, chưa có plan/tasks, chờ ba cổng kiểm tài khoản của chủ sở hữu.
 - [ ] **RES-001** benchmark đối thủ (xem mục "Nghiên cứu riêng"); chưa có ngân sách hay quyền dùng quota có phí.
 
@@ -69,7 +71,7 @@ verdict mà listening không trả lời được; (b) Spec 019 qua ba cổng t�
 
 Nợ nhỏ giữ nguyên, sửa khi chạm tới, không lên lịch:
 
-- [ ] `son`/`kem` mơ hồ trong taxonomy `beauty`.
+- [x] `son`/`kem` mơ hồ trong taxonomy `beauty` — đóng 10/11/2026: seed không có hai từ đơn này, và Spec 021 đã bỏ taxonomy.
 - [ ] `_contiguous_phrase` chỉ đọc `canonical_name` (nhãn xuất hiện trong báo cáo Attention).
 
 Đóng sau khi kiểm code 09/11/2026:
@@ -341,9 +343,9 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   cluster từ 5 signal trở xuống đều là phán đoán hợp lý, còn hai cluster lớn hơn thì sai — bảng
   đấu esports vào `fashion` với 1/15, post ly hôn vào `beauty` với 1/9. Sau khi áp, đúng 2 row
   đổi, cả hai ca đó về `unclassified`, và các cluster đúng đều giữ nguyên.
-- [ ] **`son` và `kem` trong taxonomy `beauty` mơ hồ khi mất dấu** (sơn/son, kém/kem). Luật đối
+- [x] **(Đóng 10/11/2026: Spec 021 đã bỏ taxonomy) `son` và `kem` trong taxonomy `beauty` mơ hồ khi mất dấu** (sơn/son, kém/kem). Luật đối
   chứng đã vô hiệu hoá tác hại của chúng, nên không còn gấp. Nợ có sẵn từ seed gốc.
-- [~] **(Parking lot 09/11/2026) Taxonomy chưa phủ các vertical ngoài thị trường:** tin tức, thể thao, người nổi tiếng,
+- [x] **(Đóng 10/11/2026: Spec 021 đã bỏ taxonomy) Taxonomy chưa phủ các vertical ngoài thị trường:** tin tức, thể thao, người nổi tiếng,
   sức khoẻ/wellness vẫn rơi vào `unclassified`. Đây là **câu hỏi phạm vi sản phẩm**, không phải
   bug: một harness về cơ hội thị trường có nên theo dõi bóng đá không? Chờ Fio quyết.
 - [x] **BREAKOUT đã với tới được (cập nhật 10/09/2026):** 5 cluster đạt `cross_platform_score
