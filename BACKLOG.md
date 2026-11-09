@@ -20,10 +20,9 @@ từ `specs/*/tasks.md` ngày 09/11/2026; từ `v0.9.0` (28/10) `main` chỉ nh�
 
 ### Có task cụ thể, chưa nghiệm thu
 
-- [ ] **Spec 014 — 2 task còn lại (114/116):** T079 follow-up thật và T113 bảng nghiệm thu FR/SC (phụ thuộc T079).
-  T079 không chạy được qua MCP hiện tại: production không có activation factory cho follow-up, không có đường công khai ghi
-  gap/budget, và cần Market parent trên YouTube (`server.py` lifespan, `follow_up_caller_activation.py:1-5`). Cần chủ sở hữu
-  quyết: dựng trusted root có review kèm API key, hay rút T079 khỏi phạm vi. T082, T084, T087, T112 đã đóng 09/11/2026.
+- [ ] **Spec 014 — còn T113** bảng nghiệm thu FR/SC. T079 đã rút ngày 09/11/2026 theo quyết định của chủ sở hữu: production
+  không có activation factory cho follow-up, nên `execute_mission_follow_up` vẫn bị từ chối mặc định và FR-023 không có bằng
+  chứng chạy thật. T082, T084, T087, T112 đã đóng 09/11/2026.
 - [ ] **TikTok trên profile Finos bị fail-closed:** validator báo locale chưa seed hoặc không hỗ trợ, nên mọi bản ghi bị
   loại. Giả thuyết: giao diện không phải tiếng Việt; chưa đo trực tiếp giá trị `lang`. Cần đo lại, rồi đổi ngôn ngữ giao
   diện của profile hoặc seed locale đó từ chữ thật TikTok hiển thị.
