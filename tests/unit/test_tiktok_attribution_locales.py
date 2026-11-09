@@ -63,7 +63,7 @@ def test_tactical_uses_packaged_seed_and_ticket_freezes_locale_templates(monkeyp
         payload = host_answer(tactical)
         payload["answers"][0]["locale"] = "en"
         service.stage(tactical["request_id"], payload)
-        assert service.submit(tactical["request_id"], "task", "session")["observations"] == []
+        assert len(service.submit(tactical["request_id"], "task", "session")["observations"]) == 1
         assert "Fixture Poster" not in json.dumps(service._tickets[tactical["request_id"]]["receipt"])
     finally:
         service.close()

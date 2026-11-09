@@ -705,9 +705,16 @@ class SqliteMissionRelayReader(IMissionRelayReader):
         qualifications = tuple(SqliteTrendRepository._qualification_from_row(row) for row in conn.execute(
             SqliteTrendRepository._QUALIFICATION_COLUMNS + " WHERE mission_id=? ORDER BY observation_id", (mission_id,),
         ).fetchall())
+        latest = conn.execute(
+            "SELECT id,workspace_id FROM mission_run_journals WHERE mission_id=? ORDER BY started_at DESC,sequence DESC LIMIT 1",
+            (mission_id,),
+        ).fetchone()
+        if request.run_id is None and latest and _uuid(latest["workspace_id"]) != mission.workspace_id:
+            raise ValueError("Latest run has incompatible workspace scope.")
+        outcome_run_id = request.run_id if request.run_id is not None else _uuid(latest["id"]) if latest else None
         outcomes = tuple(_outcome(row) for row in conn.execute(
             "SELECT * FROM mission_probe_outcomes WHERE run_id=? ORDER BY connector_surface",
-            (str(request.run_id) if request.run_id is not None else None,),
+            (str(outcome_run_id) if outcome_run_id is not None else None,),
         ).fetchall())
         evidence = MissionEvidenceSnapshot(
             mission=mission,
@@ -731,7 +738,7 @@ class SqliteMissionRelayReader(IMissionRelayReader):
             if current_run and _uuid(current_run["workspace_id"]) != mission.workspace_id:
                 raise ValueError("Current research run has incompatible workspace scope.")
             research_run_id = _uuid(current_run["id"]) if current_run else None
-            current_outcomes = outcomes if research_run_id == request.run_id else tuple(_outcome(r) for r in conn.execute(
+            current_outcomes = outcomes if research_run_id == outcome_run_id else tuple(_outcome(r) for r in conn.execute(
                 "SELECT * FROM mission_probe_outcomes WHERE run_id=? ORDER BY connector_surface",
                 (str(research_run_id) if research_run_id else None,),
             ))
@@ -755,10 +762,7 @@ class SqliteMissionRelayReader(IMissionRelayReader):
             related_results=related, related_results_total=related_total,
             read_at=datetime.now(timezone.utc), total_observations=total, source_count=source_count,
             frame_evidence=canonical if full_frame else None,
-            latest_run_id=_uuid(latest["id"]) if (latest := conn.execute(
-                "SELECT id FROM mission_run_journals WHERE mission_id=? ORDER BY started_at DESC,sequence DESC LIMIT 1",
-                (mission_id,),
-            ).fetchone()) is not None else None,
+            latest_run_id=_uuid(latest["id"]) if latest else None,
         )
 
 
@@ -890,6 +894,13 @@ class PostgresMissionRelayReader(IMissionRelayReader):
         qualifications = tuple(repository._qualification_from_row(row) for row in await _pg_fetch(conn,
             repository._QUALIFICATION_COLUMNS + " WHERE mission_id=%s ORDER BY observation_id", (mission_id,), many=True, tuples=True,
         ))
+        latest = await _pg_fetch(conn,
+            "SELECT id,workspace_id FROM mission_run_journals WHERE mission_id=%s ORDER BY started_at DESC,sequence DESC LIMIT 1",
+            (mission_id,),
+        )
+        if request.run_id is None and latest and _pg_uuid(latest["workspace_id"]) != mission.workspace_id:
+            raise ValueError("Latest run has incompatible workspace scope.")
+        outcome_run_id = request.run_id if request.run_id is not None else _pg_uuid(latest["id"]) if latest else None
         outcomes = tuple(MissionProbeOutcome(
             outcome_id=_pg_uuid(row["id"]), run_id=_pg_uuid(row["run_id"]), platform=row["platform"],
             connector_surface=row["connector_surface"], status=row["status"], signals_collected=row["signals_collected"],
@@ -897,7 +908,7 @@ class PostgresMissionRelayReader(IMissionRelayReader):
             queried_keywords=tuple(row["queried_keywords"] or ()), queried_window=row["queried_window"],
             scope_attestation=row["scope_attestation"], note=row["note"], collection_plan_digest=row["collection_plan_digest"],
         ) for row in await _pg_fetch(conn,
-            "SELECT * FROM mission_probe_outcomes WHERE run_id=%s ORDER BY connector_surface", (request.run_id,), many=True,
+            "SELECT * FROM mission_probe_outcomes WHERE run_id=%s ORDER BY connector_surface", (outcome_run_id,), many=True,
         ))
         claims = []
         for row in await _pg_fetch(conn,
@@ -911,10 +922,6 @@ class PostgresMissionRelayReader(IMissionRelayReader):
             mission=mission, manifest=repository._manifest_from_row(manifest_row) if manifest_row is not None else None,
             brief=repository._brief_from_row(brief_row) if brief_row is not None else None,
             signals=signals, qualifications=qualifications, outcomes=outcomes, claims=tuple(claims),
-        )
-        latest = await _pg_fetch(conn,
-            "SELECT id FROM mission_run_journals WHERE mission_id=%s ORDER BY started_at DESC,sequence DESC LIMIT 1",
-            (mission_id,),
         )
         canonical = replace(evidence, signals=corpus) if full_frame else evidence
         research = None
@@ -931,7 +938,7 @@ class PostgresMissionRelayReader(IMissionRelayReader):
             if current_run and _pg_uuid(current_run["workspace_id"]) != mission.workspace_id:
                 raise ValueError("Current research run has incompatible workspace scope.")
             research_run_id = _pg_uuid(current_run["id"]) if current_run else None
-            current_outcomes = outcomes if research_run_id == request.run_id else tuple(_pg_outcome(r) for r in await _pg_fetch(conn,
+            current_outcomes = outcomes if research_run_id == outcome_run_id else tuple(_pg_outcome(r) for r in await _pg_fetch(conn,
                 "SELECT * FROM mission_probe_outcomes WHERE run_id=%s ORDER BY connector_surface", (research_run_id,), many=True,
             ))
             research_canonical = replace(canonical, outcomes=current_outcomes)

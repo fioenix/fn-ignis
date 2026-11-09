@@ -87,7 +87,7 @@
             <span class="bg-slate-100 text-slate-600 text-xs px-2.5 py-1 rounded-full font-mono font-bold">{{ mission.shortcode if mission.shortcode else mission.id }}</span>
           </div>
           <h1 class="text-2xl md:text-4xl font-black text-slate-900 tracking-tight">{{ mission.title }}</h1>
-          <p class="text-xs md:text-sm text-slate-500 font-medium">Cross-Platform Trend Intelligence & Market Gap Analysis • Target Geo: {{ mission.geo_code.value if mission.geo_code.value is defined else mission.geo_code }} • Timeframe: {{ mission.timeframe }}</p>
+          <p class="text-xs md:text-sm text-slate-500 font-medium">Cross-Platform Trend Intelligence & Market Gap Analysis • Target Geo: {{ mission.geo_code.value if mission.geo_code.value is defined else mission.geo_code }} • Timeframe: {{ mission.timeframe.value if mission.timeframe.value is defined else mission.timeframe }}</p>
         </div>
 
         <div class="flex items-center space-x-4 bg-slate-50 border border-slate-200 rounded-2xl p-4 shrink-0">
@@ -124,7 +124,7 @@
         <div class="bg-gradient-to-br from-slate-50 to-emerald-50/30 border border-slate-200/80 rounded-2xl p-4 space-y-1">
           <div class="text-xs font-bold text-slate-500 uppercase">Data Freshness</div>
           <div class="text-3xl font-black text-emerald-700">{{ scorecard.data_freshness_score }}%</div>
-          <div class="text-[11px] text-emerald-600 font-semibold">Matching {{ mission.timeframe }} window</div>
+          <div class="text-[11px] text-emerald-600 font-semibold">Matching {{ mission.timeframe.value if mission.timeframe.value is defined else mission.timeframe }} window</div>
         </div>
         <div class="bg-gradient-to-br from-slate-50 to-purple-50/30 border border-slate-200/80 rounded-2xl p-4 space-y-1">
           <div class="text-xs font-bold text-slate-500 uppercase">Creator Diversity</div>

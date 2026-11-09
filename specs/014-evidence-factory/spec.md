@@ -507,3 +507,16 @@ Option 3 was selected on 2026-10-04 and superseded by option 4 on 2026-10-19; op
 
 - Q: Can a client without advertised roots use caller-owned storage? → A: Only an actual canonical typed ClientCapabilities record explicitly NOT_ADVERTISED may use one operator-configured IGNIS_CALLER_ROOT from the server launch environment, snapshotted and identity-pinned at startup. UNKNOWN/missing capability, missing/malformed/replaced/symlinked startup root and model-supplied paths refuse. No CWD or global settings fallback is permitted; .fnignis allocation and protected setup remain explicit existing consumers. (owner approved; narrowly supersedes the earlier blanket no-roots refusal)
 - Q: Which authority wins when native roots are advertised? → A: Native roots remain authoritative. Missing/malformed/ambiguous roots or RPC failure refuse without configured fallback. Any configured startup root must be valid, unchanged and exactly match the single native root. Existing scoped configuration, backend refusal/no SQLite fallback, containment and data/clock/source-grant lifecycle contracts remain unchanged. Offline tests do not establish actual native Codex activation. (owner approved)
+
+### Session 2026-11-09 — closing offline acceptance while the owner was unavailable
+
+- Q: May T082, T084 and T087 close on CI evidence from `main` instead of new local full runs? → A: Yes, where the run's per-test log shows the named tests passing on PostgreSQL at the current `main` commit; gaps an independent audit found are closed with targeted additions, and any remaining limit is written beside the tick. (agent decided; basis: owner's instruction of 09/11/2026 to proceed without asking, the machine rule that full suites are the owner's call, and a Codex read-only audit that rated T082 satisfied and T084 partial before the additions.)
+- Q: May T079 and T112 run now? → A: No. They need a real mission, and AGENTS.md Section 8 reserves real TikTok, Threads and Instagram sessions for the owner; the instruction to proceed without asking did not grant it. (agent decided; basis: AGENTS.md Section 8.)
+- Q: Should T079 be built out or retired? → A: Retired. No real follow-up runs in R2; `execute_mission_follow_up` remains refused by default in production. (owner decided 2026-11-09)
+- Q: May T112 run with real sessions after the answer above? → A: Yes. The owner approved a small scope on 2026-11-09, superseding the earlier "No" for T112: two Attention missions, one source each, two keywords, the Finos Chrome profile and the host-browser path only. (owner decided 2026-11-09)
+
+### Session 2026-11-09 — parking unmet requirements with the frozen Market verdict
+
+- Q: What happens to the four UNMET requirements in the T113 matrix? → A: FR-001, FR-003, SC-001 and SC-014 are parked
+  with the frozen Market verdict. They stay UNMET and their text is unchanged; they are no longer open work. SC-014
+  also needs a real follow-up, which T079's retirement removed (owner decided; basis: ledger review on 2026-11-09).

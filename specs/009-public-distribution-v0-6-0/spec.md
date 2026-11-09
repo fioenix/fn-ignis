@@ -4,7 +4,7 @@
 
 **Created**: 2026-09-28
 
-**Status**: Accepted for planning
+**Status**: Implemented and released in `v0.6.0`
 
 **Input**: Product-owner direction to make source bootstrap and public GHCR the required
 distribution surfaces, defer PyPI, prove both paths from clean public inputs, and release the

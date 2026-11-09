@@ -4,7 +4,7 @@
 
 **Created**: 2026-09-29
 
-**Status**: Draft
+**Status**: Implemented and released in `v0.7.0`
 
 **Input**: User description: "Protect the fn-ignis-only YouTube API key from exhausting its daily quota while preserving scheduled radar ingestion and on-demand research."
 

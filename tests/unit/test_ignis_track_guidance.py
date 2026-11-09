@@ -58,6 +58,16 @@ def test_packaged_guide_has_the_required_sections_and_rules():
         assert term in guide, f"The guide is missing a required rule: {term}"
 
 
+def test_guide_names_each_evidence_responsibility_and_what_each_stage_exposes():
+    guide = _packaged_guide()
+    section = guide.split("## The six evidence responsibilities", 1)[1].split("\n## ", 1)[0]
+    for responsibility in ("Mission authority", "Collection", "Provenance", "Qualification",
+                           "Falsification", "Claim permission"):
+        assert f"| {responsibility} |" in section, f"The guide is missing the responsibility: {responsibility}"
+    for column in ("Receives", "Produces", "Why it matters", "What can fail"):
+        assert column in section, f"The guide is missing the stage column: {column}"
+
+
 def test_replay_section_states_the_rules_that_keep_a_replay_from_inventing_figures():
     """FR-033: a replay plays back one read and adds no figure, activity or liveness of its own."""
     guide = _packaged_guide()

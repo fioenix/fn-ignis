@@ -848,8 +848,8 @@ class StrategicMarketReasoner:
         ]
         
         if not video_signals:
-            reasons.append("Zero localized tutorial videos or content assets recorded.")
-            return TrendMaturityStage.EMERGING, reasons
+            # Having no video surface in the sample measures nothing about the market.
+            return None, ["No video surface was collected; maturity cannot be assessed."]
 
         video_signals = [s for s in video_signals if s.metadata.get("metric_known") is not False]
         if not video_signals:

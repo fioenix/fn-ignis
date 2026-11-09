@@ -4,7 +4,7 @@
 
 **Created**: 2026-09-21
 
-**Status**: Accepted for P1 implementation (US1-US3)
+**Status**: P1 (US1-US3) implemented and released in `v0.5.0`; the P2 stories US4 and US5 were outside this acceptance
 
 **Input**: User decision note: `docs/decisions/2026-09-21-dual-surface-research-workspace.md`
 

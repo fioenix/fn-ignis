@@ -73,12 +73,13 @@ def _safe_url(value: str | None) -> str | None:
         return None
 
 
-def _scope_matches(evidence, run, mission_id, run_id, *, complete: bool) -> bool:
+def _scope_matches(evidence, run, mission_id, run_id, *, complete: bool, latest_run_id=None) -> bool:
     mission = evidence.mission
     if type(mission_id) is not UUID or mission is None or mission.id != mission_id:
         return False
     if run_id is None:
-        if run is not None or evidence.outcomes:
+        # Only a coherent reader can bind mission-level outcomes to its recorded latest run.
+        if run is not None or (evidence.outcomes and latest_run_id is None):
             return False
     elif type(run_id) is not UUID or run is None or (
         run.run_id != run_id or run.mission_id != mission_id or run.workspace_id != mission.workspace_id
@@ -104,7 +105,7 @@ def _scope_matches(evidence, run, mission_id, run_id, *, complete: bool) -> bool
     for qualification in evidence.qualifications:
         if qualification.mission_id != mission_id or complete and qualification.observation_id not in ids:
             return False
-    if any(outcome.run_id != run_id for outcome in evidence.outcomes):
+    if any(outcome.run_id != (run_id if run_id is not None else latest_run_id) for outcome in evidence.outcomes):
         return False
     if any(claim.mission_id != mission_id for claim in evidence.claims):
         return False
@@ -155,7 +156,7 @@ def _channels(evidence) -> tuple[RelayChannelOutcome, ...]:
         status=outcome.status, signals_collected=outcome.signals_collected,
         completed_at=outcome.completed_at, note=_safe_text(outcome.note),
     ) for outcome in evidence.outcomes]
-    recorded = {outcome.platform for outcome in evidence.outcomes}
+    recorded = {name for outcome in evidence.outcomes for name in (outcome.platform, outcome.connector_surface)}
     if evidence.manifest is not None:
         for platform in dict.fromkeys((*evidence.manifest.required_channels, *evidence.manifest.optional_channels)):
             if platform not in recorded:
@@ -351,7 +352,8 @@ def _project(
     if type(evidence_offset) is not int or evidence_offset < 0:
         return _failure(RelayReadReason.SCOPE_MISMATCH)
     complete = coherent_read is None or coherent_read.total_observations == len(evidence.signals)
-    if not _scope_matches(evidence, run, selected_mission_id, selected_run_id, complete=complete):
+    if not _scope_matches(evidence, run, selected_mission_id, selected_run_id, complete=complete,
+                          latest_run_id=coherent_read.latest_run_id if coherent_read else None):
         return _failure(RelayReadReason.SCOPE_MISMATCH)
     try:
         surface = ResearchSurface(evidence.mission.surface)

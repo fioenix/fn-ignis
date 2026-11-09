@@ -40,7 +40,7 @@ môi trường Python và SQLite cục bộ, nạp từ vựng, cấu hình các
 tra tổng hợp. Credentials và phiên đăng nhập social thực tế là tùy chọn, phải do người vận
 hành cho phép. Kết quả kiểm tra tổng hợp không chứng minh nguồn live truy cập được.
 
-Cây mã nguồn hiện có migration tới `sql/038_tiktok_attribution_locales.sql`. Migration 038 nạp mẫu câu ghi công tác giả TikTok theo ngôn ngữ giao diện. Với ngôn ngữ chưa có mẫu, kết quả là DEGRADED và không có bản ghi; đây không phải xác nhận rằng tìm kiếm không có dữ liệu. Migration này không sửa bằng chứng đã lưu. Migration 037 nạp sẵn nhãn các nút hành động của Threads theo từng ngôn ngữ giao diện, dùng để đọc chỉ số khi tìm kiếm qua trình duyệt; nó không sửa bằng chứng đã lưu. Migration 036 nạp sẵn mẫu câu ghi công tác giả của Threads, dùng để bỏ câu ghi công khỏi trích đoạn khi tìm kiếm qua trình duyệt; nó không sửa bằng chứng đã lưu. Migration 035 lưu lịch sử mục tiêu, kỳ so sánh và nhịp lấy mẫu của watchlist; nó không sửa bằng chứng đã lưu. Migration 034 nạp sẵn mẫu câu
+Cây mã nguồn hiện có migration tới `sql/038_tiktok_attribution_locales.sql`. Migration 038 nạp mẫu câu ghi công tác giả TikTok theo ngôn ngữ giao diện. Từ `tiktok-public-grid-v3`, Ignis chỉ giữ element caption và các hashtag ngay sau nó nên ngôn ngữ giao diện không còn chặn bản ghi. Migration này không sửa bằng chứng đã lưu. Migration 037 nạp sẵn nhãn các nút hành động của Threads theo từng ngôn ngữ giao diện, dùng để đọc chỉ số khi tìm kiếm qua trình duyệt; nó không sửa bằng chứng đã lưu. Migration 036 nạp sẵn mẫu câu ghi công tác giả của Threads, dùng để bỏ câu ghi công khỏi trích đoạn khi tìm kiếm qua trình duyệt; nó không sửa bằng chứng đã lưu. Migration 035 lưu lịch sử mục tiêu, kỳ so sánh và nhịp lấy mẫu của watchlist; nó không sửa bằng chứng đã lưu. Migration 034 nạp sẵn mẫu câu
 ghi công tác giả của TikTok, dùng để bỏ câu ghi công khỏi trích đoạn khi tìm kiếm qua trình duyệt
 host; nó không sửa bằng chứng đã lưu. Migration 033 thêm bộ đếm số
 lượt tìm theo từ khóa của từng kênh trong từng ngày, dùng cho trần request theo ngày; nó không sửa bằng
@@ -73,8 +73,7 @@ Không chạy lại 025 khi đã có hàng DEGRADED chứa kết quả một ph�
 trước khi 026 chạy. Kiểm chứng chạy lại 026 không đồng nghĩa chạy lại toàn bộ lịch sử migration.
 
 Với PostgreSQL hiện có ở `035`, áp dụng lần lượt `036`, `037` và `038` bằng tài khoản sở hữu
-bảng. Nếu thiếu `038`, mọi truy vấn TikTok qua trình duyệt host ở chế độ MISSION đều bị chặn
-với trạng thái `DEGRADED`.
+bảng. Nếu thiếu `038`, tìm kiếm TikTok qua trình duyệt host ở chế độ MISSION bị từ chối ngay từ đầu.
 
 Workflow phát hành tạo image `ghcr.io/fioenix/fn-ignis:0.9.0` khi tag `v0.9.0` được push.
 Image v0.8.0 không có hợp đồng thu thập qua trình duyệt host của v0.9.0 được mô tả ở đây. Chưa công bố
@@ -153,7 +152,7 @@ không khả dụng có lý do, không phải số 0 đã đo. Search envelope r
 xác minh có thể trả về `EMPTY_NO_DATA` cho từ khóa đã chạy. Kết quả này không chứng minh đã
 bao phủ từ khóa khác hay biết rõ khoảng thời gian.
 
-TikTok hiện dùng `tiktok-public-grid-v2`; Threads dùng `threads-search-top-v2`. Các kỳ watchlist
+TikTok hiện dùng `tiktok-public-grid-v3`; Threads dùng `threads-search-top-v2`. Các kỳ watchlist
 trải qua thời điểm nâng cấp trả về `not_comparable` với lý do `collection_path_changed` hoặc
 `collection_path_mixed` khi đường thu thập khác nhau hoặc bị trộn trong kỳ.
 
