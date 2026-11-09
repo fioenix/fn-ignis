@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-02
 
-**Status**: Specification, plan and bounded localhost relay approved — implementation in progress
+**Status**: Implemented and released in `v0.8.0`
 
 **Input**: Owner approved using the live Chrome session through a host-provided integration,
 without cookie export, a new debugging port, or silent fallback to isolated contexts, and
@@ -157,6 +157,12 @@ mission use requires its confirmed source, query budget, authority, and evidence
   to keyword expansion. Genuine keyword Trends time-series ingestion is outside this feature.
 
 ## Clarifications
+
+### Session 2026-11-09
+
+- Q: Should the five unchecked test-first tasks stay open? → A: No. T004, T006, T007, T020 and T022 close as
+  process history. The tests exist; their original red order was never observed and stays unclaimed
+  (owner decided; basis: ledger review on 2026-11-09).
 
 ### Session 2026-10-26
 

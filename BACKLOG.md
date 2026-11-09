@@ -15,14 +15,13 @@
 
 ## Việc đang mở — đọc lại 09/11/2026
 
-Mục này là các việc đang được chọn làm tính đến 09/11/2026; các phần bên dưới là lịch sử và bối cảnh. Spec 011, 012 và 013
-vẫn giữ ledger riêng; đã rà ngày 09/11/2026 và ghi trạng thái từng dòng. Còn lại ở các spec đó: pilot 011 và quyết định baseline của chủ sở hữu, và kiểm tra hình ảnh báo cáo Market của Spec 013 T018, T022. Trạng thái Spec 014 và 017 lấy từ `tasks.md` cùng ngày; từ `v0.9.0` (28/10) `main` chỉ nhận hai bản nâng dependabot (#105, #106).
+Mục này là các việc đang được chọn làm tính đến 09/11/2026; các phần bên dưới là lịch sử và bối cảnh. Chủ sở hữu duyệt dọn
+ledger cùng ngày: task hết hiệu lực đã rút và ghi lý do trong `tasks.md`; pilot Market của Spec 011 và bốn yêu cầu UNMET của
+Spec 014 chuyển xuống mục đóng băng bên dưới. Ba task baseline của Spec 011 nhắm vào kho Supabase đã rút; không dữ liệu nào bị
+xóa và chưa đọc lại kho đó.
 
 ### Có task cụ thể, chưa nghiệm thu
 
-- [ ] **Spec 014 — ledger đã đóng (115 task xong, T079 rút), còn 4 yêu cầu UNMET** trong bảng nghiệm thu T113:
-  FR-001 và FR-003 (artifact chưa trình bày đủ sáu trách nhiệm và giải thích từng giai đoạn), SC-001 (chưa đo người đọc hiểu
-  trong hai phút), SC-014 (không có follow-up thật vì T079 đã rút 09/11/2026; `execute_mission_follow_up` vẫn bị từ chối mặc định).
 - [x] **TikTok trên profile Finos bị fail-closed** — đóng 09/11/2026. Đo trực tiếp: trang có `lang=en` trong khi
   `tiktok_attribution_en` chưa có mẫu, nên validator loại toàn bộ. Đã đổi giao diện profile sang Tiếng Việt (`vi-VN`);
   một lượt host-browser TACTICAL với truy vấn "son môi" trả `ACCEPTED`/`HEALTHY`, 12 observation, đã gỡ tên tác giả
@@ -30,7 +29,6 @@ vẫn giữ ledger riêng; đã rà ngày 09/11/2026 và ghi trạng thái từn
 - [ ] **Spec 017 — T006** nghiệm thu Claude Code Desktop theo `quickstart.md`; **T008** chạy một routine thật
   14 ngày liên tiếp trên một watchlist golden set (có thể báo cáo riêng, không đặt ngưỡng).
 - [ ] **Spec 019 (Shopee Affiliate)** — `Draft`, chưa có plan/tasks, chờ ba cổng kiểm tài khoản của chủ sở hữu.
-- [ ] **Pilot Việt Nam của Spec 011** chưa chạy.
 - [ ] **RES-001** benchmark đối thủ (xem mục "Nghiên cứu riêng"); chưa có ngân sách hay quyền dùng quota có phí.
 
 ### Việc của người vận hành
@@ -58,6 +56,13 @@ nhãn và supply score chỉ còn phục vụ các tool Market đã đăng ký (
 
 **Điều kiện mở lại** (một trong hai): (a) pilot Việt Nam hoặc một mission Market thật chạy xong và có người cần
 verdict mà listening không trả lời được; (b) Spec 019 qua ba cổng tài khoản, đủ dữ liệu cầu và cung.
+
+Đóng băng cùng chế độ này (chủ sở hữu quyết 09/11/2026), mở lại theo điều kiện trên:
+
+- [~] **Pilot Việt Nam của Spec 011** (T085–T090): chỉ chạy khi có câu hỏi thị trường thật và người cần câu trả lời.
+- [~] **Spec 014, bốn yêu cầu UNMET** trong bảng nghiệm thu T113: FR-001 và FR-003 (artifact chưa trình bày đủ sáu trách
+  nhiệm và giải thích từng giai đoạn), SC-001 (chưa đo người đọc hiểu trong hai phút), SC-014 (không có follow-up thật vì
+  T079 đã rút; `execute_mission_follow_up` vẫn bị từ chối mặc định).
 
 Nợ nhỏ giữ nguyên, sửa khi chạm tới, không lên lịch:
 

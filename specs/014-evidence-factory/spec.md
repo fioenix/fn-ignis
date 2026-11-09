@@ -514,3 +514,9 @@ Option 3 was selected on 2026-10-04 and superseded by option 4 on 2026-10-19; op
 - Q: May T079 and T112 run now? → A: No. They need a real mission, and AGENTS.md Section 8 reserves real TikTok, Threads and Instagram sessions for the owner; the instruction to proceed without asking did not grant it. (agent decided; basis: AGENTS.md Section 8.)
 - Q: Should T079 be built out or retired? → A: Retired. No real follow-up runs in R2; `execute_mission_follow_up` remains refused by default in production. (owner decided 2026-11-09)
 - Q: May T112 run with real sessions after the answer above? → A: Yes. The owner approved a small scope on 2026-11-09, superseding the earlier "No" for T112: two Attention missions, one source each, two keywords, the Finos Chrome profile and the host-browser path only. (owner decided 2026-11-09)
+
+### Session 2026-11-09 — parking unmet requirements with the frozen Market verdict
+
+- Q: What happens to the four UNMET requirements in the T113 matrix? → A: FR-001, FR-003, SC-001 and SC-014 are parked
+  with the frozen Market verdict. They stay UNMET and their text is unchanged; they are no longer open work. SC-014
+  also needs a real follow-up, which T079's retirement removed (owner decided; basis: ledger review on 2026-11-09).
