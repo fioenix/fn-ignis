@@ -165,7 +165,7 @@ def test_legacy_taxonomy_refusal_precedes_any_bootstrap(tmp_path, monkeypatch):
     entered = []
     monkeypatch.setattr(SqliteTrendRepository, '_create_tables_and_seed', lambda self: entered.append('bootstrap'))
     repo = SqliteTrendRepository(str(path))
-    with pytest.raises(RepositoryException, match='retire_industry_taxonomy'):
+    with pytest.raises(RepositoryException, match='matching source checkout.*retire_industry_taxonomy'):
         asyncio.run(repo._ensure_schema())
     assert entered == []
     assert _bytes(path) == before

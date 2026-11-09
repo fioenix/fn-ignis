@@ -821,7 +821,8 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
             ).fetchone():
                 raise RepositoryException(
                     "Legacy industry taxonomy requires explicit retirement before startup. "
-                    "Use scripts/retire_industry_taxonomy.py project, then apply with the reviewed baseline."
+                    "From a matching source checkout, use scripts/retire_industry_taxonomy.py project, "
+                    "then apply with the reviewed baseline."
                 )
         finally:
             if conn is not self._mem_conn:
