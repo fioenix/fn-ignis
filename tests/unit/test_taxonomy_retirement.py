@@ -343,3 +343,35 @@ def test_interrupted_apply_rolls_back_before_returning_control(legacy, stage):
         assert retirement.project(connection, 'sqlite', 'fixture-store') == baseline
     finally:
         connection.close()
+
+
+
+def test_protected_table_without_primary_key_has_stable_complete_digest(legacy):
+    rows = [(None, 'null key'), ('same', 'second'), ('same', 'first'),
+            ('same', 'first')]
+    with sqlite3.connect(legacy) as conn:
+        conn.execute('DROP TABLE trend_signals')
+        conn.execute('CREATE TABLE trend_signals (id TEXT, payload TEXT)')
+        conn.executemany('INSERT INTO trend_signals VALUES (?, ?)', rows)
+    baseline = projection(legacy)
+    assert baseline['protected_sets']['trend_signals']['count'] == 4
+    with sqlite3.connect(legacy) as conn:
+        conn.execute('DELETE FROM trend_signals')
+        conn.executemany('INSERT INTO trend_signals VALUES (?, ?)', reversed(rows))
+    assert projection(legacy) == baseline
+    assert apply_fixture(legacy, baseline)['changed_count'] == 14
+    with sqlite3.connect(legacy) as conn:
+        assert retirement.verify(conn, 'sqlite', 'fixture-store', baseline)['status'] == 'VERIFIED'
+        conn.execute("UPDATE trend_signals SET payload='changed' WHERE payload='second'")
+    with sqlite3.connect(legacy) as conn:
+        with pytest.raises(retirement.RetirementError, match='POST_STATE_MISMATCH'):
+            retirement.verify(conn, 'sqlite', 'fixture-store', baseline)
+
+
+def test_topic_clusters_still_requires_a_primary_key(legacy):
+    with sqlite3.connect(legacy) as conn:
+        conn.execute('ALTER TABLE topic_clusters RENAME TO old_clusters')
+        conn.execute('CREATE TABLE topic_clusters AS SELECT * FROM old_clusters')
+        conn.execute('DROP TABLE old_clusters')
+    with pytest.raises(retirement.RetirementError, match='UNSUPPORTED_STORE'):
+        projection(legacy)

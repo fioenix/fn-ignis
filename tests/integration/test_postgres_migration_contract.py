@@ -1052,3 +1052,34 @@ def test_re_applying_025_and_the_whole_chain_preserves_claim_state(supabase_like
         _security_state(dsn),
         _uuid_state(dsn),
     ) == settled
+
+
+
+@pytest.mark.parametrize('roles', [False, True])
+def test_re_applying_039_sql_preserves_the_retired_populated_store(request, roles):
+    """SC-005: repeat only the pending migration, never recreate retired taxonomy."""
+    from ignis.infrastructure.migration import taxonomy_retirement as retirement
+
+    dsn = request.getfixturevalue('supabase_like_dsn' if roles else 'empty_postgres_dsn')
+    _apply(dsn, *_through(38))
+    with psycopg.connect(dsn) as conn:
+        conn.execute("INSERT INTO topic_clusters (canonical_name, category) VALUES ('legacy', 'beauty')")
+        conn.execute("INSERT INTO trend_signals (platform, raw_title) VALUES ('youtube', 'preserved')")
+    with psycopg.connect(dsn) as conn:
+        conn.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+        baseline = retirement.project(conn, 'postgres', 'sql-retry-fixture')
+    with psycopg.connect(dsn) as conn:
+        conn.execute("SELECT set_config('ignis.taxonomy_projection_digest', %s, true)",
+                     (baseline['projection_digest'],))
+        conn.execute((REPO_SQL / '039_remove_seeded_taxonomy.sql').read_text())
+        assert conn.execute("SELECT current_setting('ignis.taxonomy_changed_count')").fetchone() == ('1',)
+        assert retirement.verify(conn, 'postgres', 'sql-retry-fixture', baseline)['status'] == 'VERIFIED'
+    with psycopg.connect(dsn) as conn:
+        conn.execute("INSERT INTO topic_clusters (canonical_name, category) VALUES ('new source', 'beauty')")
+    with psycopg.connect(dsn) as conn:
+        before_retry = retirement.project(conn, 'postgres', 'sql-retry-fixture')
+    with psycopg.connect(dsn) as conn:
+        conn.execute((REPO_SQL / '039_remove_seeded_taxonomy.sql').read_text())
+        assert conn.execute("SELECT current_setting('ignis.taxonomy_changed_count')").fetchone() == ('0',)
+        assert retirement.project(conn, 'postgres', 'sql-retry-fixture') == before_retry
+        assert conn.execute("SELECT category FROM topic_clusters WHERE canonical_name='new source'").fetchone() == ('beauty',)

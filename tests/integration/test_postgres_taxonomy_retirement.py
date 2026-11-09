@@ -157,6 +157,8 @@ def test_baseline_is_recomputed_after_waiting_for_writer(legacy_pg):
             deadline = time.monotonic() + 3
             waiting = False
             while time.monotonic() < deadline:
+                # Statistics are cached within this writer transaction unless cleared.
+                writer.execute("SELECT pg_stat_clear_snapshot()")
                 waiting = writer.execute(
                     "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname=current_database() "
                     "AND application_name='taxonomy-retirement-test' AND wait_event_type='Lock')"
@@ -169,3 +171,66 @@ def test_baseline_is_recomputed_after_waiting_for_writer(legacy_pg):
             with pytest.raises(retirement.RetirementError, match='BASELINE_DRIFT'):
                 future.result(timeout=10)
     assert project(legacy_pg)['table_present'] is True
+
+
+
+@pytest.mark.parametrize('roles', [False, True])
+def test_populated_real_chain_projects_applies_and_verifies(request, roles):
+    """Use 001-038 unchanged, including the keyless legacy signal relation."""
+    dsn = request.getfixturevalue('supabase_like_dsn' if roles else 'empty_postgres_dsn')
+    with psycopg.connect(dsn) as conn:
+        for name in all_postgres_migrations():
+            if int(name[:3]) <= 38:
+                conn.execute((SQL / name).read_text())
+        assert conn.execute(
+            "SELECT count(*) FROM pg_index WHERE indrelid='public.trend_signals'::regclass "
+            "AND indisprimary"
+        ).fetchone() == (0,)
+        cluster = conn.execute(
+            "INSERT INTO topic_clusters (canonical_name, category, cross_platform_score) "
+            "VALUES ('legacy category', 'beauty', 12.5) RETURNING id"
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO topic_clusters (canonical_name, category) "
+            "VALUES ('source category', 'source label')"
+        )
+        mission = conn.execute(
+            "INSERT INTO research_missions (title) VALUES ('retirement regression') RETURNING id"
+        ).fetchone()[0]
+        signal = conn.execute(
+            "INSERT INTO trend_signals (platform, raw_title, cluster_id, mission_id, metadata) "
+            "VALUES ('youtube', 'preserved legacy evidence', %s, %s, '{}') RETURNING id",
+            (cluster, mission),
+        ).fetchone()[0]
+        # Duplicate IDs and complete duplicate rows are valid without a primary key.
+        conn.execute("INSERT INTO trend_signals SELECT * FROM trend_signals")
+        conn.execute(
+            "INSERT INTO signal_metrics (signal_id, metric_value) VALUES (%s, 3)", (signal,)
+        )
+        source = conn.execute(
+            "INSERT INTO sources (platform, external_id) VALUES ('youtube', 'retirement') RETURNING id"
+        ).fetchone()[0]
+        observation = conn.execute(
+            "INSERT INTO observations (source_id, cluster_id, observed_at, time_provenance, identity_source) "
+            "VALUES (%s, %s, now(), 'exact_ingestion', 'metadata_external_id') RETURNING id",
+            (source, cluster),
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO mission_evidence (mission_id, observation_id) VALUES (%s, %s)",
+            (mission, observation),
+        )
+    baseline = project(dsn)
+    assert baseline['reset_total'] == 1
+    assert baseline['protected_sets']['trend_signals']['count'] == 2
+    for table in ('research_missions', 'sources', 'observations', 'mission_evidence', 'signal_metrics'):
+        assert baseline['protected_sets'][table]['count'] == 1
+    assert baseline['protected_sets']['market_lexicons']['count'] > 0
+    assert project(dsn) == baseline
+    assert apply(dsn, baseline)['changed_count'] == 1
+    with psycopg.connect(dsn) as conn:
+        result = retirement.verify(conn, 'postgres', 'fixture-pg', baseline)
+        assert result['status'] == 'VERIFIED' and all(result['invariants'].values())
+        assert conn.execute(
+            'SELECT canonical_name, category FROM topic_clusters ORDER BY canonical_name'
+        ).fetchall() == [('legacy category', 'unclassified'), ('source category', 'source label')]
+    assert apply(dsn, baseline)['changed_count'] == 0

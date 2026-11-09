@@ -8,7 +8,9 @@ DECLARE
         'food', 'health', 'news', 'realestate', 'sports', 'tech', 'travel'
     ];
     zero_counts jsonb;
+    changed_count bigint;
 BEGIN
+    PERFORM set_config('ignis.taxonomy_changed_count', '0', true);
     IF to_regclass('public.industry_taxonomies') IS NULL THEN
         RETURN;
     END IF;
@@ -34,6 +36,8 @@ BEGIN
         );
     END IF;
     UPDATE public.topic_clusters SET category = 'unclassified' WHERE category = ANY(former_codes);
+    GET DIAGNOSTICS changed_count = ROW_COUNT;
+    PERFORM set_config('ignis.taxonomy_changed_count', changed_count::text, true);
     DROP TABLE public.industry_taxonomies;
 END
 $retire$;

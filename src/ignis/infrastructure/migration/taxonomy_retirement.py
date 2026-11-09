@@ -165,8 +165,11 @@ def _rows(connection, backend, table):
             'JOIN pg_attribute a ON a.attrelid=c.oid AND a.attnum=ANY(i.indkey) '
             "WHERE n.nspname='public' AND c.relname=%s AND i.indisprimary ORDER BY a.attname", (table,),
         )]
-    if not columns or not keys or (table == 'topic_clusters' and not {'id', 'category'} <= set(columns)):
+    if not columns or (table == 'topic_clusters' and (not keys or not {'id', 'category'} <= set(columns))):
         raise RetirementError('UNSUPPORTED_STORE', 2)
+    # Protected evidence can be keyless (notably the legacy PostgreSQL hypertable).
+    # Identical complete rows are interchangeable, including duplicate rows.
+    keys = keys or columns
     selected = ','.join('"' + name.replace('"', '""') + '"' for name in columns)
     order = ','.join('"' + name.replace('"', '""') + '"' for name in keys)
     prefix = 'public.' if backend == 'postgres' else ''
@@ -295,10 +298,10 @@ def apply(connection, backend, store_identity, baseline):
                    for row in _schema(connection, backend)):
                 raise RetirementError('DEPENDENT_OBJECT')
             placeholders = ','.join('?' for _ in FORMER_CODES)
-            connection.execute(
+            changed_count = connection.execute(
                 f'UPDATE topic_clusters SET category = ? WHERE category IN ({placeholders})',
                 ('unclassified', *FORMER_CODES),
-            )
+            ).rowcount
             connection.execute('DROP TABLE industry_taxonomies')
         else:
             from ignis.resources import sql_seed_file
@@ -308,9 +311,12 @@ def apply(connection, backend, store_identity, baseline):
             connection.execute("SELECT set_config('ignis.taxonomy_projection_digest', %s, true)",
                                (baseline['projection_digest'],))
             connection.execute(migration.read_text(encoding='utf-8'))
+            changed_count = int(connection.execute(
+                "SELECT current_setting('ignis.taxonomy_changed_count')"
+            ).fetchone()[0])
         result = verify(connection, backend, store_identity, baseline)
         connection.commit()
-        return {**result, 'status': 'APPLIED', 'changed_count': baseline['reset_total'], 'committed': True}
+        return {**result, 'status': 'APPLIED', 'changed_count': changed_count, 'committed': True}
     except BaseException as error:
         connection.rollback()
         if isinstance(error, RetirementError) or not isinstance(error, Exception):

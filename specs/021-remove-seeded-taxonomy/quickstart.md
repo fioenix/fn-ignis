@@ -50,7 +50,7 @@ PostgreSQL. Use the existing fixtures in `tests/conftest.py` and integration con
 DSN/roles or skipped tests remain an explicit unverified gate.
 
 ```bash
-.venv/bin/pytest tests/integration/test_taxonomy_retirement.py
+.venv/bin/pytest tests/integration/test_postgres_taxonomy_retirement.py
 .venv/bin/pytest tests/integration/test_postgres_migration_contract.py
 .venv/bin/pytest tests/integration/test_postgres_rls_coverage.py
 .venv/bin/pytest tests/integration/test_decision_grade_evidence.py
