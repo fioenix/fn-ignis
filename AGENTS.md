@@ -346,3 +346,9 @@ These boundaries hold for every contributor. Where the `noulmes` skill is instal
 - An agent records a decision in a spec's `## Clarifications` only when the task belongs to that spec, even when `.specify/feature.json` names that spec; `feature.json` can still name a finished spec.
 - A decision that belongs to no spec is recorded as a dated note tagged `fn-ignis` in the first folder of `NOULMES_DECISIONS` when it is set, and is otherwise reported as unrecorded.
 - `docs/decisions/` holds architecture and product ADRs. An agent drafts an ADR as `Proposed`, and the owner sets its status.
+
+## Agent skills
+
+This repository uses the finolabs-vibecode skills. Routing on: use `fnl-coding-router`. Use Spec Kit. Pull requests follow `fnl-review-gate` "Pull requests"; reviewers may post code/security reviews. Help: `/fnl-ask`.
+
+Review relay approval (owner, chat, 9 November 2026): on `fioenix/fn-ignis` pull requests, when an independent Codex reviewer returns its finished comment with `cannot-post: no-network`, the coordinator may relay that comment once per review run through `post_review.py`, unchanged from its first-line marker, with a second line naming the reviewer, the coordinator and this approval. This covers code and security reviews; it grants no merge, deploy or other authority.
