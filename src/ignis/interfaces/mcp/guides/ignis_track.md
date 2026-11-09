@@ -40,7 +40,9 @@ Take every value from the snapshot. Show:
 - mission ID, `surface` (`MARKET` or `ATTENTION`), `revision` and `read_at`;
 - the run: `run_id` echoes only a run you selected; when it is null, show
   `research.current_run_id` if research is available, otherwise say the run is unknown;
-- `frame_digest`, or `frame_pending_reason` when no frame is bound;
+- `frame_digest`, or `frame_pending_reason` when no frame is bound. On an Attention mission no claim
+  binds to a frame, so `frame_digest` stays null and the reason reads `UNAVAILABLE`: say that, and do
+  not report it as a failed collection;
 - `collection_state`, or "unknown" when it is null;
 - each entry in `channels` with its `platform`, `connector_surface`, `status`, `signals_collected`
   and `note`;
@@ -50,7 +52,8 @@ Take every value from the snapshot. Show:
   permitted claims from `claim_gate.claims` with their evidence bindings; otherwise
   `claim_gate.gap_report`; earlier claims from `claim_gate.history` labeled as history;
 - research work and findings from `research` when its `availability` is `AVAILABLE`, otherwise
-  say research is unknown. For each finding, show `latest_recorded` (the newest revision) and
+  say research is unknown. `SCHEMA_UNAVAILABLE` can occur in a SQLite store before its first research
+  write; otherwise a missing or incompatible schema leaves research unknown. For each finding, show `latest_recorded` (the newest revision) and
   `current_eligible` (eligible for the current frame) separately; a finding with `text_withheld`
   true is shown as withheld, never as empty text. Label work `activity` with
   `provenance` `HOST_REPORTED` as reported by the host, and items with `recorded_provenance`

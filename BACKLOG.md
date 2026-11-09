@@ -26,8 +26,6 @@ vẫn giữ ledger riêng; đã rà ngày 09/11/2026 và ghi trạng thái từn
 - [ ] **TikTok trên profile Finos bị fail-closed:** validator báo locale chưa seed hoặc không hỗ trợ, nên mọi bản ghi bị
   loại. Giả thuyết: giao diện không phải tiếng Việt; chưa đo trực tiếp giá trị `lang`. Cần đo lại, rồi đổi ngôn ngữ giao
   diện của profile hoặc seed locale đó từ chữ thật TikTok hiển thị.
-- [ ] **Chưa giải thích được (T112):** snapshot trả `frame_digest` null dù submit có trả digest; `research` và
-  `related_results_coverage` báo `SCHEMA_UNAVAILABLE` dù các bảng có trong store.
 - [ ] **Spec 017 — T006** nghiệm thu Claude Code Desktop theo `quickstart.md`; **T008** chạy một routine thật
   14 ngày liên tiếp trên một watchlist golden set (có thể báo cáo riêng, không đặt ngưỡng).
 - [ ] **Spec 019 (Shopee Affiliate)** — `Draft`, chưa có plan/tasks, chờ ba cổng kiểm tài khoản của chủ sở hữu.
