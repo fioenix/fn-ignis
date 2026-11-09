@@ -322,3 +322,24 @@ def test_empty_backend_never_falls_through_to_default_connection(flag, capsys, m
     assert cli().main(['project', flag, '']) == 2
     assert json.loads(capsys.readouterr().out)['reason'] == 'INVALID_INPUT'
     assert calls == []
+
+
+@pytest.mark.parametrize('stage', ['after_update', 'after_drop'])
+def test_interrupted_apply_rolls_back_before_returning_control(legacy, stage):
+    class Interrupted(sqlite3.Connection):
+        def execute(self, statement, *args, **kwargs):
+            if statement.startswith('DROP TABLE') and stage == 'after_update':
+                raise KeyboardInterrupt()
+            result = super().execute(statement, *args, **kwargs)
+            if statement.startswith('DROP TABLE') and stage == 'after_drop':
+                raise KeyboardInterrupt()
+            return result
+    baseline = projection(legacy)
+    connection = sqlite3.connect(legacy, factory=Interrupted)
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            retirement.apply(connection, 'sqlite', 'fixture-store', baseline)
+        assert not connection.in_transaction, 'An interrupted apply must release its transaction'
+        assert retirement.project(connection, 'sqlite', 'fixture-store') == baseline
+    finally:
+        connection.close()

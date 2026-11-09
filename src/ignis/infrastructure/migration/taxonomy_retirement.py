@@ -311,8 +311,8 @@ def apply(connection, backend, store_identity, baseline):
         result = verify(connection, backend, store_identity, baseline)
         connection.commit()
         return {**result, 'status': 'APPLIED', 'changed_count': baseline['reset_total'], 'committed': True}
-    except Exception as error:
+    except BaseException as error:
         connection.rollback()
-        if isinstance(error, RetirementError):
+        if isinstance(error, RetirementError) or not isinstance(error, Exception):
             raise
         raise RetirementError('APPLY_FAILED') from None
