@@ -16,7 +16,7 @@
 ## Việc đang mở — đọc lại 09/11/2026
 
 Mục này là các việc đang được chọn làm tính đến 09/11/2026; các phần bên dưới là lịch sử và bối cảnh. Spec 011, 012 và 013
-vẫn giữ ledger riêng với các dòng chưa tick, một số có thể đã cũ, chưa rà lại. Trạng thái Spec 014 và 017 lấy từ `tasks.md` cùng ngày; từ `v0.9.0` (28/10) `main` chỉ nhận hai bản nâng dependabot (#105, #106).
+vẫn giữ ledger riêng; đã rà ngày 09/11/2026 và ghi trạng thái từng dòng. Còn lại ở các spec đó là việc của chủ sở hữu: pilot 011 và quyết định baseline. Trạng thái Spec 014 và 017 lấy từ `tasks.md` cùng ngày; từ `v0.9.0` (28/10) `main` chỉ nhận hai bản nâng dependabot (#105, #106).
 
 ### Có task cụ thể, chưa nghiệm thu
 
@@ -26,7 +26,6 @@ vẫn giữ ledger riêng với các dòng chưa tick, một số có thể đã
 - [ ] **TikTok trên profile Finos bị fail-closed:** validator báo locale chưa seed hoặc không hỗ trợ, nên mọi bản ghi bị
   loại. Giả thuyết: giao diện không phải tiếng Việt; chưa đo trực tiếp giá trị `lang`. Cần đo lại, rồi đổi ngôn ngữ giao
   diện của profile hoặc seed locale đó từ chữ thật TikTok hiển thị.
-- [ ] **Snapshot chưa chọn run hiển thị channel là "chưa đo"** dù outcome đã ghi (phát hiện ở T112).
 - [ ] **Chưa giải thích được (T112):** snapshot trả `frame_digest` null dù submit có trả digest; `research` và
   `related_results_coverage` báo `SCHEMA_UNAVAILABLE` dù các bảng có trong store.
 - [ ] **Spec 017 — T006** nghiệm thu Claude Code Desktop theo `quickstart.md`; **T008** chạy một routine thật
