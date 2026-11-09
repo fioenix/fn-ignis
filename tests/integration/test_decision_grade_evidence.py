@@ -688,8 +688,7 @@ async def test_cold_start_vocabulary_failure_calls_no_connector_and_fails_clearl
         raise RuntimeError("market_lexicons is unreadable")
 
     process["sync"]._repository = type(
-        "UnreadableVocabulary", (), {"get_domain_lexicons": unreadable,
-                                     "get_industry_taxonomies": unreadable}
+        "UnreadableVocabulary", (), {"get_domain_lexicons": unreadable}
     )()
 
     with pytest.raises(VocabularySynchronizationError):
@@ -1929,3 +1928,70 @@ async def test_submit_batch_and_analysis_give_one_next_step_while_evidence_is_pe
     assert bool(batch["evidence"]) is (reason_code == "QUALIFICATION_INCOMPLETE")
     for forbidden in analysis["gap_report"]["withheld_outputs"]:
         assert forbidden not in analysis
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("surface", ["market", "attention"])
+async def test_taxonomy_category_only_reset_preserves_analysis(
+    repository_case, host_workspace, monkeypatch, tmp_path, surface
+):
+    """Exercise real handlers against the same persisted evidence before/after label reset."""
+    from ignis.application.use_cases.current_evidence_frame import load_current_evidence_frame
+    from ignis.domain.entities import TopicCluster
+    from ignis.interfaces.mcp import server as mcp_server
+
+    from ignis.infrastructure.templates import html_builder
+    class FixedRenderClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return T0
+    monkeypatch.setattr(html_builder, 'datetime', FixedRenderClock)
+    repository = repository_case.repository
+    store, workspace = await _workspace(repository, host_workspace)
+    items = CORPUS["semantic_controls"]["positive"]
+    if surface == "market":
+        mission, _, held = await _market_with(
+            repository, store, workspace, items, CONTROL_KEYWORDS,
+            outcomes=[("google", "google", "HEALTHY", 1), ("youtube", "youtube", "HEALTHY", 5)],
+        )
+        cluster = TopicCluster(canonical_name="Synthetic category parity", category="beauty")
+        for signal in held:
+            signal.cluster_id = cluster.id
+        cluster.signals = held
+        await repository.save_clusters([cluster])
+        await repository.assign_observation_clusters(held)
+    else:
+        mission, held, items = await _attention_with(repository, store, workspace, {"supported": items})
+    monkeypatch.setattr(mcp_server, "get_components", lambda: _handler_components(repository, store))
+    monkeypatch.setattr(mcp_server, "_get_secure_reports_dir", lambda: tmp_path)
+    await _qualify_through_handlers(
+        mcp_server, mission, _judgments_by_observation(held, items, "control_judgment")
+    )
+
+    def set_category(value):
+        repository_case.query_one(
+            "UPDATE topic_clusters SET category = ? RETURNING id",
+            "UPDATE topic_clusters SET category = %s RETURNING id", (value,),
+        )
+
+    async def capture():
+        analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id), limit=50))
+        artifact = json.loads(await mcp_server.handle_generate_mission_artifact(str(mission.id)))
+        html = Path(artifact["artifact_file"]).read_text()
+        claims = await store.load_mission_evidence_snapshot(mission.id)
+        signals = await repository.get_mission_signals(mission.id)
+        frame = await load_current_evidence_frame(repository, store, mission) if surface == "market" else None
+        discovery = json.loads(await mcp_server.handle_discover_market_opportunities(str(mission.id)))
+        return analysis, html, claims, signals, frame, discovery
+
+    set_category("beauty")
+    before = await capture()
+    set_category("unclassified")
+    after = await capture()
+    assert before == after
+    # Relevant observation content must invalidate the frame, unlike a cluster display label.
+    if surface == "market":
+        snapshot = before[2]
+        snapshot.signals[0].metadata["category"] = "changed-source-category"
+        from ignis.application.use_cases.current_evidence_frame import frame_from_snapshot
+        assert frame_from_snapshot(snapshot).frame_digest != before[4].frame_digest

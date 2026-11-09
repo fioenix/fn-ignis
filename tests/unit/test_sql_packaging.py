@@ -27,8 +27,8 @@ SEED_FILES = (
 )
 # Not a seed: PostgreSQL-only, and read by no bootstrap. The Compose init and an operator applying
 # sql/ by hand need the whole chain, so the newest migration is pinned here and shipped with it.
-NEWEST_POSTGRES_ONLY_MIGRATION = "035_watchlist_listening_plans.sql"
-NEWEST_MIGRATION = "038_tiktok_attribution_locales.sql"
+NEWEST_POSTGRES_ONLY_MIGRATION = "039_remove_seeded_taxonomy.sql"
+NEWEST_MIGRATION = "039_remove_seeded_taxonomy.sql"
 # The closed sdist member list: runtime package, the SQL chain, and the build metadata. Anything
 # else -- tests, docs, examples, reports, handoff notes, agent or local settings -- must not ship.
 SDIST_MEMBERS = {"src/ignis", "sql", "pyproject.toml", "README.md", "LICENSE"}
@@ -207,3 +207,25 @@ def test_threads_seed_resolves_in_checkout_and_packaged_tactical_layout(tmp_path
 def test_host_resources_are_readable_through_the_package(relative):
     from importlib.resources import files
     assert files("ignis").joinpath(relative).read_text(encoding="utf-8").strip()
+
+
+@pytest.mark.asyncio
+async def test_packaged_sql_bootstrap_keeps_lexicons_without_taxonomy(tmp_path, monkeypatch):
+    import shutil
+    import sqlite3
+    from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+    packaged = tmp_path / 'package' / 'ignis' / 'sql'
+    shutil.copytree(sql_seed_dir(), packaged)
+    monkeypatch.setattr(resources, 'PACKAGED_SQL_DIR', packaged)
+    monkeypatch.setattr(resources, 'REPOSITORY_SQL_DIR', tmp_path / 'absent')
+    names = sorted(path.name for path in packaged.glob('*.sql'))
+    assert [int(name[:3]) for name in names] == list(range(1, 40))
+    assert names[-1] == NEWEST_MIGRATION
+    path = tmp_path / 'installed.sqlite3'
+    for _ in range(2):
+        repository = SqliteTrendRepository(str(path))
+        await repository._ensure_schema()
+        await repository.close()
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("SELECT name FROM sqlite_master WHERE name='industry_taxonomies'").fetchall() == []
+        assert conn.execute("SELECT count(*) FROM market_lexicons WHERE domain IN ('fashion','tech','ecommerce','common_vi')").fetchone() == (69,)

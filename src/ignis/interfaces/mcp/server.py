@@ -3763,14 +3763,12 @@ async def handle_list_domain_lexicons(domain: Optional[str] = None) -> str:
     comp = get_components()
     try:
         lexicons = await comp["repository"].get_domain_lexicons(domain=domain)
-        taxonomies = await comp["repository"].get_industry_taxonomies()
         return json.dumps(
             {
                 "status": "SUCCESS",
                 "total_lexicon_terms": len(lexicons),
                 "domain_filter": domain,
                 "lexicons": lexicons,
-                "industry_taxonomies": taxonomies,
             },
             ensure_ascii=False,
             indent=2,
@@ -3780,7 +3778,7 @@ async def handle_list_domain_lexicons(domain: Optional[str] = None) -> str:
         return json.dumps({"status": "ERROR", "message": str(e)}, ensure_ascii=False)
 
 
-@mcp.tool(name="list_domain_lexicons", description="List active domain vocabularies, slang terms, and industry mappings currently loaded in the system.")
+@mcp.tool(name="list_domain_lexicons", description="List active domain vocabularies and slang terms currently loaded in the system.")
 async def list_domain_lexicons(domain: Optional[str] = None) -> str:
     return await handle_list_domain_lexicons(domain=domain)
 

@@ -312,7 +312,7 @@ _WATCHLIST_DDL = """
 """
 
 # Tables an existing-ready connection may change: the finite parent's mission, journal, progress,
-# source, observation, quota and cluster records. Vocabulary, taxonomy, runtime configuration,
+# source, observation, quota and cluster records. Vocabulary, runtime configuration,
 # credentials and workspace registrations are never written through this path.
 _EXISTING_READY_WRITABLE = frozenset(
     {
@@ -799,11 +799,34 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
 
         def _sync_initialize() -> None:
             if not self._initialized:
+                self._refuse_legacy_taxonomy()
                 self._create_tables_and_seed()
                 self._refuse_an_unbackfilled_corpus()
                 self._initialized = True
 
         await self._run_write(_sync_initialize)
+
+    def _refuse_legacy_taxonomy(self) -> None:
+        """Refuse before bootstrap opens a writable connection or executes any schema/seed SQL."""
+        if self._mem_conn is not None:
+            conn = self._mem_conn
+        else:
+            path = Path(self._db_path)
+            if not path.is_file():
+                return
+            conn = sqlite3.connect(path.absolute().as_uri() + "?mode=ro", uri=True)
+        try:
+            if conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'industry_taxonomies'"
+            ).fetchone():
+                raise RepositoryException(
+                    "Legacy industry taxonomy requires explicit retirement before startup. "
+                    "From a matching source checkout, use scripts/retire_industry_taxonomy.py project, "
+                    "then apply with the reviewed baseline."
+                )
+        finally:
+            if conn is not self._mem_conn:
+                conn.close()
 
     async def _ensure_progress_schema(self) -> None:
         """Explicit additive setup for authorized writers, never canonical bootstrap or reads."""
@@ -1683,14 +1706,6 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
                 UNIQUE(domain, term)
             );
 
-            CREATE TABLE IF NOT EXISTS industry_taxonomies (
-                id TEXT PRIMARY KEY,
-                industry_code TEXT NOT NULL UNIQUE,
-                industry_name TEXT NOT NULL,
-                keywords TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            );
-
             CREATE TABLE IF NOT EXISTS runtime_configs (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL,
@@ -2102,24 +2117,6 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
                         "INSERT OR IGNORE INTO market_lexicons (id, domain, term, category, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)",
                         (str(uuid4()), dom, term, cat, "system", now_str),
                     )
-
-        # Refreshed on every bootstrap rather than seeded once. Taxonomies are system-owned --
-        # no tool writes them -- so there is no user edit to preserve, and INSERT OR IGNORE meant
-        # a database created before a keyword set was widened kept the narrow one forever and
-        # classified differently from Postgres.
-        tax_path = sql_seed_file("003_market_lexicons.sql")
-        if tax_path:
-            now_str = datetime.now(timezone.utc).isoformat()
-            content = tax_path.read_text(encoding="utf-8")
-            tax_matches = re.findall(r"\('([^']+)',\s*'([^']+)',\s*ARRAY\[([^\]]+)\]\)", content)
-            for code, name, kw_blob in tax_matches:
-                keywords = re.findall(r"'([^']+)'", kw_blob)
-                cur.execute(
-                    "INSERT INTO industry_taxonomies (id, industry_code, industry_name, keywords, created_at) "
-                    "VALUES (?, ?, ?, ?, ?) ON CONFLICT(industry_code) DO UPDATE SET "
-                    "industry_name = excluded.industry_name, keywords = excluded.keywords",
-                    (str(uuid4()), code, name, json.dumps(keywords, ensure_ascii=False), now_str),
-                )
 
         # System-owned vocabulary that replaced hardcoded Python constants. Unlike the seeds
         # above it is re-applied on every bootstrap: no MCP tool writes these domains, so there
@@ -4200,31 +4197,6 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
                     conn.close()
 
         return await self._run_write(_sync_reg)
-
-    async def get_industry_taxonomies(self) -> List[Dict[str, Any]]:
-        await self._ensure_schema()
-
-        def _sync_get():
-            conn = self._get_connection()
-            try:
-                cur = conn.cursor()
-                cur.execute("SELECT industry_code, industry_name, keywords, created_at FROM industry_taxonomies")
-                rows = cur.fetchall()
-                taxonomies = []
-                for r in rows:
-                    kws = json.loads(r["keywords"]) if r["keywords"] else []
-                    taxonomies.append({
-                        "industry_code": r["industry_code"],
-                        "industry_name": r["industry_name"],
-                        "keywords": kws,
-                        "created_at": r["created_at"],
-                    })
-                return taxonomies
-            finally:
-                if self._mem_conn is None:
-                    conn.close()
-
-        return await asyncio.to_thread(_sync_get)
 
     async def get_runtime_config(self, key: str) -> Optional[str]:
         await self._ensure_schema()

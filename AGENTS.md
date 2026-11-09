@@ -106,12 +106,11 @@ Domain knowledge belongs in the database, not in Python. The tables exist precis
 can be extended at runtime without a release:
 
 - `market_lexicons` — domain terms, slang, synonyms (grouped by `domain` + `category`), foreign stopwords, noise blacklist.
-- `industry_taxonomies` — category keywords used to classify clusters.
 - `runtime_configs` — thresholds and connector parameters.
 
 **Do NOT** introduce a Python `list`/`dict`/`set` of domain terms, synonyms, brand names, intent
 keywords, noise phrases, or category keywords inside `src/`. Seed them in `sql/` and read them through
-the existing `register_*` / `get_domain_lexicons` / `get_industry_taxonomies` paths. If a new engine
+the existing `register_*` / `get_domain_lexicons` paths. If a new engine
 needs vocabulary, it grows a `register_*` method and a sync call — it does not grow a constant.
 
 Two narrow exceptions, both of which must carry an inline comment stating why:
@@ -121,8 +120,12 @@ Two narrow exceptions, both of which must carry an inline comment stating why:
 A hardcoded vocabulary is a band-aid even when it makes a test pass: it ships domain knowledge that only
 a code release can change, and it silently diverges from the database other components read.
 
+Cluster categories come only from usable source-provided labels; otherwise they are `unclassified`.
+Do not add an industry taxonomy or keyword-based category inference. Platform-interface labels
+and language-detection vocabulary remain seeded data in `market_lexicons`.
+
 **Store vocabulary in the language as it is written.** Vietnamese terms keep their tone marks, in
-`market_lexicons` and `industry_taxonomies` alike. Stripping tones to "canonicalise" destroys the word:
+`market_lexicons`. Stripping tones to "canonicalise" destroys the word:
 `vàng` (gold) and `vang` (resonant) fold to one string, as do `tóc`/`tốc` and `chính phủ`/`chinh phục`.
 That folding produced a run of wrong categories — a bolero playlist under finance, an esports bracket
 under beauty — and four separate rules were added to compensate before the premise itself was accepted.

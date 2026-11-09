@@ -732,7 +732,7 @@
     "type": "function",
     "function": {
       "name": "list_domain_lexicons",
-      "description": "List active domain vocabularies, slang terms, and industry mappings currently loaded in the system.",
+      "description": "List active domain vocabularies and slang terms currently loaded in the system.",
       "parameters": {
         "additionalProperties": false,
         "properties": {

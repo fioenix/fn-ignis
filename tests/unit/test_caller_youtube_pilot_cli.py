@@ -864,7 +864,7 @@ print(json.dumps({'calls': calls, 'entered': entered}), file=sys.stderr)
 raise SystemExit(code)
 '''
 
-_PRESERVED = ('market_lexicons', 'industry_taxonomies', 'runtime_configs', 'platform_credentials', 'research_workspaces')
+_PRESERVED = ('market_lexicons', 'runtime_configs', 'platform_credentials', 'research_workspaces')
 
 
 def _traced(args, tmp_path):

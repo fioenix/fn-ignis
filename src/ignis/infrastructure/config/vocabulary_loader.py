@@ -172,14 +172,9 @@ class VocabularySynchronizer:
         return vocabulary
 
     async def synchronize_vocabulary(self) -> MarketVocabulary:
-        """Load market_lexicons and industry_taxonomies into every bound engine."""
+        """Load market_lexicons into every bound engine."""
         try:
             vocabulary = await load_market_vocabulary(self._repository)
-            taxonomies = (
-                await self._repository.get_industry_taxonomies()
-                if self._clusterer is not None and hasattr(self._clusterer, "register_taxonomies")
-                else None
-            )
         except Exception as exc:
             raise VocabularySynchronizationError(
                 f"Could not read the persisted vocabulary from the configured database: {exc}"
@@ -225,8 +220,6 @@ class VocabularySynchronizer:
                     engine.register_noise_blacklist(noise_terms)
             if self._clusterer is not None and hasattr(self._clusterer, "register_stopwords"):
                 self._clusterer.register_stopwords(noise_terms)
-        if taxonomies:
-            self._clusterer.register_taxonomies(taxonomies)
         return vocabulary
 
     async def synchronize_self_identities(self) -> List[Any]:

@@ -57,7 +57,12 @@ async def test_handle_list_domain_lexicons():
         resp = json.loads(resp_str)
         assert resp["status"] == "SUCCESS"
         assert resp["total_lexicon_terms"] == 1
-        assert len(resp["industry_taxonomies"]) == 1
+        assert resp == {
+            "status": "SUCCESS", "total_lexicon_terms": 1, "domain_filter": "tech",
+            "lexicons": mock_repo.get_domain_lexicons.return_value,
+        }
+        mock_repo.get_domain_lexicons.assert_awaited_once_with(domain="tech")
+        mock_repo.get_industry_taxonomies.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -87,3 +92,41 @@ async def test_register_machinery_never_teaches_evaluators_market_terms(tmp_path
         assert all(key[0] != domain for key in vocabulary.by_domain_and_category)
     finally:
         await repo.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('domain', [None, 'tech', ''])
+async def test_list_lexicons_never_reads_taxonomy_and_keeps_filter(domain):
+    repository = AsyncMock()
+    repository.get_domain_lexicons.return_value = []
+    repository.get_industry_taxonomies.side_effect = AssertionError('forbidden taxonomy read')
+    with patch('ignis.interfaces.mcp.server.get_components', return_value={'repository': repository}):
+        assert json.loads(await handle_list_domain_lexicons(domain)) == {
+            'status': 'SUCCESS', 'total_lexicon_terms': 0, 'domain_filter': domain, 'lexicons': [],
+        }
+    repository.get_domain_lexicons.assert_awaited_once_with(domain=domain)
+    repository.get_industry_taxonomies.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_list_lexicons_preserves_error_shape():
+    repository = AsyncMock()
+    repository.get_domain_lexicons.side_effect = RuntimeError('synthetic unavailable')
+    with patch('ignis.interfaces.mcp.server.get_components', return_value={'repository': repository}):
+        assert json.loads(await handle_list_domain_lexicons()) == {
+            'status': 'ERROR', 'message': 'synthetic unavailable',
+        }
+
+
+@pytest.mark.asyncio
+async def test_taxonomy_removal_keeps_real_mcp_inventory_and_request_schema():
+    from test_public_mcp_contract import EXPECTED_TOOLS
+    from ignis.interfaces.mcp.server import mcp
+    tools = {tool.name: tool for tool in await mcp.list_tools()}
+    assert len(tools) == 53
+    assert set(tools) == EXPECTED_TOOLS
+    schema = tools['list_domain_lexicons'].parameters
+    assert set(schema['properties']) == {'domain'}
+    assert schema.get('required', []) == []
+    assert schema['properties']['domain']['anyOf'] == [{'type': 'string'}, {'type': 'null'}]
+    assert schema['properties']['domain']['default'] is None

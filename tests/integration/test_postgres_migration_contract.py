@@ -125,6 +125,7 @@ def test_every_migration_runs_on_plain_postgres_and_leaves_the_final_schema(empt
         for row in _all(dsn, "SELECT term FROM market_lexicons WHERE domain = 'tiktok_ui_noise'")
     }
     assert ui_noise and not ui_noise & RETIRED_UI_NOISE, "020 did not run after the earlier files"
+    assert _one(dsn, "SELECT to_regclass('public.industry_taxonomies')")[0] is None
     state = _security_state(dsn)
     assert dict(state["rls"])["market_lexicons"] is True, "006 must still enable RLS"
     assert dict(state["rls"])["platform_credentials"] is True
@@ -133,12 +134,12 @@ def test_every_migration_runs_on_plain_postgres_and_leaves_the_final_schema(empt
 
 def test_re_applying_006_and_the_whole_sequence_changes_nothing(empty_postgres_dsn):
     dsn = empty_postgres_dsn
-    _apply(dsn, *all_postgres_migrations())
+    _apply(dsn, *_through(38))
     settled = _security_state(dsn)
     lexicons = _all(dsn, "SELECT domain, term FROM market_lexicons ORDER BY domain, term")
 
     _apply(dsn, SECURITY_MIGRATION)
-    _apply(dsn, *all_postgres_migrations())
+    _apply(dsn, *_through(38))
 
     assert _security_state(dsn) == settled
     assert _all(dsn, "SELECT domain, term FROM market_lexicons ORDER BY domain, term") == lexicons
@@ -147,9 +148,9 @@ def test_re_applying_006_and_the_whole_sequence_changes_nothing(empty_postgres_d
 # --- B. a Supabase-like server, where the roles exist -------------------------------------------
 
 
-def _apply_with_rpc_probe(dsn: str) -> None:
+def _apply_with_rpc_probe(dsn: str, *, historical=False) -> None:
     """The real sequence, with an RPC function present before 006 as it is on Supabase."""
-    names = all_postgres_migrations()
+    names = _through(38) if historical else all_postgres_migrations()
     split = names.index(SECURITY_MIGRATION)
     _apply(dsn, *names[:split])
     with psycopg.connect(dsn) as conn:
@@ -171,19 +172,11 @@ def _as_role(dsn: str, role: str, query: str):
         return cursor.fetchone() if cursor.description else cursor.rowcount
 
 
-def test_supabase_roles_get_exactly_the_two_read_only_policies(supabase_like_dsn):
+def test_supabase_roles_get_only_the_remaining_lexicon_read_policy(supabase_like_dsn):
     dsn = supabase_like_dsn
     _apply_with_rpc_probe(dsn)
 
     assert _all(dsn, POLICY_QUERY) == [
-        (
-            "industry_taxonomies",
-            "allow_read_industry_taxonomies",
-            "SELECT",
-            "PERMISSIVE",
-            ["anon", "authenticated"],
-            "true",
-        ),
         (
             "market_lexicons",
             "allow_read_market_lexicons",
@@ -214,7 +207,6 @@ def test_supabase_roles_can_read_the_vocabulary_and_nothing_else(supabase_like_d
     )
     for role in SUPABASE_ROLES:
         assert _as_role(dsn, role, "SELECT count(*) FROM market_lexicons")[0] > 0
-        assert _as_role(dsn, role, "SELECT count(*) FROM industry_taxonomies")[0] > 0
         for statement in refused:
             with pytest.raises(errors.InsufficientPrivilege):
                 _as_role(dsn, role, statement)
@@ -249,11 +241,11 @@ def test_a_second_application_neither_duplicates_nor_weakens_supabase_security(
     supabase_like_dsn,
 ):
     dsn = supabase_like_dsn
-    _apply_with_rpc_probe(dsn)
+    _apply_with_rpc_probe(dsn, historical=True)
     settled = _security_state(dsn)
 
     _apply(dsn, SECURITY_MIGRATION)
-    _apply(dsn, *all_postgres_migrations())
+    _apply(dsn, *_through(38))
 
     assert _security_state(dsn) == settled
     assert len(settled["policies"]) == 2
@@ -433,7 +425,7 @@ def test_a_fresh_install_defaults_every_uuid_key_to_the_builtin_generator(empty_
     assert _all(dsn, UUID_DEFAULTS) == [
         (table, "id", "gen_random_uuid()")
         for table in sorted(
-            UUID_DEFAULT_TABLES + BUILTIN_SINCE_003 + BUILTIN_SINCE_023 + BUILTIN_SINCE_025
+            UUID_DEFAULT_TABLES + ("market_lexicons",) + BUILTIN_SINCE_023 + BUILTIN_SINCE_025
             + BUILTIN_SINCE_027
         )
     ]
@@ -1060,3 +1052,34 @@ def test_re_applying_025_and_the_whole_chain_preserves_claim_state(supabase_like
         _security_state(dsn),
         _uuid_state(dsn),
     ) == settled
+
+
+
+@pytest.mark.parametrize('roles', [False, True])
+def test_re_applying_039_sql_preserves_the_retired_populated_store(request, roles):
+    """SC-005: repeat only the pending migration, never recreate retired taxonomy."""
+    from ignis.infrastructure.migration import taxonomy_retirement as retirement
+
+    dsn = request.getfixturevalue('supabase_like_dsn' if roles else 'empty_postgres_dsn')
+    _apply(dsn, *_through(38))
+    with psycopg.connect(dsn) as conn:
+        conn.execute("INSERT INTO topic_clusters (canonical_name, category) VALUES ('legacy', 'beauty')")
+        conn.execute("INSERT INTO trend_signals (platform, raw_title) VALUES ('youtube', 'preserved')")
+    with psycopg.connect(dsn) as conn:
+        conn.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+        baseline = retirement.project(conn, 'postgres', 'sql-retry-fixture')
+    with psycopg.connect(dsn) as conn:
+        conn.execute("SELECT set_config('ignis.taxonomy_projection_digest', %s, true)",
+                     (baseline['projection_digest'],))
+        conn.execute((REPO_SQL / '039_remove_seeded_taxonomy.sql').read_text())
+        assert conn.execute("SELECT current_setting('ignis.taxonomy_changed_count')").fetchone() == ('1',)
+        assert retirement.verify(conn, 'postgres', 'sql-retry-fixture', baseline)['status'] == 'VERIFIED'
+    with psycopg.connect(dsn) as conn:
+        conn.execute("INSERT INTO topic_clusters (canonical_name, category) VALUES ('new source', 'beauty')")
+    with psycopg.connect(dsn) as conn:
+        before_retry = retirement.project(conn, 'postgres', 'sql-retry-fixture')
+    with psycopg.connect(dsn) as conn:
+        conn.execute((REPO_SQL / '039_remove_seeded_taxonomy.sql').read_text())
+        assert conn.execute("SELECT current_setting('ignis.taxonomy_changed_count')").fetchone() == ('0',)
+        assert retirement.project(conn, 'postgres', 'sql-retry-fixture') == before_retry
+        assert conn.execute("SELECT category FROM topic_clusters WHERE canonical_name='new source'").fetchone() == ('beauty',)

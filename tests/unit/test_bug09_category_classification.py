@@ -1,74 +1,55 @@
+"""Only usable source metadata may supply a cluster category."""
+from unittest.mock import AsyncMock
+
 import pytest
 
-from ignis.domain.value_objects import GeoCode, PlatformType
 from ignis.domain.entities import TrendSignal
+from ignis.domain.value_objects import PlatformType
 from ignis.infrastructure.clustering.semantic_clusterer import SemanticClusterer
+from ignis.infrastructure.config.vocabulary_loader import VocabularySynchronizer
 
 
-TAXONOMIES = [
-    {"industry_code": "tech", "industry_name": "Tech & Electronics", "keywords": ["ai", "software", "agent", "app"]},
-    {"industry_code": "beauty", "industry_name": "Beauty & Personal Care", "keywords": ["skincare", "makeup", "serum"]},
-]
-
-
-@pytest.mark.asyncio
-async def test_bug09_category_propagated_from_source_metadata():
-    """A category reported by TikTok Creative Center must survive, not be overwritten with "general"."""
-    clusterer = SemanticClusterer()
-    signals = [
-        TrendSignal(
-            platform=PlatformType.TIKTOK,
-            raw_title="Xu huong lam dep mua he 2026",
-            geo_code=GeoCode.VN,
-            metadata={"category": "Beauty & Personal Care"},
-        )
+async def synchronized_clusterer():
+    repository = AsyncMock()
+    repository.get_domain_lexicons.return_value = []
+    # Synthetic legacy rows expose the old fallback without shipping a keyword corpus.
+    repository.get_industry_taxonomies.return_value = [
+        {'industry_code': 'tech', 'keywords': ['synthetic topic', 'sample pattern']},
     ]
-    clusters = await clusterer.cluster_signals(signals)
-    assert clusters[0].category == "beauty & personal care"
-
-
-@pytest.mark.asyncio
-async def test_bug09_category_inferred_from_registered_taxonomy():
-    """Sources without a category are classified against the industry_taxonomies table."""
     clusterer = SemanticClusterer()
-    clusterer.register_taxonomies(TAXONOMIES)
-    signals = [
-        TrendSignal(platform=PlatformType.YOUTUBE, raw_title="Huong dan dung AI agent cho doanh nghiep", geo_code=GeoCode.VN),
-    ]
-    clusters = await clusterer.cluster_signals(signals)
-    assert clusters[0].category == "tech"
+    await VocabularySynchronizer(repository, clusterer=clusterer).synchronize_vocabulary()
+    return clusterer
 
 
 @pytest.mark.asyncio
-async def test_bug09_unknown_topic_is_unclassified_not_general():
-    clusterer = SemanticClusterer()
-    clusterer.register_taxonomies(TAXONOMIES)
-    signals = [
-        TrendSignal(platform=PlatformType.GOOGLE_TRENDS, raw_title="Ket qua tran dau toi qua", geo_code=GeoCode.VN),
-    ]
-    clusters = await clusterer.cluster_signals(signals)
-    assert clusters[0].category == "unclassified"
+@pytest.mark.parametrize('category', [None, '', 'a', '12', '27.6k', '  ', '1,000'])
+async def test_unusable_source_never_falls_back_to_keywords(category):
+    clusterer = await synchronized_clusterer()
+    signal = TrendSignal(platform=PlatformType.YOUTUBE, raw_title='Synthetic topic sample pattern',
+                         metadata={} if category is None else {'category': category})
+    clusters = await clusterer.cluster_signals([signal])
+    assert len(clusters) == 1
+    assert clusters[0].category == 'unclassified'
+    assert clusters[0].signals == [signal]
 
 
 @pytest.mark.asyncio
-async def test_bug09_sqlite_bootstrap_seeds_industry_taxonomies(tmp_path):
-    from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
-
-    repo = SqliteTrendRepository(db_path=str(tmp_path / "tax.db"))
-    taxonomies = await repo.get_industry_taxonomies()
-    assert taxonomies, "SQLite bootstrap must seed industry_taxonomies"
-    assert all(t["keywords"] for t in taxonomies)
+@pytest.mark.parametrize('source,expected', [(' Beauty ', 'beauty'),
+    ('Beauty & Personal Care', 'beauty & personal care'), ('SOURCE LABEL', 'source label')])
+async def test_usable_source_category_survives_normalized(source, expected):
+    clusterer = await synchronized_clusterer()
+    signal = TrendSignal(platform=PlatformType.YOUTUBE, raw_title='Synthetic topic sample pattern',
+                         metadata={'category': source})
+    assert (await clusterer.cluster_signals([signal]))[0].category == expected
 
 
 @pytest.mark.asyncio
-async def test_bug09_taxonomy_match_is_diacritics_insensitive():
-    """Lexicon entries are stored unaccented ("khoa hoc"); accented titles must still match."""
-    clusterer = SemanticClusterer()
-    clusterer.register_taxonomies([
-        {"industry_code": "education", "industry_name": "Education", "keywords": ["khoa hoc", "dao tao"]},
-    ])
-    signals = [
-        TrendSignal(platform=PlatformType.YOUTUBE, raw_title="Khóa học đào tạo marketing 2026", geo_code=GeoCode.VN),
-    ]
+async def test_existing_source_majority_and_membership_are_preserved():
+    clusterer = await synchronized_clusterer()
+    signals = [TrendSignal(platform=PlatformType.YOUTUBE, raw_title='Synthetic topic sample pattern',
+                           source_url=f'https://example.test/{index}', metadata={'category': category})
+               for index, category in enumerate([' beauty ', 'BEAUTY', 'custom source'])]
     clusters = await clusterer.cluster_signals(signals)
-    assert clusters[0].category == "education"
+    assert len(clusters) == 1
+    assert clusters[0].category == 'beauty'
+    assert {s.source_url for s in clusters[0].signals} == {s.source_url for s in signals}

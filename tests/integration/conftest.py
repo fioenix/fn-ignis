@@ -79,6 +79,8 @@ SCHEMA_MIGRATIONS = (
     "036_threads_attribution.sql",
     "037_threads_action_labels.sql",
     "038_tiktok_attribution_locales.sql",
+    # Spec 021: the ready schema has no seeded taxonomy.
+    "039_remove_seeded_taxonomy.sql",
 )
 
 
