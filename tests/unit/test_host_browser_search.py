@@ -78,7 +78,7 @@ def answer(request, **overrides):
 
 def test_preparation_binds_exact_query_and_refuses_unbounded_or_unauthorized_scope(service):
     request = prepare(service)
-    assert request["queries"][0]["search_url"] == "https://www.tiktok.com/search?q=t%C3%BAi%20%C4%91i%20l%C3%A0m"
+    assert request["queries"][0]["search_url"] == "https://www.tiktok.com/search/video?q=t%C3%BAi%20%C4%91i%20l%C3%A0m"
     assert request["mode"] == "TACTICAL"
     for overrides in [dict(queries=[]), dict(result_limit=0), dict(lifetime_seconds=0), dict(authorized=False),
                       dict(result_limit=101), dict(lifetime_seconds=3601),
@@ -133,7 +133,7 @@ def test_invalid_answer_cannot_be_promoted_or_retried(service, mutation):
     elif mutation == "session":
         payload["session_ref"] = "other-session"
     elif mutation == "page":
-        payload["answers"][0]["page_url"] = "https://www.tiktok.com/search?q=wrong"
+        payload["answers"][0]["page_url"] = "https://www.tiktok.com/search/video?q=wrong"
     elif mutation == "capture":
         payload["answers"][0]["captured_at"] = "2000-01-01T00:00:00Z"
     elif mutation == "extra":
@@ -284,8 +284,8 @@ def test_v3_locale_never_gates_records(locale):
     now = datetime.now(timezone.utc)
     request = HostSearchRequest(request_id="fixture", host_task_ref="task-1", session_ref="chrome-1",
         issued_at=now - timedelta(seconds=1), expires_at=now + timedelta(seconds=60),
-        queries=(HostSearchQuery(query_id="q", query="test", search_url="https://www.tiktok.com/search?q=test", result_limit=3),))
-    payload = answer({"request_id": "fixture", "queries": [{"query_id": "q", "query": "test", "search_url": "https://www.tiktok.com/search?q=test"}]})
+        queries=(HostSearchQuery(query_id="q", query="test", search_url="https://www.tiktok.com/search/video?q=test", result_limit=3),))
+    payload = answer({"request_id": "fixture", "queries": [{"query_id": "q", "query": "test", "search_url": "https://www.tiktok.com/search/video?q=test"}]})
     item = payload["answers"][0]
     item.update(locale=locale, status="HEALTHY", empty_state_visible=False)
     item["records"][0]["excerpt"] = "Caption"
@@ -295,3 +295,24 @@ def test_v3_locale_never_gates_records(locale):
     [outcome] = result["outcomes"]
     assert outcome["status"] == "HEALTHY"
 
+
+@pytest.mark.parametrize("page,accepted", [
+    ("https://www.tiktok.com/search/video?q=test", True),
+    ("https://www.tiktok.com/search?q=test", False),
+])
+def test_t060_tiktok_answers_must_come_from_the_video_results_page(page, accepted):
+    from datetime import timedelta
+    from ignis.domain.host_browser_search import HostSearchRequest, HostSearchQuery
+    from ignis.infrastructure.connectors.host_browser.validator import validate_answer
+    now = datetime.now(timezone.utc)
+    url = "https://www.tiktok.com/search/video?q=test"
+    request = HostSearchRequest(request_id="fixture", host_task_ref="task-1", session_ref="chrome-1",
+        issued_at=now - timedelta(seconds=1), expires_at=now + timedelta(seconds=60),
+        queries=(HostSearchQuery(query_id="q", query="test", search_url=url, result_limit=3),))
+    payload = answer({"request_id": "fixture", "queries": [{"query_id": "q", "query": "test", "search_url": url, "result_limit": 3}]})
+    payload["answers"][0]["page_url"] = page
+    if accepted:
+        assert validate_answer(request, payload, datetime.now(timezone.utc), ("do {author} tạo với",))["outcomes"]
+    else:
+        with pytest.raises(ValueError, match="does not match"):
+            validate_answer(request, payload, datetime.now(timezone.utc), ("do {author} tạo với",))

@@ -10,7 +10,7 @@
       "query": "túi đi làm",
       "query_id": "00000000-0000-0000-0000-000000000002",
       "result_limit": 3,
-      "search_url": "https://www.tiktok.com/search?q=t%C3%BAi%20%C4%91i%20l%C3%A0m"
+      "search_url": "https://www.tiktok.com/search/video?q=t%C3%BAi%20%C4%91i%20l%C3%A0m"
     }
   ],
   "relay_url": "http://127.0.0.1:0/SYNTHETIC-RELAY",

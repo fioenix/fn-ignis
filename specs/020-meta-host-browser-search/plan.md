@@ -255,3 +255,7 @@ credentials, commit, migration application to live stores or release authority.
 T058 adds seed 038 (034/036/037 preserved) and TikTok public-grid-v2. See spec Clarifications,
 research R14 and contracts/tiktok-search.md. Targeted RED/GREEN and final checks are retained under
 `.handoff/t058/`; socket/browser/PostgreSQL proof is reported separately from offline tests.
+
+## T060 execution path (09/11/2026)
+
+Direct path under the Spec Kit depth gate: one seam, known consumers, no migration or dependency, and a small contained contract change in the accepted page path.
