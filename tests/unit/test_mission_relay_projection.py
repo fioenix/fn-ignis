@@ -369,6 +369,57 @@ def test_channel_projection_distinguishes_unknown_from_measured_empty(records):
     ]
 
 
+def test_manifest_surface_does_not_duplicate_a_recorded_channel(records):
+    evidence, run = records
+    evidence = replace(evidence,
+        manifest=replace(evidence.manifest, required_channels=("tiktok_video",), optional_channels=("tiktok",)),
+        outcomes=(replace(evidence.outcomes[0], platform="tiktok", connector_surface="tiktok_video",
+                          status=ChannelHealthStatus.DEGRADED, note="Partial collection"),))
+    payload, _ = _projection("snapshot", evidence, run)
+    assert len(payload["channels"]) == 1
+    assert payload["channels"][0]["status"] == "DEGRADED"
+
+
+@pytest.mark.asyncio
+async def test_runless_snapshot_reads_latest_outcomes_without_selecting_a_run(tmp_path):
+    from uuid import uuid4
+    from ignis.application.ports.mission_relay_port import MissionRelayReadRequest
+    from ignis.application.use_cases.get_mission_relay_snapshot import GetMissionRelaySnapshotUseCase
+    from ignis.infrastructure.persistence.mission_relay_reader import SqliteMissionRelayReader
+    from test_mission_claims import _eligible_mission
+
+    repository, store, mission, _, _ = await _eligible_mission(tmp_path)
+    try:
+        old_run = (await store.list_run_journals(mission.id))[0]
+        old_evidence = await store.load_mission_evidence_snapshot(mission.id)
+        latest_run = replace(old_run, run_id=uuid4(), sequence=2, journal_path=tmp_path / "latest.md",
+                             started_at=old_run.started_at + timedelta(seconds=1))
+        await store.record_run_journal(latest_run)
+        latest_outcomes = [replace(outcome, outcome_id=uuid4(), run_id=latest_run.run_id,
+            status=ChannelHealthStatus.DEGRADED, signals_collected=0, note="Partial collection")
+            for outcome in old_evidence.outcomes]
+        await store.record_probe_outcomes(latest_run.run_id, latest_outcomes)
+        reader = SqliteMissionRelayReader(repository)
+        use_case = GetMissionRelaySnapshotUseCase(reader)
+        request = MissionRelayReadRequest(mission_id=mission.id, run_id=None, page_size=1)
+        implicit = (await use_case.execute(request)).to_payload()
+        explicit = (await use_case.execute(replace(request, run_id=latest_run.run_id))).to_payload()
+        assert implicit["channels"] == explicit["channels"]
+        assert implicit["run_id"] is None
+        assert implicit["high_water"] == explicit["high_water"]
+        assert implicit["claim_gate"]["render_status"] == "WITHHELD"
+        historical = (await use_case.execute(replace(request, run_id=old_run.run_id))).to_payload()
+        assert historical["run_id"] == str(old_run.run_id)
+        assert historical["channels"][0]["status"] == "HEALTHY"
+        # The newest run is authoritative even when it has not measured anything yet.
+        await store.record_run_journal(replace(latest_run, run_id=uuid4(), sequence=3, journal_path=tmp_path / "running.md",
+            status="RUNNING", completed_at=None, started_at=latest_run.started_at + timedelta(seconds=1)))
+        unmeasured = (await use_case.execute(request)).to_payload()
+        assert all(row["status"] is None for row in unmeasured["channels"])
+    finally:
+        await repository.close()
+
+
 def test_projection_pages_without_substituting_page_counts_for_corpus_totals(records):
     """Catch re-counting a page as complete coverage or losing continuation."""
     evidence, run = records

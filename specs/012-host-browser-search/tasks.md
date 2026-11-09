@@ -42,9 +42,9 @@ not substituted for final-source results.
 ## Phase 2: Foundation / Transport Stop Gate
 
 - [x] T003 Resolve and prove deterministic host result relay without model reconstruction; actual relay/readback recorded in .handoff/spec012-live-validation.md and final Spec 013 UAT ledger. Original transport-gate note remains historical.
-- [ ] T004 Write failing typed preparation/bounds tests in tests/unit/test_host_browser_search.py.
+- [ ] T004 Write failing typed preparation/bounds tests in tests/unit/test_host_browser_search.py. **Status 2026-11-09**: over-limit cases added in `test_preparation_binds_exact_query_and_refuses_unbounded_or_unauthorized_scope`; red order unobserved, stays unchecked.
 - [x] T005 Implement strict request/session/query models in src/ignis/domain/host_browser_search.py; current preparation/bounds tests pass. T004's historical RED evidence remains separate.
-- [ ] T006 Write failing actual MCP discovery/serialization smoke in tests/integration/test_host_browser_search_mcp.py.
+- [ ] T006 Write failing actual MCP discovery/serialization smoke in tests/integration/test_host_browser_search_mcp.py. **Status 2026-11-09**: the tests exist (`test_host_search_tools_are_additive_and_require_explicit_browser_scope`, `test_tactical_preparation_and_cancel_need_no_database_component`); red order was never observed, so it stays unchecked per the ledger's exception.
 
 The owner approved the localhost relay amendment. Foundation/tactical operations T004–T013 must exist
 before T003's actual round-trip; no mock can complete that gate. The actual round-trip has since been
@@ -55,7 +55,7 @@ recorded; unchecked tasks below still require individual acceptance reconciliati
 **Independent test**: Actual prepare, authorized Chrome extraction, actual submit and attributable
 observation readback; no Market claim or default collector change.
 
-- [ ] T007 [US1] Write failing preparation/refusal tests in tests/unit/test_host_browser_search.py.
+- [ ] T007 [US1] Write failing preparation/refusal tests in tests/unit/test_host_browser_search.py. **Status 2026-11-09**: the tests exist (`test_preparation_without_attribution_vocabulary_fails_closed`, `test_unsupported_host_source_is_refused_before_transport_or_storage`); red order unobserved, stays unchecked.
 - [x] T008 [US1] Implement tactical preparation and finite tickets in src/ignis/application/use_cases/host_browser_search.py.
 - [x] T009 [P] [US1] Write deterministic public-card extractor tests with visible-grid fixtures in tests/integration/test_host_browser_extractor.py; numeric-only and observed visible image-label regressions have retained RED/GREEN evidence.
 - [x] T010 [US1] Implement packaged extractor in src/ignis/infrastructure/connectors/host_browser/tiktok_search.js; make T009 green. Actual content-bearing installed/browser round-trip and final five-query collection verified.
@@ -80,9 +80,9 @@ close owner tabs. No runtime/browser transport permission expansion.
 **Independent test**: Fresh isolated mission uses complete confirmed scope and normal writer/journal/
 frame/qualification; stale or replayed answers cannot write and unknown window cannot prove absence.
 
-- [ ] T020 [US3] Write current-execution parity tests before extracting the ingestion seam in tests/integration/test_host_browser_mission.py.
+- [ ] T020 [US3] Write current-execution parity tests before extracting the ingestion seam in tests/integration/test_host_browser_mission.py. **Status 2026-11-09**: the test exists (`test_ordinary_execution_and_shared_writer_seam_preserve_ingress_contract`); red order unobserved, stays unchecked.
 - [x] T021 [US3] Extract common ingestion without public signature changes in src/ignis/application/use_cases/execute_mission.py; current ordinary/shared-writer parity is verified on both repositories. T020 chronology is not inferred from these characterization tests.
-- [ ] T022 [US3] Write failing manifest/Brief/frame race, quota/falsifier and writer-conflict tests in tests/integration/test_host_browser_mission.py.
+- [ ] T022 [US3] Write failing manifest/Brief/frame race, quota/falsifier and writer-conflict tests in tests/integration/test_host_browser_mission.py. **Status 2026-11-09**: the tests exist (`test_persisted_scope_changes_reject_host_answer_before_ingress`, `test_market_preparation_preserves_falsifiers_and_refuses_query_budget_overrun`, `test_writer_conflict_terminates_ticket_without_overwriting_evidence`); red order unobserved, stays unchecked.
 - [x] T023 [US3] Implement mission preparation/submit under existing writer in src/ignis/application/use_cases/host_browser_search.py; current scope-race/quota/falsifier/conflict cases pass, without claiming T022 historical RED order.
 - [x] T024 [US3] Verify all-surface outcomes, observation associations and qualification missingness in tests/integration/test_host_browser_mission.py; final dual-backend gate and partial DEGRADED frame/withholding contracts verified.
 - [x] T025 [US3] Run fresh local mission round-trip and frame readback; original sanitized proof in .handoff/spec012-live-validation.md, content-bearing proof in caption validation and final installed 136-observation frame in Spec 013's ledger.

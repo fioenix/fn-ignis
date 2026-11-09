@@ -65,6 +65,23 @@ Take every value from the snapshot. Show:
 
 Every artifact states that it is a point-in-time snapshot taken at `read_at`, not a live view.
 
+## The six evidence responsibilities
+
+Present all six in whatever layout fits, and keep each one identifiable when you group them. For
+each, state what it receives, what it produces, why it matters and what can fail, using the current
+values from the snapshot. When the snapshot does not establish a responsibility, show it as pending
+or unavailable and say which; never drop it. On an Attention mission, qualification and falsification
+normally stay unassessed: show them that way rather than leaving them out.
+
+| Responsibility | Receives | Produces | Why it matters | What can fail | Snapshot fields |
+|---|---|---|---|---|---|
+| Mission authority | The confirmed mission request | The manifest and the allowed scope | Bounds what may be collected and claimed | No manifest, or a run outside its scope | `manifest_digest`, `brief_revision_id`, `surface` |
+| Collection | Approved queries and sources | Channel outcomes and observations | Shows what was asked and what answered | Auth, rate limit, degraded or unrequested channels | `channels`, `collection_state`, `counts` |
+| Provenance | Each collected item | Source link, times and source policy | Lets a reader check where evidence came from | Unknown times or source policy | `source_url`, `published_at`, `captured_at`, `source_policy` |
+| Qualification | Observations and the current frame | A relation and role for each observation | Separates relevant evidence from noise | Unassessed items, unavailable evaluator | `qualification_relation`, `evidence_role`, `qualification_frame_fingerprint` |
+| Falsification | Qualified evidence and contrary probes | Contradicting evidence and named gaps | A claim has to survive what argues against it | No contrary evidence sought or found | `direction`, `claim_gate.gap_report.missing_evidence`, `claim_gate.gap_report.attempted_probes` |
+| Claim permission | The current frame and recorded claims | Permitted claims or a gap report | Decides whether a conclusion may be shown | Stale frame, withheld or unavailable gate | `claim_gate.state`, `claim_gate.render_status`, `claim_gate.reason_code` |
+
 ## Display rules
 
 | State | Show it only when the snapshot says so |
