@@ -153,7 +153,7 @@ def handoff_request():
         "request_id": "request-1", "host_task_ref": "task-1", "session_ref": "chrome-1",
         "extractor_version": "tiktok-public-grid-v3",
         "queries": [{"query_id": "query-1", "query": "túi đi làm", "result_limit": 3,
-                     "search_url": "https://www.tiktok.com/search?q=t%C3%BAi%20%C4%91i%20l%C3%A0m"}],
+                     "search_url": "https://www.tiktok.com/search/video?q=t%C3%BAi%20%C4%91i%20l%C3%A0m"}],
     }
 
 

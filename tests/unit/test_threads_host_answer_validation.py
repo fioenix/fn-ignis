@@ -14,7 +14,7 @@ def request_data(**overrides):
     data = dict(request_id="request", host_task_ref="task", session_ref="session",
                 issued_at="2026-10-28T01:00:00+00:00", expires_at="2026-10-28T01:30:00+00:00",
                 queries=[dict(query_id="q1", query="synthetic query",
-                              search_url="https://www.tiktok.com/search?q=synthetic%20query", result_limit=20)])
+                              search_url="https://www.tiktok.com/search/video?q=synthetic%20query", result_limit=20)])
     data.update(overrides)
     return data
 

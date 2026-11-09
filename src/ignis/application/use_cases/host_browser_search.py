@@ -135,7 +135,7 @@ class HostBrowserSearchService:
             issued_at=now, expires_at=now + timedelta(seconds=lifetime_seconds),
             queries=tuple(HostSearchQuery(query_id=str(uuid4()), query=query,
                           search_url=("https://www.threads.com/search?q=" if source == "threads" else
-                                      "https://www.tiktok.com/search?q=") + quote(query, safe=""),
+                                      "https://www.tiktok.com/search/video?q=") + quote(query, safe=""),
                           result_limit=result_limit) for query in queries),
         )
         if any(not query.query.strip() for query in request.queries):

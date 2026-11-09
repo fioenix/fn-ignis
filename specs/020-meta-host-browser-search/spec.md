@@ -99,6 +99,8 @@ that hides automation, or is reported unavailable when the platform blocks it.
 
 - Q: How is the TikTok poster's name kept out of an answer? → A: Extractor v3 keeps only the text of `search-card-video-caption` and the hashtags that directly follow it in the image label, and drops the record when the caption element is missing, not unique, not rendered, or not the start of the label. It never reads the poster's name. Matching the name against the label was rejected after two review rounds: a name written differently in the label could not be proved removed. Interface language no longer gates records. (owner approved 09/11/2026; basis: measured 28 of 28 tiles.)
 
+- Q: Which TikTok search page does the host-browser connector open? → A: `/search/video?q=`, and answers from any other path are rejected. The general `/search?q=` page showed an error with no tiles on 3 of 7 loads on 09/11/2026, while `/search/video` loaded on 2 of 2. (owner approved 09/11/2026; small sample, research R16.)
+
 ## Context: current state (observed 27/10/2026 on `main` at `8a816fb`)
 
 - The `threads` and `reels` channels collect through Playwright with session cookies captured by

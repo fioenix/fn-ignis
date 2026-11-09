@@ -82,10 +82,11 @@ def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
         raise ValueError("Every approved query requires exactly one answer")
     observations, outcomes = [], []
     origin = "www.threads.com" if request.source == "threads" else "www.tiktok.com"
+    search_path = "/search" if request.source == "threads" else "/search/video"
     for item in answer.answers:
         query = expected[item.query_id]
         page = urlsplit(item.page_url)
-        if (page.scheme != "https" or page.netloc != origin or page.path != "/search" or page.fragment
+        if (page.scheme != "https" or page.netloc != origin or page.path != search_path or page.fragment
                 or parse_qs(page.query, keep_blank_values=True) != {"q": [query.query]} or item.query != query.query):
             raise ValueError("Search page does not match the approved query")
         if request.source == "threads":

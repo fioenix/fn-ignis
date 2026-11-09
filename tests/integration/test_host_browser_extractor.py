@@ -48,7 +48,7 @@ def extract(query="túi đi làm", page_query="túi đi làm", card_text="Túi �
         ] : []
       };
       const fn = vm.runInNewContext('(' + fs.readFileSync(process.argv[1], 'utf8') + ')', {
-        document, location: {href: 'https://www.tiktok.com/search?q=' + encodeURIComponent(process.argv[3])}, URL, Date
+        document, location: {href: 'https://www.tiktok.com/search/video?q=' + encodeURIComponent(process.argv[3])}, URL, Date
       });
       console.log(JSON.stringify(fn({query_id: 'query-1', query: process.argv[2], result_limit: 3})));
     """

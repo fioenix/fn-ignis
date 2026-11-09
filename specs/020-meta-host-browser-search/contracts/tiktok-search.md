@@ -2,7 +2,7 @@
 
 ## Host-browser answer v2
 
-`extractor_version=tiktok-public-grid-v3` replaces v1 and v2 for new tickets/answers. Identity, exact query,
+`extractor_version=tiktok-public-grid-v3` replaces v1 and v2 for new tickets/answers. Searches open `https://www.tiktok.com/search/video?q=<encoded query>`, and an answer from any other path is rejected. Identity, exact query,
 page URL, lifetime, bounds, status/verification and sanitation checks remain. Earlier answers cannot
 satisfy a v3 ticket; historical observations/path facts remain unchanged.
 
