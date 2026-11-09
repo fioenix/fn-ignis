@@ -20,9 +20,9 @@ từ `specs/*/tasks.md` ngày 09/11/2026; từ `v0.9.0` (28/10) `main` chỉ nh�
 
 ### Có task cụ thể, chưa nghiệm thu
 
-- [ ] **Spec 014 — còn T113** bảng nghiệm thu FR/SC. T079 đã rút ngày 09/11/2026 theo quyết định của chủ sở hữu: production
-  không có activation factory cho follow-up, nên `execute_mission_follow_up` vẫn bị từ chối mặc định và FR-023 không có bằng
-  chứng chạy thật. T082, T084, T087, T112 đã đóng 09/11/2026.
+- [ ] **Spec 014 — ledger đã đóng (115 task xong, T079 rút), còn 4 yêu cầu UNMET** trong bảng nghiệm thu T113:
+  FR-001 và FR-003 (artifact chưa trình bày đủ sáu trách nhiệm và giải thích từng giai đoạn), SC-001 (chưa đo người đọc hiểu
+  trong hai phút), SC-014 (không có follow-up thật vì T079 đã rút 09/11/2026; `execute_mission_follow_up` vẫn bị từ chối mặc định).
 - [ ] **TikTok trên profile Finos bị fail-closed:** validator báo locale chưa seed hoặc không hỗ trợ, nên mọi bản ghi bị
   loại. Giả thuyết: giao diện không phải tiếng Việt; chưa đo trực tiếp giá trị `lang`. Cần đo lại, rồi đổi ngôn ngữ giao
   diện của profile hoặc seed locale đó từ chữ thật TikTok hiển thị.
