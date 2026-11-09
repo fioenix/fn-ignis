@@ -381,10 +381,11 @@ def test_two_fresh_compose_inits_run_every_file_and_end_in_the_same_state(tmp_pa
     assert first["readback"] == second["readback"]
 
 
-@pytest.mark.parametrize("control", ("table_identity", "uuid_identity", "rls", "policy"))
+@pytest.mark.parametrize("control", ("table_identity", "uuid_identity", "rls", "policy", "taxonomy"))
 def test_readback_oracle_rejects_identity_substitution_and_access_widening(control):
     """Correct counts cannot hide the wrong schema or a widened access policy."""
     readback = {
+        "taxonomy_absent": "t",
         "later_objects": "13", "ui_noise_terms": "10", "retired_present": "0",
         "rls_market_lexicons": "t", "public_policies": "0", "public_tables": "56",
         "public_table_names": ",".join(EXPECTED_PUBLIC_TABLES),
@@ -401,21 +402,24 @@ def test_readback_oracle_rejects_identity_substitution_and_access_widening(contr
             "mission_progress_events.id", "research_assignments.assignment_id")
     elif control == "rls":
         readback["public_tables_without_rls"] = "1"
-    else:
+    elif control == "policy":
         readback["public_policies"] = "1"
+    else:
+        readback["taxonomy_absent"] = "f"
     with pytest.raises(AssertionError):
         _assert_readback(readback)
 
 
-def _migration_sources():
+def _migration_sources(through=None):
     return [re.sub(r"--[^\n]*", "", (REPO / "sql" / name).read_text(encoding="utf-8"))
-            for name in all_postgres_migrations()]
+            for name in all_postgres_migrations()
+            if through is None or int(name[:3]) <= through]
 
 
-def _declared_public_tables():
+def _declared_public_tables(through=None):
     """Tables the chain's own CREATE/DROP statements leave behind, independent of the oracle."""
     created, dropped = set(), set()
-    for source in _migration_sources():
+    for source in _migration_sources(through):
         created.update(re.findall(
             r"CREATE\s+(?:UNLOGGED\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:public\.)?([a-z_0-9]+)\s*\(",
             source, re.I))
@@ -443,7 +447,8 @@ def _declared_builtin_uuid_columns():
                 r"ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?(?:public\.)?([a-z_0-9]+)"
                 r"\s+ALTER\s+COLUMN\s+([a-z_0-9]+)\s+SET\s+DEFAULT\s+" + generator, source, re.I):
             columns.add(f"{altered.group(1)}.{altered.group(2)}")
-    return columns
+    remaining_tables = _declared_public_tables()
+    return {column for column in columns if column.split(".")[0] in remaining_tables}
 
 
 def test_full_chain_oracle_matches_every_declared_table_and_uuid_default():
@@ -459,6 +464,7 @@ def test_full_chain_oracle_matches_every_declared_table_and_uuid_default():
     assert list(EXPECTED_PUBLIC_TABLES) == tables
     assert list(EXPECTED_UUID_COLUMNS) == columns
     _assert_readback({
+        "taxonomy_absent": "t",
         "later_objects": "13", "ui_noise_terms": "10", "retired_present": "0",
         "rls_market_lexicons": "t", "public_policies": "0", "public_tables": str(len(tables)),
         "public_table_names": ",".join(tables), "public_tables_without_rls": "0",
@@ -468,9 +474,13 @@ def test_full_chain_oracle_matches_every_declared_table_and_uuid_default():
 
 
 def test_threads_vocabulary_endpoint_keeps_the_existing_relation_inventory():
-    """036 adds words only; the fixture chain and table/RLS oracle must not gain a table."""
-    assert all_postgres_migrations()[-1] == NEWEST_MIGRATION == "038_tiktok_attribution_locales.sql"
-    seed = _migration_sources()[-1]
-    assert not re.search(r"\b(CREATE|ALTER|DROP|UPDATE|DELETE)\b", seed, re.I)
-    assert "INSERT INTO market_lexicons" in seed
-    assert _declared_public_tables() == set(EXPECTED_PUBLIC_TABLES)
+    """036-038 add vocabulary only; 039 separately retires the taxonomy relation."""
+    assert all_postgres_migrations()[-1] == NEWEST_MIGRATION == "039_remove_seeded_taxonomy.sql"
+    before = _declared_public_tables(through=35)
+    assert before == set(EXPECTED_PUBLIC_TABLES) | {'industry_taxonomies'}
+    for version in (36, 37, 38):
+        seed = _migration_sources(through=version)[-1]
+        assert not re.search(r"\b(CREATE|ALTER|DROP|UPDATE|DELETE)\b", seed, re.I)
+        assert "INSERT INTO market_lexicons" in seed
+        assert _declared_public_tables(through=version) == before
+    assert _declared_public_tables() == before - {'industry_taxonomies'}

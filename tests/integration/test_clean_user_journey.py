@@ -372,17 +372,43 @@ def test_sql028_table_oracle_neither_captures_schema_nor_omits_research_tables()
     }
 
 
+def _final_table_names(migrations) -> tuple[set[str], set[str]]:
+    """Track created and retired identities in migration order."""
+    present, retired = set(), set()
+    for migration in migrations:
+        source = re.sub(r"--[^\n]*", "", migration.read_text(encoding="utf-8"))
+        created = _created_table_names(source)
+        dropped = {name.strip('"') for name in re.findall(
+            r'\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?'
+            r'(?:(?:"\w+"|\w+)\s*\.\s*)?("\w+"|\w+)', source, re.IGNORECASE,
+        )}
+        present = (present | created) - dropped
+        retired = (retired - created) | dropped
+    return present, retired
+
+
+def test_final_table_inventory_honors_retirement_and_recreation(tmp_path):
+    migrations = [tmp_path / f'{index}.sql' for index in range(3)]
+    migrations[0].write_text('CREATE TABLE kept (id INT); CREATE TABLE retired (id INT);')
+    migrations[1].write_text('DROP TABLE IF EXISTS "public"."retired";')
+    migrations[2].write_text('CREATE TABLE public.retired (id INT);')
+    assert _final_table_names(migrations[:2]) == ({'kept'}, {'retired'})
+    assert _final_table_names(migrations) == ({'kept', 'retired'}, set())
+    present, retired = _final_table_names(sorted((REPO_ROOT / 'sql').glob('*.sql')))
+    assert 'industry_taxonomies' not in present
+    assert retired == {'industry_taxonomies'}
+
+
 def test_bootstrap_applies_tables_from_the_complete_migration_chain(bootstrapped):
     """The schema must reach the end of the chain the tag ships, not the end some doc remembers.
 
-    Collect table additions across the chain: a later constraint-only migration need not create
-    a table. Its behavioral changes are exercised separately, not inferred from table presence.
+    Track additions and retirements across the chain: a constraint-only migration need not
+    create a table. Its behavioral changes are exercised separately, not inferred from table presence.
     """
     import sqlite3
 
     newest = _newest_migration(REPO_ROOT)
-    expected = {table for migration in (REPO_ROOT / "sql").glob("*.sql")
-                for table in _created_table_names(migration.read_text(encoding="utf-8"))}
+    expected, retired = _final_table_names(sorted((REPO_ROOT / "sql").glob("*.sql")))
     assert expected, "The migration chain must define tables"
     assert (bootstrapped["checkout"] / "sql" / newest.name).is_file(), f"the checkout lacks {newest.name}"
 
@@ -392,7 +418,8 @@ def test_bootstrap_applies_tables_from_the_complete_migration_chain(bootstrapped
             for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
         }
     missing = [table for table in expected if table not in tables]
-    assert not missing, f"bootstrap did not create the tables {newest.name} adds: {missing}"
+    assert not missing, f"bootstrap lacks final tables through {newest.name}: {missing}"
+    assert not tables & retired, f"bootstrap recreated retired tables: {sorted(tables & retired)}"
 
 
 def test_bootstrapped_database_retains_partial_outcomes_without_permitting_failed_counts(bootstrapped):
