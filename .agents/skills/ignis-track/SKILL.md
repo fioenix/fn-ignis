@@ -57,7 +57,8 @@ Take every value from the snapshot. Show:
   permitted claims from `claim_gate.claims` with their evidence bindings; otherwise
   `claim_gate.gap_report`; earlier claims from `claim_gate.history` labeled as history;
 - research work and findings from `research` when its `availability` is `AVAILABLE`, otherwise
-  say research is unknown; `SCHEMA_UNAVAILABLE` also means no research was ever recorded in this store. For each finding, show `latest_recorded` (the newest revision) and
+  say research is unknown. `SCHEMA_UNAVAILABLE` can occur in a SQLite store before its first research
+  write; otherwise a missing or incompatible schema leaves research unknown. For each finding, show `latest_recorded` (the newest revision) and
   `current_eligible` (eligible for the current frame) separately; a finding with `text_withheld`
   true is shown as withheld, never as empty text. Label work `activity` with
   `provenance` `HOST_REPORTED` as reported by the host, and items with `recorded_provenance`
