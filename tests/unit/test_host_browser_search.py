@@ -80,7 +80,9 @@ def test_preparation_binds_exact_query_and_refuses_unbounded_or_unauthorized_sco
     request = prepare(service)
     assert request["queries"][0]["search_url"] == "https://www.tiktok.com/search?q=t%C3%BAi%20%C4%91i%20l%C3%A0m"
     assert request["mode"] == "TACTICAL"
-    for overrides in [dict(queries=[]), dict(result_limit=0), dict(lifetime_seconds=0), dict(authorized=False)]:
+    for overrides in [dict(queries=[]), dict(result_limit=0), dict(lifetime_seconds=0), dict(authorized=False),
+                      dict(result_limit=101), dict(lifetime_seconds=3601),
+                      dict(queries=[f"query {index}" for index in range(33)])]:
         with pytest.raises(ValueError):
             prepare(service, **overrides)
 
