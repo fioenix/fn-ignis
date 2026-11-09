@@ -60,10 +60,12 @@ before T002 if any is missing.
   `scripts/wheel_mcp_smoke.py`; code and security review of the diff; dispose of findings with
   evidence before the PR.
   Done 22/10/2026 at the branch head: unit 2810 passed, integration on SQLite 1566 passed (PostgreSQL in CI); ruff and `git diff --check` clean; `uv lock --check` resolves; the built wheel ships `guides/ignis_routine.md` and `scripts/wheel_mcp_smoke.py` holds a session with 52 tools. Self-review of the diff: no tool or signature change, serving reads nothing, no credential or author field in the guide; the routine prompt names the watchlist the person wrote, which is their own text.
-- [ ] T008 After activation, keep one real routine running on one golden-set watchlist for 14
+- [~] T008 After activation, keep one real routine running on one golden-set watchlist for 14
   consecutive days and record the share of days with a completed run (SC-005) in
   `.handoff/spec017/routine-14-days.handoff.md`. The feature may merge before this finishes; the
   measurement is reported separately and sets no target.
+  **Parked 2026-11-09 (owner)**: not measured. The routine is not set up again only to fill this measurement; see
+  Clarifications, Session 2026-11-09.
 
 ## Dependencies
 
