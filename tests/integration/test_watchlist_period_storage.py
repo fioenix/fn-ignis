@@ -8,7 +8,7 @@ first three days. Runs on SQLite and PostgreSQL through `repository_case`.
 import dataclasses
 import json
 from datetime import date, datetime, timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
@@ -16,9 +16,12 @@ import pytest_asyncio
 from ignis.application.ports.research_workspace_port import RunJournal
 from ignis.application.use_cases.create_attention_mission import CreateAttentionMissionUseCase
 from ignis.application.use_cases.create_research_workspace import CreateResearchWorkspaceUseCase
-from ignis.domain.entities import TrendSignal
+from ignis.domain.entities import ResearchMission, TrendSignal
 from ignis.domain.listening_period import LISTENING_TZ
-from ignis.domain.research_workspace import EvidenceQualification, MissionProbeOutcome, compute_frame_fingerprint
+from ignis.domain.research_workspace import (
+    AuthorityBoundary, EvidenceQualification, MissionManifest, MissionOutputType,
+    MissionProbeOutcome, compute_frame_fingerprint,
+)
 from ignis.domain.value_objects import GeoCode, PlatformType
 from ignis.infrastructure.persistence.workspace_repository import WorkspaceRepository
 from ignis.interfaces.mcp import server as mcp_server
@@ -68,10 +71,24 @@ SURFACES = {"youtube": "youtube", "tiktok_video_grid": "tiktok", "reels": "reels
 
 
 async def daily_run(repository, store, workspace, watchlist_id, day, signals=(), failed=(), judged=True, paths=None):
-    """One routine firing: a run, its completed collection on `day`, and judged evidence."""
-    run = await call("handle_start_watchlist_run", watchlist_id=watchlist_id,
-                     allowed_resources=list(SURFACES), authority_boundary=AUTHORITY)
-    mission = await repository.get_mission(run["mission_id"])
+    """Install one historical firing through storage; current starts reduce retired sources."""
+    watchlist = await repository.get_watchlist(UUID(watchlist_id))
+    from ignis.application.use_cases.watchlists import run_keywords
+    mission = ResearchMission(
+        title="Historical watchlist run", keywords=run_keywords(watchlist.current.definition),
+        platforms=[PlatformType(p) for p in SURFACES.values()], geo_code=GeoCode.VN, timeframe="7d",
+        workspace_id=workspace.workspace_id, surface="ATTENTION", status="PENDING",
+    )
+    manifest = MissionManifest(
+        mission_id=mission.id, outcome="Historical period fixture", decision_context=None,
+        required_channels=tuple(SURFACES), optional_channels=(),
+        authority_boundary=AuthorityBoundary(**AUTHORITY), quota_budget={},
+        output_type=MissionOutputType.COLLECTION_FRAME, stop_conditions=("One pass",),
+        analysis_policy="evidence-gated-v1", retention_policy="test-only", created_by="fixture",
+        confirmed_at=at(day),
+    )
+    await store.create_attention_mission_with_manifest(mission, manifest)
+    await repository.record_watchlist_run(mission.id, UUID(watchlist_id), watchlist.current.version)
     journal = RunJournal(run_id=uuid4(), mission_id=mission.id, workspace_id=workspace.workspace_id,
                          journal_path=workspace.journal_dir / f"run-{mission.id}.json", sequence=1,
                          status="STARTED", started_at=at(day, 21))

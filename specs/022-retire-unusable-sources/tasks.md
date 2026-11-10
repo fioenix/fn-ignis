@@ -30,10 +30,10 @@ required/optional resource refused before a connector, quota or writer is touche
 Independent proof: mixed requests create survivor-only runs with retirement reasons, all-retired
 requests create nothing, and old manifests/observations/outcomes/sessions remain readable unchanged.
 
-- [ ] T011 [US2] Add mixed/all-retired and retained-evidence tests in tests/unit/test_watchlist_source_retirement.py and tests/integration/test_source_retirement_storage.py; observe reduction RED.
-- [ ] T012 [US2] Reduce only new run authority resources in src/ignis/application/use_cases/watchlists.py and return explicit retirement entries.
-- [ ] T013 [US2] Document historical purpose of CHANNEL_ORDER/SAMPLED_CHANNELS in src/ignis/domain/watchlist_period.py and SUPPLY_SURFACE_PLATFORMS in src/ignis/domain/research_workspace.py; preserve template/read behavior.
-- [ ] T014 [US2] Verify SQLite preservation and existing period/seen-axis contracts; record PostgreSQL-only checks as pending in .handoff/022-verification.md and commit the seam.
+- [x] T011 [US2] Add mixed/all-retired and retained-evidence tests in tests/unit/test_watchlist_source_retirement.py and tests/integration/test_source_retirement_storage.py; observe reduction RED.
+- [x] T012 [US2] Reduce only new run authority resources in src/ignis/application/use_cases/watchlists.py and return explicit retirement entries.
+- [x] T013 [US2] Document historical purpose of CHANNEL_ORDER/SAMPLED_CHANNELS in src/ignis/domain/watchlist_period.py and SUPPLY_SURFACE_PLATFORMS in src/ignis/domain/research_workspace.py; preserve template/read behavior.
+- [x] T014 [US2] Verify SQLite preservation and existing period/seen-axis contracts; record PostgreSQL-only checks as pending in .handoff/022-verification.md and commit the seam.
 
 ## Phase 5: US3 — Guidance and distribution (P3)
 

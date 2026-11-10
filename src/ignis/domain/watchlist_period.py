@@ -29,8 +29,10 @@ from ignis.domain.watchlist import ListeningPlan, plan_in_effect
 
 # R3: only a collection that measured something, or measured a zero, completes a channel-day.
 COMPLETING_STATUSES = frozenset({"HEALTHY", "EMPTY_NO_DATA"})
+# Historical measurement order, not the active connector catalog. Retired rows stay readable.
 CHANNEL_ORDER = ("google", "youtube", "tiktok", "threads", "reels")
 # Channels whose figures come from the posts Ignis happened to collect, not the whole platform.
+# Preserve the sampling interpretation of historical Reels observations.
 SAMPLED_CHANNELS = frozenset({"tiktok", "threads", "reels"})
 MAX_ITEMS = 3
 MAX_TERMS = 10
