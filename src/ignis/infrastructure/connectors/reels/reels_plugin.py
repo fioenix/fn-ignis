@@ -455,8 +455,7 @@ class ReelsPlugin(IConnectorPlugin):
 
         raise ConnectorAuthenticationException(
             "No valid Instagram credentials available across all auth tiers. "
-            "Tier 1 (Personal / Browser): Run `authenticate_instagram(browser_login=True)`. "
-            "Tier 2 (Enterprise / Developer): Run `authenticate_instagram(auth_code=...)`."
+            "Built-in Reels collection and Instagram sign-in are retired."
         )
 
     async def _graph_get(self, url: str, params: Dict[str, Any]) -> Dict[str, Any]:

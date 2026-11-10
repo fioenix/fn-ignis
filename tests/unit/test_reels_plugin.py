@@ -1,5 +1,6 @@
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
+from ignis.domain.exceptions import ConnectorAuthenticationException
 from ignis.domain.value_objects import GeoCode, IngressScope, PlatformType
 from ignis.infrastructure.connectors.reels.reels_plugin import ReelsPlugin
 
@@ -17,6 +18,18 @@ SAMPLE_REELS_RESPONSE = {
         }
     ]
 }
+
+
+@pytest.mark.asyncio
+async def test_missing_token_does_not_offer_a_removed_authentication_tool(monkeypatch):
+    plugin = ReelsPlugin()
+    monkeypatch.setattr(plugin, "resolve_auth_tier", AsyncMock(return_value=(None, None)))
+
+    with pytest.raises(ConnectorAuthenticationException) as error:
+        await plugin._require_token()
+
+    assert "No valid Instagram credentials" in str(error.value)
+    assert "authenticate_instagram" not in str(error.value)
 
 @pytest.mark.asyncio
 async def test_reels_plugin_fetch():

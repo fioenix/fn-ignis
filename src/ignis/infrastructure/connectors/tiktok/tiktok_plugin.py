@@ -195,8 +195,8 @@ class TikTokPlugin(IConnectorPlugin):
         except Exception as e:
             return f"Could not read the stored TikTok session: {e}"
         return (
-            "No TikTok session is stored, so keyword search returns nothing. Run "
-            "authenticate_tiktok. The public explore grid still works without one."
+            "No TikTok session is stored. Built-in keyword search is retired; "
+            "use user-authorized host-browser search for a bounded request."
         )
 
     async def resolve_ingest_runtime(self) -> IngestRuntime:
