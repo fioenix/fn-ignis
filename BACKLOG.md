@@ -31,7 +31,7 @@ xóa và chưa đọc lại kho đó.
   scheduled task nào, nguyên nhân chưa rõ. Mở lại khi có người cần period view định kỳ cho một quyết định thật, trên watchlist
   của chủ đề đó; lượt dựng đó kiểm luôn việc xóa routine (FR-008) và luồng tạo routine của guide sau 23/10. T006 đã đóng
   ngày 09/11/2026 theo kết quả 23/10.
-- [ ] **Spec 021 — T022, T029**: code đã merge (PR #125, 10/11/2026), PostgreSQL và Compose đã qua CI; chưa áp lên store thật nào. Chủ sở hữu quyết khi nào chạy `scripts/retire_industry_taxonomy.py` trên các store được phép.
+- [x] **Spec 021 — T022, T029** — đóng 10/11/2026: đã retire cả hai store dev (SQLite của caller: 30/85 cluster; PostgreSQL `ignis`: 1/1), verify qua, có sao lưu; server chạy bản mới.
 - [ ] **69 từ miền trong `market_lexicons`** (`sql/003`: fashion, tech, ecommerce, common_vi) vẫn là hardcode kiểu taxonomy, có đi vào quality evaluator và strategic reasoner; cần đo riêng trước khi bỏ.
 - [ ] **Spec 019 (Shopee Affiliate)** — `Draft`, chưa có plan/tasks, chờ ba cổng kiểm tài khoản của chủ sở hữu.
 - [ ] **RES-001** benchmark đối thủ (xem mục "Nghiên cứu riêng"); chưa có ngân sách hay quyền dùng quota có phí.
@@ -83,7 +83,7 @@ Nợ nhỏ giữ nguyên, sửa khi chạm tới, không lên lịch:
   đã chết; mã thừa còn đó, chưa dọn.
 
 Đã chuyển sang parking lot ("Market verdict — đóng băng"): supply score không phân biệt "không có dữ liệu"
-với "không ai xem"; taxonomy chưa phủ vertical ngoài thị trường.
+với "không ai xem"; taxonomy chưa phủ vertical ngoài thị trường (mục này đã đóng ngày 10/11/2026 cùng Spec 021).
 
 ---
 
@@ -347,7 +347,7 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   chứng đã vô hiệu hoá tác hại của chúng, nên không còn gấp. Nợ có sẵn từ seed gốc.
 - [x] **(Đóng 10/11/2026: Spec 021 đã bỏ taxonomy) Taxonomy chưa phủ các vertical ngoài thị trường:** tin tức, thể thao, người nổi tiếng,
   sức khoẻ/wellness vẫn rơi vào `unclassified`. Đây là **câu hỏi phạm vi sản phẩm**, không phải
-  bug: một harness về cơ hội thị trường có nên theo dõi bóng đá không? Chờ Fio quyết.
+  bug: một harness về cơ hội thị trường có nên theo dõi bóng đá không? Không còn cần quyết: Spec 021 đã bỏ taxonomy.
 - [x] **BREAKOUT đã với tới được (cập nhật 10/09/2026):** 5 cluster đạt `cross_platform_score
   >= 80`, và lượt pass đủ 6 connector ngày 09/09 tạo ra 2 cluster trải 4 nền tảng. Trước đó
   tối đa là 3. Ghi chú cũ nói chưa cluster nào đạt đã sai từ khi ingress hai tầng chạy thật.
