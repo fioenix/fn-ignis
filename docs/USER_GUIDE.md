@@ -1,7 +1,7 @@
-# Ignis User Guide — Spec 022
+# Ignis User Guide — v0.10.0
 
-This guide describes the current Spec 022 branch with 41 tools. Source retirement is not yet
-released; published v0.9.0 retains its earlier catalog and source behavior.
+This guide describes v0.10.0 with 41 tools. Published v0.9.0 retains its earlier catalog and
+source behavior.
 The v0.7.0 release is a historical Dual-Track artifact, not this mission-bound branch.
 
 ## 1. Start and inspect
@@ -262,13 +262,13 @@ unchanged, and reading a snapshot confers no execution authority.
 ## 4. Tool and deployment boundaries
 
 The local MCP server exposes **41 tools**. Discover the running server's descriptions for exact
-signatures; removed daily-discovery and unguided-research tools are not part of this branch.
+signatures; removed daily-discovery and unguided-research tools are not part of this release.
 For an existing PostgreSQL database on `035`, apply `036`, `037` and `038` in order as the
 table owner. Without `038`, a MISSION TikTok host-browser search is refused before it starts.
 
-The release workflow builds `ghcr.io/fioenix/fn-ignis:0.9.0` when the `v0.9.0` tag is pushed.
-The v0.8.0 image does not contain the v0.9.0 host-browser contract described here.
-PyPI publication is not advertised. Run the branch's
+The release workflow builds `ghcr.io/fioenix/fn-ignis:0.10.0` when the `v0.10.0` tag is pushed.
+The v0.9.0 image still carries the removed tools and the retired sources.
+PyPI publication is not advertised. Run the checkout's
 `.venv/bin/pytest tests/` (the CI scope; PostgreSQL cases skip unless `IGNIS_TEST_POSTGRES_DSN`
 names a disposable test database) and `uv lock --check` for local checks. The test suite
 replaces credentials with inert values; to also keep the checkout's `.env` out of a run, use the

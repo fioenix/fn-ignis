@@ -1,7 +1,7 @@
-# Hướng dẫn sử dụng Ignis — Spec 022
+# Hướng dẫn sử dụng Ignis — v0.10.0
 
-Tài liệu mô tả nhánh Spec 022 hiện tại với 41 tools. Việc ngừng các nguồn không còn dùng được
-chưa phát hành; bản v0.9.0 đã công bố vẫn có danh mục và cách thu thập trước thay đổi này.
+Tài liệu mô tả bản v0.10.0 với 41 tools. Bản v0.9.0 đã công bố vẫn có danh mục và cách thu
+thập trước thay đổi này.
 Bản v0.7.0 thuộc kiến trúc Dual-Track cũ, không mô tả nhánh theo nhiệm vụ này.
 
 ## 1. Khởi động và kiểm tra
@@ -266,8 +266,8 @@ các tool khám phá hằng ngày và nghiên cứu không giới hạn đã b�
 Với PostgreSQL hiện có ở `035`, áp dụng lần lượt `036`, `037` và `038` bằng tài khoản sở hữu
 bảng. Nếu thiếu `038`, tìm kiếm TikTok qua trình duyệt host ở chế độ MISSION bị từ chối ngay từ đầu.
 
-Workflow phát hành tạo image `ghcr.io/fioenix/fn-ignis:0.9.0` khi tag `v0.9.0` được push.
-Image v0.8.0 không có hợp đồng thu thập qua trình duyệt host của v0.9.0 được mô tả ở đây.
+Workflow phát hành tạo image `ghcr.io/fioenix/fn-ignis:0.10.0` khi tag `v0.10.0` được push.
+Image v0.9.0 vẫn có các tool đã gỡ và các nguồn đã ngừng.
 Chưa công bố cách cài qua PyPI. Chạy `.venv/bin/pytest tests/` (đúng phạm vi CI; các ca kiểm thử PostgreSQL bị bỏ qua nếu
 `IGNIS_TEST_POSTGRES_DSN` không trỏ tới một database kiểm thử dùng một lần) và `uv lock --check`
 để kiểm tra cục bộ. Bộ kiểm thử tự thay credential bằng giá trị trơ; nếu muốn tách hẳn khỏi
