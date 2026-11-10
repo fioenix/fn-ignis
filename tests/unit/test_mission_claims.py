@@ -7,7 +7,7 @@ from uuid import uuid4
 import pytest
 
 from ignis.application.ports.research_workspace_port import RunJournal
-from ignis.application.use_cases.confirm_market_brief import ConfirmMarketBriefUseCase
+from tests.fixtures.historical_missions import store_historical_market
 from ignis.application.use_cases.create_research_workspace import CreateResearchWorkspaceUseCase
 from ignis.application.use_cases.current_evidence_frame import load_current_evidence_frame
 from ignis.application.use_cases.get_mission_claims import GetMissionClaimsUseCase
@@ -85,7 +85,7 @@ async def _eligible_mission(tmp_path, *, contradiction=True, repository=None):
     workspace = await workspace_use_case.confirm(
         await workspace_use_case.propose(host, "Claim controls"), confirmation=True
     )
-    mission, brief = await ConfirmMarketBriefUseCase(repository, store).execute(
+    mission, brief = await store_historical_market(store,
         workspace_id=workspace.workspace_id,
         confirmed_by="requester",
         keywords=["retail stockout"],

@@ -16,10 +16,9 @@ from ignis.application.use_cases.get_mission_analysis import GetMissionAnalysisU
 from ignis.domain.entities import ResearchMission, TrendSignal
 from ignis.domain.value_objects import GeoCode, PlatformType
 from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin
-from ignis.interfaces.mcp.server import handle_extract_customer_pain_points, handle_get_tiktok_video_comments
+from ignis.interfaces.mcp.server import handle_get_tiktok_video_comments
 
 from tests.fixtures.author_identity_sentinels import (
-    SENTINEL_TIKTOK_COMMENTER,
     SENTINEL_TIKTOK_HANDLE,
     SENTINEL_TIKTOK_NICKNAME,
     TIKTOK_HANDLE_URL,
@@ -86,9 +85,6 @@ def test_an_evidence_batch_row_has_an_identity_free_link_and_says_whether_it_can
 
 def _comment_components():
     repository = AsyncMock()
-    repository.get_domain_lexicons.return_value = [
-        {"domain": "customer_inquiry", "term": term, "category": "question"} for term in ("?", "giá")
-    ]
     # A mock keeps no request count, so it sets no daily ceiling.
     repository.reserve_connector_requests = AsyncMock(side_effect=NotImplementedError)
     components = {"registry": MagicMock(), "repository": repository, "tiktok_auth_manager": AsyncMock()}
@@ -96,31 +92,6 @@ def _comment_components():
     return components
 
 
-@pytest.mark.asyncio
-async def test_pain_points_name_no_commenter_or_creator():
-    legacy_payload = [
-        {
-            "video_url": TIKTOK_HANDLE_URL,
-            "video_title": "Áo khoác chống nắng",
-            "author": SENTINEL_TIKTOK_HANDLE,
-            "views": 50000,
-            "total_comments_fetched": 1,
-            "comments": [
-                {"comment_id": "1", "author": SENTINEL_TIKTOK_COMMENTER, "author_id": "id_1",
-                 "text": "Giá bao nhiêu vậy shop?", "likes": 3},
-            ],
-        }
-    ]
-    with patch("ignis.interfaces.mcp.server.get_components", return_value=_comment_components()):
-        with patch.object(TikTokPlugin, "fetch_top_comments_for_keywords", new_callable=AsyncMock) as fetch:
-            fetch.return_value = legacy_payload
-            response = json.loads(await handle_extract_customer_pain_points(keywords=["áo khoác"], geo="VN", max_videos=1))
-
-    assert response["status"] == "SUCCESS"
-    assert [i["inquiry"] for i in response["top_inquiries_and_pain_points"]] == ["Giá bao nhiêu vậy shop?"]
-    assert "author" not in response["top_inquiries_and_pain_points"][0]
-    assert response["videos_breakdown"][0]["video_url"] == SHARE_LINK
-    assert _leaks(response) == []
 
 
 @pytest.mark.asyncio
@@ -135,19 +106,6 @@ async def test_video_comments_echo_an_identity_free_link_and_no_commenter():
     assert _leaks(response) == []
 
 
-@pytest.mark.asyncio
-async def test_top_comments_for_keywords_carry_no_creator():
-    plugin = TikTokPlugin(auth_manager=None)
-    signal = TrendSignal(
-        platform=PlatformType.TIKTOK, raw_title="Áo khoác", metric_value=10.0, source_url=TIKTOK_HANDLE_URL,
-        metadata={"channel": SENTINEL_TIKTOK_HANDLE, "item_id": TIKTOK_ITEM_ID},
-    )
-    with patch.object(TikTokPlugin, "search_signals", new=AsyncMock(return_value=[signal])), \
-            patch.object(TikTokPlugin, "fetch_video_comments", new=AsyncMock(return_value=[])):
-        videos = await plugin.fetch_top_comments_for_keywords(["áo khoác"], max_videos=1)
-
-    assert videos[0]["video_url"] == SHARE_LINK
-    assert "author" not in videos[0]
 
 
 # --- per-response concentration with a key that is never stored (T026) -------------------------
@@ -181,25 +139,6 @@ async def test_video_comments_report_concentration_without_any_author():
     components["repository"].get_or_create_mission_author_key.assert_not_called()
 
 
-@pytest.mark.asyncio
-async def test_pain_points_report_concentration_across_videos():
-    payload = [
-        {"video_url": SHARE_LINK, "video_title": "Áo khoác", "views": 1, "total_comments_fetched": 2,
-         "comments": [
-             {"comment_id": "1", "text": "Giá bao nhiêu?", "likes": 1, "author_assignment": _assigned("c" * 16)},
-             {"comment_id": "2", "text": "Đẹp", "likes": 1, "author_assignment": _assigned("c" * 16)},
-         ]},
-        {"video_url": SHARE_LINK, "video_title": "Áo khoác 2", "views": 1, "total_comments_fetched": 1,
-         "comments": [{"comment_id": "3", "text": "Có size không?", "likes": 1, "author_assignment": _assigned("d" * 16)}]},
-    ]
-    with patch("ignis.interfaces.mcp.server.get_components", return_value=_comment_components()):
-        with patch.object(TikTokPlugin, "fetch_top_comments_for_keywords", new_callable=AsyncMock) as fetch:
-            fetch.return_value = payload
-            response = json.loads(await handle_extract_customer_pain_points(keywords=["áo khoác"], geo="VN", max_videos=2))
-
-    assert isinstance(fetch.await_args.kwargs["author_key"], bytes)
-    assert response["author_concentration"]["distinct_authors"] == 2
-    assert "author_assignment" not in json.dumps(response)
 
 
 @pytest.mark.asyncio
@@ -234,17 +173,12 @@ MENTIONED = "sentinel.mention.linh"
 @pytest.mark.asyncio
 async def test_comment_answers_carry_no_raw_mention():
     comments = [{"comment_id": "1", "text": f"@{MENTIONED} giá bao nhiêu?", "likes": 0}]
-    pain_points = [{"video_url": SHARE_LINK, "video_title": f"Hỏi @{MENTIONED}", "views": 1,
-                    "total_comments_fetched": 1, "comments": [dict(comments[0])]}]
     with patch("ignis.interfaces.mcp.server.get_components", return_value=_comment_components()):
         with patch.object(TikTokPlugin, "fetch_video_comments", new_callable=AsyncMock) as fetch:
             fetch.return_value = [dict(comments[0])]
             video = await handle_get_tiktok_video_comments(video_url=SHARE_LINK, limit=5)
-        with patch.object(TikTokPlugin, "fetch_top_comments_for_keywords", new_callable=AsyncMock) as fetch:
-            fetch.return_value = pain_points
-            pains = await handle_extract_customer_pain_points(keywords=["áo"], geo="VN", max_videos=1)
 
-    assert MENTIONED not in video and MENTIONED not in pains
+    assert MENTIONED not in video
     assert "@[user] giá bao nhiêu?" in video
 
 
@@ -283,14 +217,8 @@ async def test_exception_text_never_carries_a_handle(caplog):
     with patch("ignis.interfaces.mcp.server.get_components", return_value=_comment_components()):
         with patch.object(TikTokPlugin, "fetch_video_comments", new=AsyncMock(side_effect=failing)):
             video = await handle_get_tiktok_video_comments(video_url=SHARE_LINK, limit=5)
-        with patch.object(TikTokPlugin, "fetch_top_comments_for_keywords", new=AsyncMock(side_effect=failing)):
-            pains = await handle_extract_customer_pain_points(keywords=["áo"], geo="VN", max_videos=1)
-    signal = TrendSignal(platform=PlatformType.TIKTOK, raw_title="x", source_url=TIKTOK_HANDLE_URL, metadata={})
-    with patch.object(TikTokPlugin, "search_signals", new=AsyncMock(return_value=[signal])), \
-            patch.object(TikTokPlugin, "fetch_video_comments", new=AsyncMock(side_effect=failing)):
-        await plugin.fetch_top_comments_for_keywords(["áo"], max_videos=1)
 
-    for text in (str(raised.value), video, pains, caplog.text):
+    for text in (str(raised.value), video, caplog.text):
         assert SENTINEL_TIKTOK_HANDLE not in text
 
 

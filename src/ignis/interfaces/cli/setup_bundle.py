@@ -281,11 +281,9 @@ async def _read_back_research_workspaces(repository) -> List[Dict[str, Any]]:
 async def run_synthetic_diagnostics() -> Dict[str, Any]:
     """Run real-time diagnostics to ensure server readiness."""
     from ignis.infrastructure.persistence import create_repository
-    from ignis.infrastructure.connectors.google_trends.rss_plugin import GoogleTrendsRssPlugin
     
     diag: Dict[str, Any] = {
         "database": "unknown",
-        "google_rss": "unknown",
         "lexicon_count": 0,
         "research_workspaces": [],
     }
@@ -314,13 +312,6 @@ async def run_synthetic_diagnostics() -> Dict[str, Any]:
         await repo.close()
     except Exception as e:
         diag["database"] = f"error: {e}"
-
-    try:
-        rss = GoogleTrendsRssPlugin()
-        rss_healthy = await rss.is_healthy()
-        diag["google_rss"] = "healthy" if rss_healthy else "degraded"
-    except Exception as e:
-        diag["google_rss"] = f"error: {e}"
 
     return diag
 

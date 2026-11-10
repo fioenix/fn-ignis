@@ -71,7 +71,7 @@ async def test_threads_prepare_is_the_only_additive_public_parameter_and_no_data
     monkeypatch.setattr(server, "_host_browser_search_service", service)
     try:
         tools = {tool.name: tool for tool in await server.mcp.list_tools()}
-        assert len(tools) == 53
+        assert len(tools) == 41
         assert tools["prepare_host_browser_search"].parameters["properties"]["source"]["default"] == "tiktok"
         for name in ("submit_host_browser_search", "cancel_host_browser_search"):
             assert set(tools[name].parameters["properties"]) == {"request_id", "host_task_ref", "session_ref"}

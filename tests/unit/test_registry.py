@@ -443,16 +443,16 @@ async def test_requirement_preflight_blocks_missing_required_but_marks_missing_o
     registry = _registry(EmptyYouTubePlugin())
 
     requirements = await registry.resolve_execution_requirements(
-        target_platforms=[PlatformType.YOUTUBE, PlatformType.THREADS, PlatformType.REELS],
-        allowed_surfaces=("youtube", "threads", "reels"),
+        target_platforms=[PlatformType.YOUTUBE, PlatformType.THREADS, PlatformType.TIKTOK],
+        allowed_surfaces=("youtube", "threads", "tiktok_video"),
         required_surfaces=("youtube", "threads"),
-        optional_surfaces=("reels",),
+        optional_surfaces=("tiktok_video",),
         keywords=["ai agent"],
     )
 
     assert requirements["resources"] == ("youtube",)
     assert requirements["unavailable_resources"] == ("threads",)
-    assert requirements["not_requested_resources"] == ("reels",)
+    assert requirements["not_requested_resources"] == ("tiktok_video",)
 
 
 @pytest.mark.asyncio

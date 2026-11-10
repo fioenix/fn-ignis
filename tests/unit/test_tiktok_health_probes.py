@@ -187,7 +187,8 @@ async def test_no_stored_session_blocks_keyword_search():
 
     reason = await TikTokPlugin(auth_manager=auth).keyword_search_blocked_reason()
 
-    assert reason and "authenticate_tiktok" in reason
+    assert reason and "No TikTok session is stored" in reason
+    assert "authenticate_tiktok" not in reason
 
 
 @pytest.mark.asyncio

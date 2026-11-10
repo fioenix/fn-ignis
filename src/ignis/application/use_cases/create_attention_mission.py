@@ -20,6 +20,7 @@ from ignis.domain.research_workspace import (
     MissionManifest,
     MissionOutputType,
 )
+from ignis.domain.research_workspace import require_active_resources
 from ignis.domain.value_objects import GeoCode, PlatformType, resolve_platform, timeframe_to_days
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,7 @@ class CreateAttentionMissionUseCase:
         geo: GeoCode = GeoCode.VN,
         timeframe: str = "7d",
     ) -> ResearchMission:
+        require_active_resources(manifest.allowed_resources)
         workspace = await self._store.get_research_workspace(workspace_id)
         if workspace is None:
             # An error rather than an implicit create: a workspace is a durable thing the

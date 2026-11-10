@@ -10,10 +10,7 @@ from ignis.config import reveal_secret, settings
 from ignis.domain.value_objects import GeoCode, Timeframe
 from ignis.domain.youtube_quota import YouTubeQuotaPolicy
 from ignis.infrastructure.clustering.semantic_clusterer import SemanticClusterer
-from ignis.infrastructure.connectors.google_trends.rss_plugin import GoogleTrendsRssPlugin
 from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
-from ignis.infrastructure.connectors.tiktok.creative_center_plugin import TikTokCreativeCenterPlugin
-from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin
 from ignis.infrastructure.connectors.youtube.youtube_plugin import YouTubeDataPlugin
 from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
 from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
@@ -51,9 +48,6 @@ CASE_STUDIES = [
 async def run_all_case_studies():
     repo = create_repository()
     registry = ConnectorPluginRegistry(repository=repo)
-    registry.register(GoogleTrendsRssPlugin())
-    registry.register(TikTokPlugin())
-    registry.register(TikTokCreativeCenterPlugin())
     youtube_api_key = reveal_secret(settings.YOUTUBE_API_KEY)
     if youtube_api_key:
         registry.register(

@@ -63,6 +63,8 @@ from ignis.domain.harness_models import QualificationSummary
 from ignis.domain.exceptions import IgnisDomainException, VocabularySynchronizationError
 from ignis.domain.research_workspace import (
     RESEARCH_ROOT_SEGMENTS,
+    RetiredSurfaceError,
+    require_active_resources,
     REQUIRED_BRIEF_FIELDS,
     AuthorityBoundary,
     IncompleteMarketBriefError,
@@ -82,7 +84,6 @@ from ignis.infrastructure.persistence.workspace_repository import WorkspaceRepos
 
 from ignis.config import reveal_secret, settings
 
-from ignis.domain.source_identity import identity_free_source_url
 from ignis.infrastructure.security.pii_sanitizer import mask_author_identity_text, render_mention_tokens
 from ignis.domain.token_rotation import (
     STATUS_EXPIRED,
@@ -91,7 +92,6 @@ from ignis.domain.token_rotation import (
     plan_staggered_refresh,
 )
 from ignis.domain.value_objects import (
-    GeoCode,
     PlatformType,
     Timeframe,
     resolve_geo,
@@ -100,20 +100,11 @@ from ignis.domain.value_objects import (
 )
 from ignis.domain.youtube_quota import YouTubeQuotaPolicy
 
-from ignis.infrastructure.auth.meta_browser_auth import (
-    InstagramBrowserAuthManager,
-    ThreadsBrowserAuthManager,
-)
-from ignis.infrastructure.auth.meta_oauth import InstagramAuthManager, ThreadsAuthManager
-from ignis.infrastructure.auth.tiktok_auth import TikTokAuthManager
 from ignis.infrastructure.clustering.semantic_clusterer import SemanticClusterer
-from ignis.infrastructure.connectors.google_trends.rss_plugin import GoogleTrendsRssPlugin
-from ignis.infrastructure.connectors.reels.reels_plugin import ReelsPlugin
-from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry, daily_ceiling_refusal
+from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
 from ignis.infrastructure.connectors.threads.threads_plugin import ThreadsPlugin
 from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin
 from ignis.infrastructure.connectors.youtube.youtube_plugin import YouTubeDataPlugin
-from ignis.infrastructure.connectors.tiktok.creative_center_plugin import TikTokCreativeCenterPlugin
 from ignis.infrastructure.harness.language_detector import HeuristicLanguageDetector
 from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
 from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
@@ -710,6 +701,8 @@ async def handle_prepare_host_browser_search(
         return _host_browser_search_service.prepare(
             host_task_ref, session_ref, queries, result_limit, lifetime_seconds, authorized, source=source,
         )
+    except RetiredSurfaceError as exc:
+        return exc.to_payload()
     except AttributionVocabularyMissing:
         return {"status": "BLOCKED", "reason_code": "AUTHOR_ATTRIBUTION_VOCABULARY_MISSING"}
     except (ValueError, InvalidMissionAuthorizationError, InvalidMissionManifestError):
@@ -801,38 +794,16 @@ def _init_components(*, caller_scope=None):
         max_pool_size=caller_scope.configuration.DB_MAX_POOL_SIZE) if caller_scope is not None else create_repository()
     if caller_scope is not None:
         caller_scope.guard_repository(repository)
-    # Platform sessions belong to the installation: authenticate_* saves them in its store, so a
-    # caller root's missions read them there while their own evidence stays in the caller store.
+    # Retained session metadata still supplies the self-content guard. Collection no longer
+    # consumes those sessions; caller evidence remains isolated from the installation store.
     credentials, credentials_owned = _operator_repository() if caller_scope is not None else (None, False)
     if credentials is None:
         credentials = repository
     runtime_config_manager = RuntimeConfigManager(repository=repository)
-    tiktok_auth_manager = TikTokAuthManager(repository=credentials)
-    threads_auth_manager = ThreadsAuthManager(repository=credentials)
-    instagram_auth_manager = InstagramAuthManager(repository=credentials)
-    threads_browser_auth_manager = ThreadsBrowserAuthManager(repository=credentials)
-    instagram_browser_auth_manager = InstagramBrowserAuthManager(repository=credentials)
-    creative_center_plugin = TikTokCreativeCenterPlugin(auth_manager=tiktok_auth_manager)
-
-    google_trends_plugin = GoogleTrendsRssPlugin()
-    tiktok_plugin = TikTokPlugin(auth_manager=tiktok_auth_manager)
-
+    # Public URL comments use no stored login. Host search owns its browser authority.
+    tiktok_plugin = TikTokPlugin()
     registry = ConnectorPluginRegistry(repository=repository)
-    registry.register(google_trends_plugin)
-    registry.register(tiktok_plugin)
-    registry.register(creative_center_plugin)
-    registry.register(
-        ThreadsPlugin(
-            auth_manager=threads_auth_manager,
-            browser_auth_manager=threads_browser_auth_manager,
-        )
-    )
-    registry.register(
-        ReelsPlugin(
-            auth_manager=instagram_auth_manager,
-            browser_auth_manager=instagram_browser_auth_manager,
-        )
-    )
+    registry.register(ThreadsPlugin())
 
     composition_settings = caller_scope.configuration if caller_scope is not None else settings
     if reveal_secret(composition_settings.YOUTUBE_API_KEY):
@@ -865,9 +836,7 @@ def _init_components(*, caller_scope=None):
         quality_evaluator=quality_evaluator,
         strategic_reasoner=strategic_reasoner,
         clusterer=clusterer,
-        google_trends_plugin=google_trends_plugin,
         language_detector=language_detector,
-        tiktok_plugin=tiktok_plugin,
         registry=registry,
         credential_repository=credentials,
     )
@@ -922,14 +891,8 @@ def _init_components(*, caller_scope=None):
         "credential_repository": credentials,
         "owned_credential_repository": credentials if credentials_owned else None,
         "registry": registry,
-        "google_trends_plugin": google_trends_plugin,
         "tiktok_plugin": tiktok_plugin,
         "language_detector": language_detector,
-        "tiktok_auth_manager": tiktok_auth_manager,
-        "threads_auth_manager": threads_auth_manager,
-        "instagram_auth_manager": instagram_auth_manager,
-        "threads_browser_auth_manager": threads_browser_auth_manager,
-        "instagram_browser_auth_manager": instagram_browser_auth_manager,
         "clusterer": clusterer,
         "artifact_builder": artifact_builder,
         "quality_evaluator": quality_evaluator,
@@ -1511,9 +1474,7 @@ def _vocabulary_synchronizer(comp: Dict[str, Any]) -> VocabularySynchronizer:
         quality_evaluator=comp.get("quality_evaluator"),
         strategic_reasoner=comp.get("strategic_reasoner"),
         clusterer=comp.get("clusterer"),
-        google_trends_plugin=comp.get("google_trends_plugin"),
         language_detector=comp.get("language_detector"),
-        tiktok_plugin=comp.get("tiktok_plugin"),
         registry=comp.get("registry"),
     )
 
@@ -1720,12 +1681,8 @@ async def handle_diagnose_system_health() -> str:
     }
 
     for plat, info in health_status.items():
-        if plat == "tiktok" and info["circuit_state"] != "CLOSED":
-            diagnostics["recommendations"].append("TikTok connector throttled or challenged by bot detection. Launch Playwright authentication or refresh cookies.")
-        elif plat == "threads":
+        if plat == "threads":
             diagnostics["recommendations"].append("Threads collection requires an explicitly authorized host-browser search; stored login does not enable internal collection.")
-        elif plat == "reels" and info["circuit_state"] != "CLOSED":
-            diagnostics["recommendations"].append(f"Meta ({plat}) requires authentication or GraphQL token verification. Check credentials.")
         elif plat == "youtube" and not reveal_secret(settings.YOUTUBE_API_KEY):
             diagnostics["recommendations"].append("YOUTUBE_API_KEY is not configured in .env.")
 
@@ -1763,16 +1720,11 @@ async def handle_get_system_logs(level: Optional[str] = None, component: Optiona
 
 # --- Handlers for Platform Authentication ---
 
-async def handle_authenticate_tiktok(headless: bool = False, timeout_seconds: int = 90) -> str:
-    comp = get_components()
-    auth_mgr: TikTokAuthManager = comp["tiktok_auth_manager"]
-    result = await auth_mgr.authenticate_interactive(headless=headless, timeout_seconds=timeout_seconds)
-    return json.dumps(result, ensure_ascii=False, indent=2)
 
 
 async def handle_get_platform_auth_status() -> str:
     comp = get_components()
-    repo: ITrendRepository = comp["repository"]
+    repo: ITrendRepository = comp.get("credential_repository", comp["repository"])
     creds = await repo.list_platform_credentials()
     refresh_plan = plan_staggered_refresh(creds)
     warnings = [e for e in refresh_plan if e["status"] in (STATUS_EXPIRING_SOON, STATUS_EXPIRED)]
@@ -1791,8 +1743,14 @@ async def handle_get_platform_auth_status() -> str:
 
 async def handle_clear_platform_auth(platform: str) -> str:
     comp = get_components()
-    repo: ITrendRepository = comp["repository"]
-    success = await repo.delete_platform_credentials(platform.lower())
+    repo: ITrendRepository = comp.get("credential_repository", comp["repository"])
+    key = platform.lower()
+    base = key.removesuffix("_browser")
+    keys = (base, base + "_browser") if base in ("instagram", "threads") else (key,)
+    success = False
+    for key in keys:
+        deleted = await repo.delete_platform_credentials(key)
+        success = deleted or success
     return json.dumps(
         {
             "platform": platform.lower(),
@@ -1804,189 +1762,22 @@ async def handle_clear_platform_auth(platform: str) -> str:
     )
 
 
-async def _run_meta_auth(
-    oauth_manager: Any,
-    browser_manager: Any,
-    platform_name: str,
-    auth_code: Optional[str],
-    client_id: Optional[str],
-    client_secret: Optional[str],
-    redirect_uri: Optional[str],
-    browser_login: bool,
-    headless: bool,
-    timeout_seconds: int,
-) -> Dict[str, Any]:
-    """
-    Dual-UX entry point: Tier 1 browser session capture, or Tier 2 Graph API OAuth.
-
-    An absent auth_code is treated as an explicit request for the browser flow, so a
-    non-technical user who just calls the tool with no arguments lands on Tier 1.
-    """
-    use_browser = browser_login or not (auth_code and auth_code.strip())
-    try:
-        if use_browser:
-            if not browser_manager:
-                raise RuntimeError(f"No browser auth manager is bound for {platform_name}.")
-            return await browser_manager.authenticate_interactive(
-                headless=headless, timeout_seconds=timeout_seconds
-            )
-        return await oauth_manager.exchange_code_for_token(
-            auth_code=auth_code,
-            client_id=client_id,
-            client_secret=client_secret,
-            redirect_uri=redirect_uri,
-        )
-    except Exception as e:
-        return {
-            "success": False,
-            "platform": platform_name,
-            "tier": "TIER_1_BROWSER_SESSION" if use_browser else "TIER_2_GRAPH_API",
-            "error_type": type(e).__name__,
-            "message": str(e),
-        }
 
 
-async def _meta_auth_status(oauth_manager: Any, browser_manager: Any) -> Dict[str, Any]:
-    """Report stored credential tiers; source collection readiness is a separate capability."""
-    status = await oauth_manager.get_auth_status()
-    browser_status = None
-    if browser_manager:
-        browser_status = await browser_manager.get_auth_status()
-        status["browser_session"] = browser_status
-
-    # Resolve active tier
-    if status.get("authenticated"):
-        status["active_tier"] = "TIER_2_GRAPH_API"
-    elif browser_status and browser_status.get("authenticated"):
-        status["active_tier"] = "TIER_1_BROWSER_SESSION"
-    else:
-        status["active_tier"] = "NONE"
-
-    return status
 
 
-async def handle_authenticate_threads(
-    auth_code: Optional[str] = None,
-    client_id: Optional[str] = None,
-    client_secret: Optional[str] = None,
-    redirect_uri: Optional[str] = None,
-    browser_login: bool = False,
-    headless: bool = False,
-    timeout_seconds: int = 180,
-) -> str:
-    comp = get_components()
-    result = await _run_meta_auth(
-        oauth_manager=comp["threads_auth_manager"],
-        browser_manager=comp.get("threads_browser_auth_manager"),
-        platform_name=ThreadsAuthManager.PLATFORM_NAME,
-        auth_code=auth_code,
-        client_id=client_id,
-        client_secret=client_secret,
-        redirect_uri=redirect_uri,
-        browser_login=browser_login,
-        headless=headless,
-        timeout_seconds=timeout_seconds,
-    )
-    if isinstance(result, dict):
-        result.update(collection_available=False, reason_code="HOST_BROWSER_REQUIRED",
-                      collection_note="Stored Threads credentials are compatibility state; collection requires an authorized host ticket.")
-    return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-async def _probe_threads_keyword_search(comp: Dict[str, Any]) -> Dict[str, Any]:
-    """Compatibility diagnostic; external Threads MCP grants and API probing are deferred."""
-    return {"status": "UNAVAILABLE", "reason_code": "HOST_BROWSER_REQUIRED",
-            "detail": "Internal Threads collection is retired; stored credentials do not enable search.",
-            "recommended_path": 'prepare_host_browser_search(source="threads")'}
 
 
-async def handle_get_threads_auth_status() -> str:
-    comp = get_components()
-    status = await _meta_auth_status(
-        comp["threads_auth_manager"], comp.get("threads_browser_auth_manager")
-    )
-    status.update(collection_available=False, reason_code="HOST_BROWSER_REQUIRED",
-                  collection_note="Stored credentials do not enable internal Threads collection.")
-    return json.dumps(status, ensure_ascii=False, indent=2)
 
 
-async def handle_clear_threads_auth() -> str:
-    comp = get_components()
-    auth_mgr: ThreadsAuthManager = comp["threads_auth_manager"]
-    cleared = await auth_mgr.clear_auth()
-    browser_mgr = comp.get("threads_browser_auth_manager")
-    browser_cleared = await browser_mgr.clear_auth() if browser_mgr else False
-    return json.dumps(
-        {
-            "platform": ThreadsAuthManager.PLATFORM_NAME,
-            "cleared": cleared,
-            "browser_session_cleared": browser_cleared,
-            "message": (
-                "Threads OAuth credentials deleted from local encrypted storage. This does not "
-                "revoke the token at Meta -- remove the app's access in Meta account security "
-                "settings if that is also required."
-            )
-            if cleared else "No stored Threads OAuth credentials found.",
-        },
-        ensure_ascii=False,
-        indent=2,
-    )
 
 
-async def handle_authenticate_instagram(
-    auth_code: Optional[str] = None,
-    client_id: Optional[str] = None,
-    client_secret: Optional[str] = None,
-    redirect_uri: Optional[str] = None,
-    browser_login: bool = False,
-    headless: bool = False,
-    timeout_seconds: int = 180,
-) -> str:
-    comp = get_components()
-    result = await _run_meta_auth(
-        oauth_manager=comp["instagram_auth_manager"],
-        browser_manager=comp.get("instagram_browser_auth_manager"),
-        platform_name=InstagramAuthManager.PLATFORM_NAME,
-        auth_code=auth_code,
-        client_id=client_id,
-        client_secret=client_secret,
-        redirect_uri=redirect_uri,
-        browser_login=browser_login,
-        headless=headless,
-        timeout_seconds=timeout_seconds,
-    )
-    return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-async def handle_get_instagram_auth_status() -> str:
-    comp = get_components()
-    status = await _meta_auth_status(
-        comp["instagram_auth_manager"], comp.get("instagram_browser_auth_manager")
-    )
-    return json.dumps(status, ensure_ascii=False, indent=2)
 
 
-async def handle_clear_instagram_auth() -> str:
-    comp = get_components()
-    auth_mgr: InstagramAuthManager = comp["instagram_auth_manager"]
-    cleared = await auth_mgr.clear_auth()
-    browser_mgr = comp.get("instagram_browser_auth_manager")
-    browser_cleared = await browser_mgr.clear_auth() if browser_mgr else False
-    return json.dumps(
-        {
-            "platform": InstagramAuthManager.PLATFORM_NAME,
-            "cleared": cleared,
-            "browser_session_cleared": browser_cleared,
-            "message": (
-                "Instagram OAuth credentials deleted from local encrypted storage. This does not "
-                "revoke the token at Meta -- remove the app's access in Meta account security "
-                "settings if that is also required."
-            )
-            if cleared else "No stored Instagram OAuth credentials found.",
-        },
-        ensure_ascii=False,
-        indent=2,
-    )
 
 
 # --- Handlers for the Dual-Surface Research Workspace ---
@@ -2125,7 +1916,7 @@ def _mission_manifest_from_payload(
         raise InvalidMissionManifestError("authority_boundary must be an object of booleans.")
     resources = payload.get("allowed_resources") or payload.get("required_channels") or ()
     optional = payload.get("optional_resources") or payload.get("optional_channels") or ()
-    return MissionManifest(
+    manifest = MissionManifest(
         outcome=payload.get("requested_outcome") or payload.get("outcome") or "",
         decision_context=payload.get("decision_context") or decision_context,
         required_channels=tuple(resources),
@@ -2144,6 +1935,9 @@ def _mission_manifest_from_payload(
         created_by=created_by,
         confirmed_at=datetime.now(timezone.utc),
     )
+
+    require_active_resources(manifest.allowed_resources)
+    return manifest
 
 
 async def handle_create_attention_mission(
@@ -2197,6 +1991,8 @@ async def handle_create_attention_mission(
             raise InvalidMissionManifestError(
                 f"Mission {mission.id} was created without a readable persisted manifest."
             )
+    except RetiredSurfaceError as exc:
+        return json.dumps(exc.to_payload(), ensure_ascii=False, indent=2)
     except ValueError:
         return _invalid_timeframe(timeframe)
     except IgnisDomainException as exc:
@@ -2300,6 +2096,8 @@ async def handle_confirm_market_brief(
             raise InvalidMissionManifestError(
                 f"Mission {mission.id} was created without a readable persisted manifest."
             )
+    except RetiredSurfaceError as exc:
+        return json.dumps(exc.to_payload(), ensure_ascii=False, indent=2)
     except IncompleteMarketBriefError as exc:
         return json.dumps(
             {
@@ -2521,6 +2319,8 @@ async def handle_execute_mission_ingress(mission_id: str) -> str:
 
     try:
         result = await comp["execute_mission_use_case"].execute(mission_id=mission.id)
+    except RetiredSurfaceError as exc:
+        return json.dumps(exc.to_payload(), ensure_ascii=False, indent=2)
     except InvalidMissionAuthorizationError as exc:
         return json.dumps(
             {
@@ -3351,12 +3151,9 @@ async def get_current_session_mission(session_id: str) -> str:
     return await handle_get_current_session_mission(session_id=session_id)
 
 
-@mcp.tool(name="authenticate_tiktok", description="Launch 1-Click interactive TikTok login (QR Code / Managed browser) to capture and persist session credentials.")
-async def authenticate_tiktok(headless: bool = False, timeout_seconds: int = 90) -> str:
-    return await handle_authenticate_tiktok(headless=headless, timeout_seconds=timeout_seconds)
 
 
-@mcp.tool(name="get_platform_auth_status", description="Check connection status and active credentials across social platforms (TikTok, Threads, Reels).")
+@mcp.tool(name="get_platform_auth_status", description="Read stored platform credential metadata, including historical sessions. Stored credentials do not establish collection readiness.")
 async def get_platform_auth_status() -> str:
     return await handle_get_platform_auth_status()
 
@@ -3366,161 +3163,33 @@ async def clear_platform_auth(platform: str) -> str:
     return await handle_clear_platform_auth(platform=platform)
 
 
-@mcp.tool(name="authenticate_threads", description="Store Meta Threads browser or OAuth credentials for compatibility. Stored credentials do not enable internal collection; Threads evidence requires an explicitly authorized host-browser search.")
-async def authenticate_threads(
-    auth_code: Optional[str] = None,
-    client_id: Optional[str] = None,
-    client_secret: Optional[str] = None,
-    redirect_uri: Optional[str] = None,
-    browser_login: bool = False,
-    headless: bool = False,
-    timeout_seconds: int = 180,
-) -> str:
-    return await handle_authenticate_threads(
-        auth_code=auth_code,
-        client_id=client_id,
-        client_secret=client_secret,
-        redirect_uri=redirect_uri,
-        browser_login=browser_login,
-        headless=headless,
-        timeout_seconds=timeout_seconds,
-    )
-
-
-@mcp.tool(name="get_threads_auth_status", description="Inspect stored Meta Threads OAuth and browser credential state. Stored login is not collection readiness; internal collection is retired and host-browser authority is separate.")
-async def get_threads_auth_status() -> str:
-    return await handle_get_threads_auth_status()
-
-
-@mcp.tool(name="clear_threads_auth", description="Delete the stored Meta Threads OAuth 2.0 credentials and browser session from local encrypted storage. Does not revoke the token at Meta.")
-async def clear_threads_auth() -> str:
-    return await handle_clear_threads_auth()
-
-
-async def handle_get_threads_trending_topics(geo: str = "VN", limit: int = 15) -> str:
-    """Retained tool signature; retired internal trending has no collection fallback."""
-    return json.dumps({"status": "UNAVAILABLE", "reason_code": "HOST_BROWSER_REQUIRED", "platform": "THREADS",
-        "geo": "VN" if geo.upper() == "VN" else "GLOBAL", "total_topics": 0, "topics": [],
-        "message": "Internal Threads trending collection is retired. Authorized host keyword search is available separately."},
-        ensure_ascii=False, indent=2)
-
-
-@mcp.tool(name="get_threads_trending_topics", description="Retained compatibility tool. Internal Threads trending collection is unavailable (HOST_BROWSER_REQUIRED); no browser, cookie or OAuth fallback runs.")
-async def get_threads_trending_topics(geo: str = "VN", limit: int = 15) -> str:
-    return await handle_get_threads_trending_topics(geo=geo, limit=limit)
-
-
-async def handle_get_threads_search_suggestions(keyword: str, geo: str = "VN", limit: int = 10) -> str:
-    """Retained tool signature; retired internal suggestions have no collection fallback."""
-    return json.dumps({"status": "UNAVAILABLE", "reason_code": "HOST_BROWSER_REQUIRED", "platform": "THREADS",
-        "geo": "VN" if geo.upper() == "VN" else "GLOBAL", "total_suggestions": 0, "suggestions": [],
-        "message": "Internal Threads suggestions collection is retired. Authorized host keyword search is available separately."},
-        ensure_ascii=False, indent=2)
-
-
-@mcp.tool(name="get_threads_search_suggestions", description="Retained compatibility tool. Internal Threads suggestions collection is unavailable (HOST_BROWSER_REQUIRED); no browser, cookie or OAuth fallback runs.")
-async def get_threads_search_suggestions(keyword: str, geo: str = "VN", limit: int = 10) -> str:
-    return await handle_get_threads_search_suggestions(keyword=keyword, geo=geo, limit=limit)
 
 
 
-@mcp.tool(name="authenticate_instagram", description="Connect Instagram with either tier: call with no auth_code (or browser_login=true) for the 1-click browser session capture that needs no Meta Developer App, or pass auth_code to run the Instagram Graph API OAuth 2.0 flow and store a 60-day long-lived token AES-encrypted.")
-async def authenticate_instagram(
-    auth_code: Optional[str] = None,
-    client_id: Optional[str] = None,
-    client_secret: Optional[str] = None,
-    redirect_uri: Optional[str] = None,
-    browser_login: bool = False,
-    headless: bool = False,
-    timeout_seconds: int = 180,
-) -> str:
-    return await handle_authenticate_instagram(
-        auth_code=auth_code,
-        client_id=client_id,
-        client_secret=client_secret,
-        redirect_uri=redirect_uri,
-        browser_login=browser_login,
-        headless=headless,
-        timeout_seconds=timeout_seconds,
-    )
 
 
-@mcp.tool(name="get_instagram_auth_status", description="Inspect the stored Instagram credentials across both tiers: OAuth 2.0 token state, granted scopes, days remaining and refresh due, plus any captured browser session.")
-async def get_instagram_auth_status() -> str:
-    return await handle_get_instagram_auth_status()
 
 
-@mcp.tool(name="clear_instagram_auth", description="Delete the stored Instagram OAuth 2.0 credentials and captured browser session from local encrypted storage. Does not revoke the token at Meta.")
-async def clear_instagram_auth() -> str:
-    return await handle_clear_instagram_auth()
 
 
-async def handle_get_tiktok_search_suggestions(keywords: List[str], geo: str = "VN") -> str:
-    comp = get_components()
-    geo_code = GeoCode.VN if geo.upper() == "VN" else GeoCode.GLOBAL
-    try:
-        suggestions = await comp["registry"].fetch_suggestions_across_all(
-            keywords=keywords,
-            geo=geo_code,
-            target_platforms=[PlatformType.TIKTOK],
-        )
-        return json.dumps(
-            {
-                "status": "SUCCESS",
-                "total_keywords": len(keywords),
-                "data": suggestions,
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-    except Exception as e:
-        logger.error(f"Error fetching TikTok search suggestions: {e}")
-        return json.dumps({"status": "ERROR", "message": str(e)}, ensure_ascii=False)
 
 
-@mcp.tool(name="get_tiktok_search_suggestions", description="Fetch real-time derivative search suggestions / autocomplete queries from TikTok for market demand analysis.")
-async def get_tiktok_search_suggestions(keywords: list[str], geo: str = "VN") -> str:
-    return await handle_get_tiktok_search_suggestions(keywords=keywords, geo=geo)
 
 
-async def handle_get_tiktok_creative_center_trends(geo: str = "VN", period: int = 7, limit: int = 20, industry: Optional[str] = None) -> str:
-    comp = get_components()
-    geo_code = GeoCode.VN if geo.upper() == "VN" else GeoCode.GLOBAL
-    safe_limit = max(1, min(limit, 50))
-    safe_period = 30 if period >= 30 else 7
-
-    # Locate TikTok Creative Center plugin
-    cc_plugin = None
-    for _, plugin in comp["registry"]._plugins.items():
-        if isinstance(plugin, TikTokCreativeCenterPlugin):
-            cc_plugin = plugin
-            break
-
-    if not cc_plugin:
-        cc_plugin = TikTokCreativeCenterPlugin(auth_manager=comp.get("tiktok_auth_manager"))
-
-    try:
-        trends = await cc_plugin.fetch_macro_trends(geo=geo_code, period=safe_period, limit=safe_limit, industry=industry)
-        return json.dumps(
-            {
-                "status": "SUCCESS",
-                "geo_code": geo_code.value,
-                "period_days": safe_period,
-                "industry_filter": industry,
-                "total_hashtags": len(trends),
-                "trending_hashtags": trends,
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-    except Exception as e:
-        logger.error(f"Error fetching TikTok Creative Center trends: {e}")
-        return json.dumps({"status": "ERROR", "message": str(e)}, ensure_ascii=False)
 
 
-@mcp.tool(name="get_tiktok_creative_center_trends", description="Fetch top macro trending hashtags, views, and industry categories from TikTok Creative Center with optional industry filtering (e.g. 'tech', 'software', 'education', 'ecommerce').")
-async def get_tiktok_creative_center_trends(geo: str = "VN", period: int = 7, limit: int = 20, industry: Optional[str] = None) -> str:
-    return await handle_get_tiktok_creative_center_trends(geo=geo, period=period, limit=limit, industry=industry)
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 def _identity_free_text(value: Any) -> Any:
@@ -3550,14 +3219,7 @@ def _response_concentration(comments: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 async def handle_get_tiktok_video_comments(video_url: str, limit: int = 30) -> str:
     comp = get_components()
-    tiktok_plugin = None
-    for _, plugin in comp["registry"]._plugins.items():
-        if isinstance(plugin, TikTokPlugin):
-            tiktok_plugin = plugin
-            break
-
-    if not tiktok_plugin:
-        tiktok_plugin = TikTokPlugin(auth_manager=comp.get("tiktok_auth_manager"))
+    tiktok_plugin = comp.get("tiktok_plugin") or TikTokPlugin()
 
     # The caller's link may name the creator; the response and the log name the video only.
     video_link = None
@@ -3587,113 +3249,6 @@ async def handle_get_tiktok_video_comments(video_url: str, limit: int = 30) -> s
 @mcp.tool(name="get_tiktok_video_comments", description="Fetch real-time public comments, inquiries, and discussions under a specific TikTok video URL.")
 async def get_tiktok_video_comments(video_url: str, limit: int = 30) -> str:
     return await handle_get_tiktok_video_comments(video_url=video_url, limit=limit)
-
-
-async def handle_extract_customer_pain_points(
-    keywords: List[str],
-    geo: str = "VN",
-    max_videos: int = 3,
-    inquiry_patterns: Optional[List[str]] = None,
-) -> str:
-    comp = get_components()
-    geo_code = GeoCode(geo.upper())
-    tiktok_plugin = None
-    for _, plugin in comp["registry"]._plugins.items():
-        if isinstance(plugin, TikTokPlugin):
-            tiktok_plugin = plugin
-            break
-
-    if not tiktok_plugin:
-        tiktok_plugin = TikTokPlugin(auth_manager=comp.get("tiktok_auth_manager"))
-
-    # This search goes to TikTok directly, not through the registry, so it reserves itself.
-    refusal = await daily_ceiling_refusal(comp["repository"], tiktok_plugin, len(keywords))
-    if refusal is not None:
-        return json.dumps({"status": "RATE_LIMITED", "reason": "daily_ceiling", "message": refusal},
-                          ensure_ascii=False)
-
-    try:
-        data = await tiktok_plugin.fetch_top_comments_for_keywords(
-            keywords=keywords,
-            geo=geo_code,
-            max_videos=max_videos,
-            limit_per_video=20,
-            author_key=_ephemeral_author_key(),
-        )
-        concentration = _response_concentration(
-            [comment for video in data for comment in video.get("comments", [])]
-        )
-        
-        # The caller may pass its own triggers; otherwise the persisted baseline is used. The
-        # same vocabulary drives the autonomous discovery pass, so both read one lexicon domain.
-        if inquiry_patterns:
-            active_triggers = [t.lower() for t in inquiry_patterns]
-        else:
-            rows = await comp["repository"].get_domain_lexicons(domain="customer_inquiry")
-            active_triggers = [
-                str(row["term"]).lower() for row in (rows or []) if row.get("term")
-            ]
-            if not active_triggers:
-                logger.warning(
-                    "No customer inquiry markers registered, so no comment can be recognised as "
-                    "a question. Check the customer_inquiry domain in market_lexicons."
-                )
-
-        # Extract inquiries and top engaged comments
-        all_comments = []
-        inquiries = []
-        for v in data:
-            for c in v.get("comments", []):
-                txt = c.get("text", "")
-                all_comments.append(txt)
-                if any(q in txt.lower() for q in active_triggers):
-                    inquiries.append({
-                        "video_title": mask_author_identity_text(v.get("video_title")),
-                        "inquiry": mask_author_identity_text(txt),
-                        "likes": c.get("likes", 0),
-                    })
-
-        return json.dumps(
-            {
-                "status": "SUCCESS",
-                "keywords": keywords,
-                "geo": geo_code.value,
-                "total_videos_analyzed": len(data),
-                "total_comments_extracted": len(all_comments),
-                "top_inquiries_and_pain_points": inquiries[:20],
-                "author_concentration": concentration,
-                # No creator or commenter, and no handle in a link (Spec 015).
-                "videos_breakdown": [
-                    {
-                        **_identity_free_text(strip_author_identity(video)),
-                        "video_url": identity_free_source_url("tiktok", video.get("video_url"), {}),
-                    }
-                    for video in data
-                ],
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-    except Exception as e:
-        message = mask_author_identity_text(str(e))
-        logger.error("Error extracting customer pain points from TikTok: %s", message)
-        return json.dumps({"status": "ERROR", "message": message}, ensure_ascii=False)
-
-
-@mcp.tool(name="extract_customer_pain_points", description="Extract voice of customer, frequent inquiries, and unmet needs across top TikTok videos for specific market keywords and target geography.")
-async def extract_customer_pain_points(
-    keywords: list[str],
-    geo: str = "VN",
-    max_videos: int = 3,
-    inquiry_patterns: Optional[list[str]] = None,
-) -> str:
-    return await handle_extract_customer_pain_points(
-        keywords=keywords,
-        geo=geo,
-        max_videos=max_videos,
-        inquiry_patterns=inquiry_patterns,
-    )
-
 
 
 async def handle_register_domain_lexicon(
@@ -3915,10 +3470,7 @@ async def handle_verify_connectors_health() -> str:
     Run active diagnostic probes across all multi-platform ingress connectors and infrastructure:
     - Database Read & Write Probe (Connection pool, active lexicons, sentinel cluster upsert)
     - YouTube Data API v3 (API Key & Quota verification)
-    - Google Trends RSS (Feed responsiveness & parsing)
-    - TikTok Connectors & Playwright (Browser engine & optional proxy routing)
     - Threads (host-required availability; no internal network probe)
-    - Instagram Reels (Active synthetic HTTP probe & session expiry check)
     - Real-time Alert generation for consecutive failures, expiring credentials, and parse-empty probes.
     """
     comp = get_components()
@@ -4167,9 +3719,16 @@ async def handle_verify_connectors_health() -> str:
             }
             diagnostics["overall_status"] = "DEGRADED"
 
-    # 3. Credential expiry & staggered refresh planning across every stored Tier-1 session
+    # 3. Only sessions consumed by active internal collectors can require refresh.
     try:
-        refresh_plan = plan_staggered_refresh(await repo.list_platform_credentials(), now=now)
+        active_platforms = {
+            plugin.platform.value for plugin in registry.list_plugins()
+            if getattr(type(plugin), "host_collection_required", False) is not True
+        }
+        credentials = await repo.list_platform_credentials()
+        refresh_plan = plan_staggered_refresh(
+            [entry for entry in credentials if entry.get("platform") in active_platforms], now=now
+        )
         diagnostics["credential_refresh_plan"] = refresh_plan
         expiry_alerts = build_expiry_alerts(refresh_plan, now=now)
         alerts.extend(expiry_alerts)
@@ -4319,8 +3878,9 @@ def prompt_voice_of_customer_audit(keywords: str = "Chatbot AI") -> str:
     """Frame a bounded source-specific customer-voice probe."""
     return f"""
 The requester wants customer-voice evidence about '{keywords}'. Confirm the source surface,
-geography, time window, sampling cap, and stop condition. Use an authorized atomic comments
-or pain-point tool, report provenance and unavailable states, and distinguish observations
+geography, time window, sampling cap, and stop condition. Use get_tiktok_video_comments only
+with a known video URL and explicit task authority. Report provenance and unavailable states,
+and distinguish observations
 from inference. Do not claim market prevalence or a strategic verdict from this probe alone.
 """
 

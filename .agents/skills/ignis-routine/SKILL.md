@@ -48,12 +48,12 @@ routine; the person sees, pauses and removes it in the host.
    - `youtube` reads its key from the workspace's own Ignis configuration, `.fnignis/.env` in the
      repository folder, not from the server's. Check that the file sets the YouTube key by looking
      for the variable name only; never print a value.
-   - `reels` and `tiktok_video_grid` need a saved sign-in: check `get_platform_auth_status`.
-     Leave `threads` out of a routine: it collects only through host-browser search (the
-     host-browser search section of the `ignis-collect` skill), which this routine prompt does
-     not run, and `execute_mission_ingress` refuses a mission whose channel it cannot collect.
-   - Only a channel that searches keywords belongs in a routine. `tiktok_creative_center` has no
-     keyword search, and `google` measures no keyword, so it would report `DEGRADED` every day.
+   - This routine runs `youtube` only. TikTok (`tiktok_video`) and `threads` require the
+     separately authorized host-browser flow; this routine prompt does not execute that flow.
+   - Historical routine prompts may still name `google`, `tiktok_creative_center`,
+     `tiktok_video_grid` or `reels`. `start_watchlist_run` reports each removed resource with
+     `SURFACE_RETIRED`, uses the remaining resources, and blocks if none remain. Never translate
+     retirement into a measured zero, retry a retired source or rewrite old observations.
    - If that configuration file changes while a session is open, the session's Ignis server answers
      `CALLER_CONFIG_CHANGED` until it restarts.
 6. Show the person, and wait for the person to confirm:
@@ -107,7 +107,8 @@ for at setup.
 Run the Ignis watchlist "{watchlist_name}" (watchlist id {watchlist_id}) once, then stop.
 
 1. Call start_watchlist_run with watchlist_id {watchlist_id}, allowed_resources {allowed_resources}
-   and authority_boundary {authority_boundary}. It returns a mission id and the version it ran.
+   and authority_boundary {authority_boundary}. Report any retired_resources with their
+   SURFACE_RETIRED reason. If BLOCKED, stop; otherwise use the returned mission id and version.
 2. Collect that mission with execute_mission_ingress, as many passes as its status asks for, and
    stop when the mission reaches a terminal state. A channel that answers RATE_LIMITED with
    daily_ceiling has reached its daily request ceiling: leave it for today.

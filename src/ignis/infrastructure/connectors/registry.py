@@ -19,6 +19,7 @@ from ignis.domain.harness_models import ChannelHealthStatus
 from ignis.domain.listening_period import LISTENING_TZ
 from ignis.domain.self_content import SelfIdentity, partition_self_authored
 from ignis.domain.entities import TrendSignal
+from ignis.domain.research_workspace import require_active_resources
 from ignis.domain.value_objects import (
     GeoCode,
     IngestRuntime,
@@ -234,6 +235,7 @@ class ConnectorPluginRegistry:
         keywords: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Resolve policy requirements without opening a connector session or spending quota."""
+        require_active_resources(allowed_surfaces)
         allowed = set(allowed_surfaces)
         selected = [
             plugin

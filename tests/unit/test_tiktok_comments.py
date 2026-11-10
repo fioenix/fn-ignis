@@ -2,9 +2,6 @@ import pytest
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin
-from ignis.interfaces.mcp.server import (
-    handle_extract_customer_pain_points,
-)
 
 
 @pytest.mark.asyncio
@@ -80,59 +77,6 @@ async def test_comment_scraping_logs_carry_no_handle(caplog):
 
 
 
-@pytest.mark.asyncio
-async def test_handle_extract_customer_pain_points():
-    # The baseline inquiry triggers come from the customer_inquiry lexicon domain. Whether the
-    # seed actually carries them is covered by test_vocabulary_loader; here the point is that
-    # the tool reads them from the repository instead of a list compiled into the module.
-    repository = AsyncMock()
-    repository.get_domain_lexicons.return_value = [
-        {"domain": "customer_inquiry", "term": term, "category": "question"}
-        for term in ("?", "how", "price", "như thế nào", "giá")
-    ]
-    # A mock keeps no request count, so it sets no daily ceiling.
-    repository.reserve_connector_requests = AsyncMock(side_effect=NotImplementedError)
-    mock_comp = {
-        "registry": MagicMock(),
-        "repository": repository,
-        "tiktok_auth_manager": AsyncMock(),
-    }
-    mock_comp["registry"]._plugins = {}
-
-    with patch("ignis.interfaces.mcp.server.get_components", return_value=mock_comp):
-        with patch.object(TikTokPlugin, "fetch_top_comments_for_keywords", new_callable=AsyncMock) as mock_fetch:
-            mock_fetch.return_value = [
-                {
-                    "video_url": "https://www.tiktok.com/@author/video/7666063173253991687",
-                    "video_title": "Hướng dẫn xây dựng AI Agent",
-                    "author": "TechReview",
-                    "views": 50000,
-                    "total_comments_fetched": 2,
-                    "comments": [
-                        {
-                            "comment_id": "1",
-                            "author": "UserB",
-                            "text": "Cài n8n trên server như thế nào vậy anh?",
-                            "likes": 3,
-                        },
-                        {
-                            "comment_id": "2",
-                            "author": "UserC",
-                            "text": "Video rất hay, cảm ơn bạn",
-                            "likes": 1,
-                        },
-                    ],
-                }
-            ]
-
-            resp_json = await handle_extract_customer_pain_points(keywords=["ai agent"], geo="VN", max_videos=1)
-            resp = json.loads(resp_json)
-            assert resp["status"] == "SUCCESS"
-            assert resp["total_videos_analyzed"] == 1
-            assert resp["total_comments_extracted"] == 2
-            assert len(resp["top_inquiries_and_pain_points"]) == 1
-            assert "như thế nào" in resp["top_inquiries_and_pain_points"][0]["inquiry"]
-            repository.get_domain_lexicons.assert_awaited_with(domain="customer_inquiry")
 
 
 @pytest.mark.asyncio
@@ -179,8 +123,7 @@ async def test_t058_comments_refuse_redirect_before_api_evaluation():
 async def test_t058_comments_response_provenance_uses_validated_id():
     from ignis.interfaces.mcp.server import handle_get_tiktok_video_comments
     plugin = TikTokPlugin()
-    comp = {"registry": MagicMock()}
-    comp["registry"]._plugins = {"tiktok": plugin}
+    comp = {"tiktok_plugin": plugin}
     with patch("ignis.interfaces.mcp.server.get_components", return_value=comp), patch.object(plugin, "fetch_video_comments", AsyncMock(return_value=[])):
         result = json.loads(await handle_get_tiktok_video_comments("https://www.tiktok.com/video/123?track=1#fragment"))
     assert result["status"] == "SUCCESS"
@@ -195,8 +138,7 @@ async def test_t058_comments_api_failure_returns_error(api_data):
     from ignis.interfaces.mcp.server import handle_get_tiktok_video_comments
 
     plugin = TikTokPlugin()
-    comp = {"registry": MagicMock()}
-    comp["registry"]._plugins = {"tiktok": plugin}
+    comp = {"tiktok_plugin": plugin}
     with patch("ignis.interfaces.mcp.server.get_components", return_value=comp), patch("playwright.async_api.async_playwright") as manager:
         engine = manager.return_value.__aenter__.return_value
         browser = engine.chromium.launch.return_value

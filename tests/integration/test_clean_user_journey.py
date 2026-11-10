@@ -10,10 +10,8 @@ SQLite database or MCP client configuration from the developer's machine is visi
 copy is made from `git ls-files`, which is the working-tree content of tracked files only --
 ignored artifacts are exactly what must not be inherited.
 
-Live connectors are not contacted for evidence here and no YouTube quota is consumed. Bootstrap's
-own diagnostics do make one unauthenticated Google Trends RSS reachability probe, which needs no
-credentials and no quota; nothing in this module asserts on its result, so the journey passes
-offline as well.
+Live connectors are not contacted for evidence here and no YouTube quota is consumed.
+Spec 022 removes the setup RSS reachability probe; setup diagnostics are local only.
 """
 
 import json
@@ -28,15 +26,10 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-EXPECTED_TOOL_COUNT = 53
+EXPECTED_TOOL_COUNT = 41
 EXPECTED_TOOL_NAMES = {
-    "authenticate_instagram",
-    "authenticate_threads",
-    "authenticate_tiktok",
     "cancel_host_browser_search",
-    "clear_instagram_auth",
     "clear_platform_auth",
-    "clear_threads_auth",
     "confirm_market_brief",
     "confirm_research_workspace",
     "create_attention_mission",
@@ -45,10 +38,8 @@ EXPECTED_TOOL_NAMES = {
     "evaluate_mission_quality",
     "execute_mission_follow_up",
     "execute_mission_ingress",
-    "extract_customer_pain_points",
     "generate_mission_artifact",
     "get_current_session_mission",
-    "get_instagram_auth_status",
     "get_mission_analysis",
     "get_mission_claims",
     "get_mission_evidence_qualification_batch",
@@ -56,11 +47,6 @@ EXPECTED_TOOL_NAMES = {
     "get_platform_auth_status",
     "get_runtime_config",
     "get_system_logs",
-    "get_threads_auth_status",
-    "get_threads_search_suggestions",
-    "get_threads_trending_topics",
-    "get_tiktok_creative_center_trends",
-    "get_tiktok_search_suggestions",
     "get_tiktok_video_comments",
     "get_watchlist",
     "list_domain_lexicons",

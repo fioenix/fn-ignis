@@ -5,10 +5,9 @@ inspectable evidence from accessible social sources, then challenge a market hyp
 acting on it. Its two capabilities are independent: source collection can end with an evidence
 frame, while Market analysis can end with a Gap Report rather than a forced verdict.
 
-**Release boundary:** v0.9.0 adds Threads and TikTok host-browser search, Reels without
-automation-hiding flags and migrations through `038`, retaining watchlists and goal-driven period
-views. The v0.7.0 source and image are historical Dual-Track artifacts; they do not expose the 53-tool
-mission-bound surface described here.
+**Branch boundary:** Spec 022 exposes 41 tools and retires unusable source collection. This
+change is not released. Published v0.9.0 includes the earlier host-browser contract and migrations
+through `038`; v0.7.0 is a historical Dual-Track artifact, not the mission-bound surface here.
 
 ## Product contract
 
@@ -81,7 +80,7 @@ Committed report templates live only in `src/ignis/infrastructure/templates/html
 
 ## Agent capabilities
 
-The current MCP server exposes **53 tools**. Use the server's live tool descriptions as the
+The current MCP server exposes **41 tools**. Use the server's live tool descriptions as the
 signature authority. Representative operations:
 
 - `create_attention_mission` and `confirm_market_brief` establish a bounded question and
@@ -104,8 +103,7 @@ signature authority. Representative operations:
   only with `--apply`, keeping observations still cited by a stored claim or research work.
   With the `ignis_routine` guide your agent can set up a daily Claude Code Desktop scheduled task
   that runs one watchlist; Ignis itself still schedules nothing.
-- Atomic source tools such as `get_tiktok_search_suggestions` and
-  `get_tiktok_video_comments` can answer source-specific questions without a Market verdict.
+- The atomic source tool `get_tiktok_video_comments` can answer source-specific questions without a Market verdict.
 - Opt-in `prepare_host_browser_search`, `submit_host_browser_search` and
   `cancel_host_browser_search` collect bounded public TikTok grids and Threads Top results through an authorized host
   browser. See [host-browser scope and limits](docs/USER_GUIDE.md#explicit-host-browser-tiktok-and-threads-search).
@@ -135,16 +133,16 @@ diagrams of this branch.
 ### Threads host collection and period paths
 
 `prepare_host_browser_search` accepts optional `source="threads"`; omitting it keeps
-`source="tiktok"`. Submit and cancel keep their three ID parameters. There are still 53 tools.
-Threads collection uses only the authorized host browser. Internal Threads Playwright collection
-is removed; the retained suggestions/trending tools return `UNAVAILABLE/HOST_BROWSER_REQUIRED`.
-Stored Threads credentials do not establish collection readiness. No API grant probe or API path
-is activated, and failure never selects a fallback collector.
+`source="tiktok"`. Submit and cancel keep their three ID parameters. There are still 41 tools.
+Threads collection uses only the authorized host browser. Internal Playwright collection and
+placeholder suggestion/trending tools have been removed. Stored Threads credentials do not
+establish collection readiness. No API grant probe or API fallback is activated.
 
-Reels stays on Playwright without automation-hiding flags. A login wall, checkpoint, challenge,
-unparseable response or missing search envelope is unavailable with a reason, never a measured
-zero. A verified, well-formed empty search envelope may return `EMPTY_NO_DATA` for the executed
-keyword. This does not establish coverage for other keywords or a known time window.
+Spec 022 retires Google Trends RSS, Creative Center, TikTok headless keyword search and Reels
+collection. Existing observations, channel outcomes and sessions remain readable and unchanged.
+A mission naming a retired surface returns `BLOCKED / SURFACE_RETIRED` before collection.
+A watchlist run removes retired entries from its requested resources and reports them explicitly;
+if none remain, it is blocked. Retirement is never a measured zero.
 
 TikTok now uses `tiktok-public-grid-v3`; Threads uses `threads-search-top-v2`. Watchlist periods
 spanning the upgrade report `not_comparable` with `collection_path_changed` or

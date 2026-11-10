@@ -68,35 +68,47 @@ async def test_sqlite_seeds_from_sql_files_no_hardcoded_python_data():
 
 
 @pytest.mark.asyncio
-async def test_dual_tier_auth_status_and_resolution():
-    """IGN-12: Test resolve_auth_tier and active_tier reported in auth status."""
-    from ignis.infrastructure.connectors.threads.threads_plugin import ThreadsPlugin
-    from ignis.infrastructure.connectors.reels.reels_plugin import ReelsPlugin
-    from ignis.interfaces.mcp.server import _meta_auth_status
+async def test_platform_auth_status_reads_credential_repository_without_enabling_collection(monkeypatch):
+    """Stored credentials remain readable without implying an internal collection tier."""
+    import json
     from unittest.mock import AsyncMock
 
-    mock_oauth = AsyncMock()
-    mock_oauth.get_auth_status.return_value = {"authenticated": False, "status": "NOT_CONNECTED"}
-    mock_browser = AsyncMock()
-    mock_browser.get_auth_status.return_value = {"authenticated": True, "status": "ACTIVE"}
+    from ignis.infrastructure.connectors.threads.threads_plugin import ThreadsPlugin
+    from ignis.interfaces.mcp import server
 
-    # active_tier should report TIER_1_BROWSER_SESSION when browser session exists
-    status = await _meta_auth_status(mock_oauth, mock_browser)
-    assert status["active_tier"] == "TIER_1_BROWSER_SESSION"
-    assert status["browser_session"]["status"] == "ACTIVE"
+    stored = [
+        {"platform": "threads", "auth_type": "oauth2", "is_active": False},
+        {"platform": "threads_browser", "auth_type": "session_cookies", "is_active": True},
+        {"platform": "instagram_browser", "auth_type": "session_cookies", "is_active": True},
+    ]
+    credentials = AsyncMock()
+    credentials.list_platform_credentials.return_value = stored
+    evidence = AsyncMock()
+    evidence.list_platform_credentials.side_effect = AssertionError("Wrong credential store")
+    monkeypatch.setattr(server, "get_components", lambda: {
+        "repository": evidence, "credential_repository": credentials,
+    })
 
-    # ThreadsPlugin resolve_auth_tier
-    mock_browser.get_storage_state.return_value = {"cookies": []}
-    mock_oauth.get_access_token.return_value = None
-    threads_plugin = ThreadsPlugin(auth_manager=mock_oauth, browser_auth_manager=mock_browser)
-    tier, cred = await threads_plugin.resolve_auth_tier()
-    assert tier == "host_required"
-    assert cred is None
+    status = json.loads(await server.handle_get_platform_auth_status())
 
-    # ReelsPlugin resolve_auth_tier
-    reels_plugin = ReelsPlugin(auth_manager=mock_oauth, browser_auth_manager=mock_browser)
-    tier_r, cred_r = await reels_plugin.resolve_auth_tier()
-    assert tier_r == "session_cookies"
+    assert status["status"] == "SUCCESS"
+    assert status["platforms"] == stored
+    assert status["count"] == 3
+    assert "active_tier" not in status
+    assert all("active_tier" not in row for row in status["platforms"])
+    assert status["expiry_warnings"] == []
+    assert [(row["platform"], row["status"]) for row in status["refresh_plan"]] == [
+        (row["platform"], "UNKNOWN_EXPIRY") for row in stored
+    ]
+    credentials.list_platform_credentials.assert_awaited_once_with()
+    evidence.list_platform_credentials.assert_not_awaited()
+
+    # Retained Threads compatibility never reads OAuth or browser sessions to collect.
+    oauth, browser = AsyncMock(), AsyncMock()
+    threads = ThreadsPlugin(auth_manager=oauth, browser_auth_manager=browser)
+    assert await threads.resolve_auth_tier() == ("host_required", None)
+    assert await threads.is_healthy() is False
+    assert oauth.mock_calls == browser.mock_calls == []
 
 
 @pytest.mark.asyncio

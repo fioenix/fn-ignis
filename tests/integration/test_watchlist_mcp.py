@@ -215,6 +215,27 @@ async def test_setting_a_plan_for_an_unknown_watchlist_returns_not_found(tools):
 
 async def test_period_path_reasons_do_not_add_public_snapshot_parameters():
     tools = {tool.name: tool for tool in await mcp_server.mcp.list_tools()}
-    assert len(tools) == 53
+    assert len(tools) == 41
     assert set(tools["get_watchlist_period_snapshot"].parameters["properties"]) == {
         "watchlist_id", "period_kind", "period_start"}
+
+
+@pytest.mark.parametrize('resources', [['youtube', 'reels', 'tiktok_video_grid'], ['reels', 'google']])
+async def test_retired_run_resources_are_reported_without_changing_watchlist_versions(tools, resources):
+    workspace, repository = tools
+    saved = await call('handle_save_watchlist', workspace_id=workspace, name='Retained list', definition=definition())
+    before = await call('handle_get_watchlist', watchlist_id=saved['watchlist_id'])
+    result = await call('handle_start_watchlist_run', watchlist_id=saved['watchlist_id'],
+                        allowed_resources=resources, authority_boundary=AUTHORITY)
+    after = await call('handle_get_watchlist', watchlist_id=saved['watchlist_id'])
+    assert result['retired_resources'] == [
+        {'surface': surface, 'reason_code': 'SURFACE_RETIRED'} for surface in resources if surface != 'youtube'
+    ]
+    assert {k: v for k, v in after.items() if k != 'runs'} == {k: v for k, v in before.items() if k != 'runs'}
+    if 'youtube' in resources:
+        assert result['status'] == 'CREATED' and len(after['runs']) == len(before['runs']) + 1
+        manifest = await WorkspaceRepository(repository=repository).get_mission_manifest(result['mission_id'])
+        assert manifest.allowed_resources == ('youtube',)
+    else:
+        assert result['status'] == 'BLOCKED' and result['reason_code'] == 'SURFACE_RETIRED'
+        assert after == before

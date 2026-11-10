@@ -1,8 +1,8 @@
-# Ignis User Guide — v0.9.0
+# Ignis User Guide — Spec 022
 
-This guide describes v0.9.0: Threads and TikTok host-browser search, Reels without
-automation-hiding flags, migrations through `038`, and retained watchlists. The v0.7.0 Dual-Track
-worker and its diagrams are historical and do not describe this branch. See [README](../README.md) for the product contract and release boundary.
+This guide describes the current Spec 022 branch with 41 tools. Source retirement is not yet
+released; published v0.9.0 retains its earlier catalog and source behavior.
+The v0.7.0 release is a historical Dual-Track artifact, not this mission-bound branch.
 
 ## 1. Start and inspect
 
@@ -58,25 +58,19 @@ browser or session authority that task needs, obtained before use. A stored cred
 session or authentication status does not by itself grant that permission.
 
 - `get_tiktok_video_comments(video_url, limit=30)` reads public comments under one TikTok video in
-  a headless browser, using a stored TikTok session if one exists. It returns `status`,
-  `video_url`, `total_comments` and the comments. A URL without a `/video/<id>` segment or a
-  missing Playwright install returns `SUCCESS` with zero comments. A blocked or unparsed page can
+  a headless browser, without using a stored TikTok session. It returns `status`,
+  `video_url`, `total_comments` and the comments. An invalid TikTok video URL returns `ERROR`.
+  If the Playwright Python package is absent, the current parser returns `SUCCESS` with zero comments. A blocked or unparsed page can
   also yield zero parsed comments, or fail with `ERROR`, depending on where it breaks. Zero is
   therefore not proof that the video has no discussion.
-- `get_tiktok_search_suggestions(keywords, geo="VN")` returns autocomplete expansions.
-  `get_tiktok_creative_center_trends(geo="VN", period=7, limit=20, industry=None)` returns macro
-  trends (`limit` capped at 50). These expand topics; they do not measure demand.
-  The retained `get_threads_search_suggestions(keyword, geo="VN", limit=10)` and
-  `get_threads_trending_topics(geo="VN", limit=15)` signatures return
-  `UNAVAILABLE/HOST_BROWSER_REQUIRED`, without browser, cookie or OAuth fallback.
 - `execute_mission_ingress(mission_id)` is the separate option for a confirmed mission: it runs only
   that mission's recorded plan and records a channel outcome for each requested source.
 
 None of these calls forces a collection-then-analysis workflow or schedules further collection,
 and they need not be chained. Each still has its own preconditions: actual source access, the
 source and mission scope, and resource limits. `execute_mission_ingress` additionally requires a
-confirmed mission and its recorded plan (for a Market mission, a confirmed Market Brief). `verify_connectors_health` runs synthetic diagnostics and authentication tools can run
-an access probe, so do not call either merely to check whether a source is available.
+confirmed mission and its recorded plan (for a Market mission, a confirmed Market Brief). `verify_connectors_health` runs probes of active connectors; do not call it without
+permission to access those sources.
 
 For a market decision, state the decision you face, target audience, geography, time window,
 hypothesis, plausible alternative, and what observation would change your mind. The agent
@@ -124,17 +118,14 @@ without a plan, pass it explicitly. The `ignis_listen` prompt and
   Only observations qualified as relevant count.
 
 Each channel keeps its own units and sample labels. Comparability is independent between axes;
-never sum across channels or axes. Unknown values are not zero. Google Trends RSS supplies macro
-feed topics and feed-reported traffic; keyword Trends measurement remains unavailable and
-reports `DEGRADED`, not a demand score.
+never sum across channels or axes. Unknown values are not zero. Historical Google Trends rows keep their original labels; they are not new keyword demand measurements.
 
 Each channel has a daily request ceiling: one request is one keyword searched on that channel, and
 the count is shared by every session on the same store for the calendar day in Asia/Ho_Chi_Minh.
 The defaults are 200 for YouTube and 50 for every other channel; raise one with
 `update_runtime_config` on `connector.<platform>.daily_request_ceiling`. A search that would pass
 the ceiling sends nothing to that channel and records it as `RATE_LIMITED` with a `daily_ceiling`
-note, while the other channels run. A pass counts every keyword it searches (Reels reads at most
-10), so a watchlist with more keywords than a channel's ceiling skips that channel until
+note, while the other channels run. A pass counts every keyword it searches, so a watchlist with more keywords than a channel's ceiling skips that channel until
 you raise it. History is finite but never pruned on its own:
 `scripts/prune_expired_observations.py` lists observations collected more than 13 months ago, and
 removes them with `--apply`, keeping any that a stored claim or recorded research work still cites.
@@ -145,8 +136,8 @@ it how to set up one Claude Code Desktop scheduled task: at most one per watchli
 day, and only after you confirm what will run. Each firing is one watchlist run and nothing else.
 Create it from a session opened in the research workspace's repository folder, because a firing
 starts in that folder. Before creating it, the agent checks that each channel can collect for your
-workspace: YouTube needs its key in the workspace's own `.fnignis/.env`, and browser channels need a
-saved sign-in. A routine never runs in a Bypass permission mode, and runs in Auto only if you accept
+workspace: YouTube needs its key in the workspace's own `.fnignis/.env`. This routine runs YouTube only;
+TikTok and Threads require a separately authorized host-browser flow. A routine never runs in a Bypass permission mode, and runs in Auto only if you accept
 that during setup. Each firing also judges which collected items are on your topics, because the
 period view counts only judged items. Setup ends with a first run you watch; in a mode that asks,
 you approve only `start_watchlist_run`, `execute_mission_ingress`,
@@ -163,18 +154,9 @@ requested plan was not measured; neither is proof that the market is empty. The 
 qualification batch, records typed support, contradiction, or context judgments, and checks
 that the current frame is terminal before making Market claims.
 
-Threads collection requires a separately authorized host browser. Stored Graph credentials are
-compatibility state, not proof of public keyword access. `authenticate_threads`,
-`get_threads_auth_status` and `clear_threads_auth` retain their public signatures; they do not
-activate collection or probe an API grant. Use explicit host preparation or report the gap.
-
-Google Trends RSS supplies current macro topics and feed-reported traffic, not a keyword
-time series. Keyword Trends measurement is currently unavailable and reports `DEGRADED`
-rather than a fabricated demand score. The existing connector suggestions interface exposes
-Google Autocomplete as `google_autocomplete` keyword expansion only: suggestion counts are
-not search volume, demand, or growth. A valid empty suggestion response differs from an
-unavailable probe; neither establishes zero market demand. Existing historical observations
-are not rewritten by this connector correction.
+Threads collection requires a separately authorized host browser. Stored Graph credentials
+do not grant public keyword access or enable collection. Historical Google observations remain
+readable with their original units; suggestions and feed traffic never prove market demand.
 
 Each strategic statement belongs in the persisted Claim Ledger. `submit_mission_claims`
 binds it to observations or eligible measured absence, and `get_mission_claims` shows whether
@@ -272,7 +254,7 @@ unchanged, and reading a snapshot confers no execution authority.
 
 ## 4. Tool and deployment boundaries
 
-The local MCP server exposes **53 tools**. Discover the running server's descriptions for exact
+The local MCP server exposes **41 tools**. Discover the running server's descriptions for exact
 signatures; removed daily-discovery and unguided-research tools are not part of this branch.
 For an existing PostgreSQL database on `035`, apply `036`, `037` and `038` in order as the
 table owner. Without `038`, a MISSION TikTok host-browser search is refused before it starts.
@@ -314,16 +296,16 @@ representative market sample, or an automatic fallback. Host cleanup preserves o
 ### Threads host collection and period paths
 
 `prepare_host_browser_search` accepts optional `source="threads"`; omitting it keeps
-`source="tiktok"`. Submit and cancel keep their three ID parameters. There are still 53 tools.
-Threads collection uses only the authorized host browser. Internal Threads Playwright collection
-is removed; the retained suggestions/trending tools return `UNAVAILABLE/HOST_BROWSER_REQUIRED`.
-Stored Threads credentials do not establish collection readiness. No API grant probe or API path
-is activated, and failure never selects a fallback collector.
+`source="tiktok"`. Submit and cancel keep their three ID parameters. There are still 41 tools.
+Threads collection uses only the authorized host browser. Internal Playwright collection and
+placeholder suggestion/trending tools have been removed. Stored Threads credentials do not
+establish collection readiness. No API grant probe or API fallback is activated.
 
-Reels stays on Playwright without automation-hiding flags. A login wall, checkpoint, challenge,
-unparseable response or missing search envelope is unavailable with a reason, never a measured
-zero. A verified, well-formed empty search envelope may return `EMPTY_NO_DATA` for the executed
-keyword. This does not establish coverage for other keywords or a known time window.
+Spec 022 retires Google Trends RSS, Creative Center, TikTok headless keyword search and Reels
+collection. Existing observations, channel outcomes and sessions remain readable and unchanged.
+A mission naming a retired surface returns `BLOCKED / SURFACE_RETIRED` before collection.
+A watchlist run removes retired entries from its requested resources and reports them explicitly;
+if none remain, it is blocked. Retirement is never a measured zero.
 
 TikTok now uses `tiktok-public-grid-v3`; Threads uses `threads-search-top-v2`. Watchlist periods
 spanning the upgrade report `not_comparable` with `collection_path_changed` or

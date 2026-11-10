@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from ignis.application.use_cases.execute_mission import TERMINAL_MISSION_STATES
 from ignis.domain.entities import TrendSignal
 from ignis.domain.harness_models import ChannelHealthStatus
-from ignis.domain.research_workspace import ResearchSurface, resolve_surface
+from ignis.domain.research_workspace import ResearchSurface, resolve_surface, require_active_resources
 from ignis.domain.value_objects import PlatformType
 from ignis.infrastructure.connectors.registry import SearchPassResult, SurfaceProbeResult
 from ignis.infrastructure.connectors.host_browser.validator import collection_path
@@ -34,6 +34,7 @@ async def prepare_scope(executor, mission_id, source="tiktok"):
     mission, manifest = snapshot.mission, snapshot.manifest
     if mission is None or manifest is None or not mission.workspace_id:
         raise ValueError("Confirmed mission scope is required")
+    require_active_resources(manifest.allowed_resources)
     if mission.status.upper() in TERMINAL_MISSION_STATES or mission.status.upper() == "RUNNING":
         raise ValueError("Mission is not pending collection")
     surface = "tiktok_video" if source == "tiktok" else "threads" if source == "threads" else None

@@ -34,8 +34,7 @@ def counted_create(*args, **kwargs):
     log['create_repository'] += 1
     return original_create(*args, **kwargs)
 server._init_components, server.create_repository = counted_init, counted_create
-for name in ('TikTokAuthManager', 'ThreadsAuthManager', 'InstagramAuthManager', 'ThreadsBrowserAuthManager',
-             'InstagramBrowserAuthManager', 'GoogleTrendsRssPlugin', 'ConnectorPluginRegistry', 'RuntimeConfigManager'):
+for name in ('ConnectorPluginRegistry', 'RuntimeConfigManager'):
     cls = getattr(server, name)
     def recording(self, *args, _init=cls.__init__, _label=name, **kwargs):
         log['constructed'].append(_label)

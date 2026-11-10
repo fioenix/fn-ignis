@@ -23,7 +23,7 @@ MACHINERY_DOMAINS = frozenset({
     "noise_blacklist",
     "ambiguous_unigrams",
     "search_intent",
-    "customer_inquiry",
+    "customer_inquiry",  # Retired inquiry terms must stay excluded from market evidence.
     "tiktok_ui_noise",
     "tiktok_attribution",
     "threads_attribution",
@@ -31,7 +31,8 @@ MACHINERY_DOMAINS = frozenset({
     "portuguese_words",
 })
 
-# Probe templates are per geo, so their domain carries the geo code: probe_templates_vn.
+# Retired template domains stay excluded from market vocabulary and ingress seeds.
+# Historical seed rows are not rewritten by connector retirement.
 PROBE_TEMPLATE_PREFIX = "probe_templates_"
 TIKTOK_SUGGEST_TEMPLATE_PREFIX = "tiktok_suggest_templates_"
 
@@ -59,7 +60,6 @@ class MarketVocabulary:
     noise_blacklist: List[str] = field(default_factory=list)
     ambiguous_unigrams: List[str] = field(default_factory=list)
     search_intent: List[str] = field(default_factory=list)
-    customer_inquiry: List[str] = field(default_factory=list)
     tiktok_ui_noise: List[str] = field(default_factory=list)
     tiktok_attribution: List[str] = field(default_factory=list)
     threads_attribution: List[str] = field(default_factory=list)
@@ -115,7 +115,6 @@ async def load_market_vocabulary(repository: ITrendRepository) -> MarketVocabula
         noise_blacklist=grouped.get("noise_blacklist", []),
         ambiguous_unigrams=grouped.get("ambiguous_unigrams", []),
         search_intent=grouped.get("search_intent", []),
-        customer_inquiry=grouped.get("customer_inquiry", []),
         tiktok_ui_noise=grouped.get("tiktok_ui_noise", []),
         tiktok_attribution=grouped.get("tiktok_attribution", []),
         threads_attribution=grouped.get("threads_attribution", []),
@@ -144,9 +143,7 @@ class VocabularySynchronizer:
         quality_evaluator: Optional[Any] = None,
         strategic_reasoner: Optional[Any] = None,
         clusterer: Optional[Any] = None,
-        google_trends_plugin: Optional[Any] = None,
         language_detector: Optional[Any] = None,
-        tiktok_plugin: Optional[Any] = None,
         registry: Optional[Any] = None,
         credential_repository: Optional[ITrendRepository] = None,
     ):
@@ -156,9 +153,7 @@ class VocabularySynchronizer:
         self._quality_evaluator = quality_evaluator
         self._strategic_reasoner = strategic_reasoner
         self._clusterer = clusterer
-        self._google_trends_plugin = google_trends_plugin
         self._language_detector = language_detector
-        self._tiktok_plugin = tiktok_plugin
         self._registry = registry
         self.self_identities: List[Any] = []
 
@@ -197,15 +192,9 @@ class VocabularySynchronizer:
                 )
         if self._clusterer is not None:
             self._clusterer.register_ambiguous_unigrams(vocabulary.ambiguous_unigrams)
-        if self._google_trends_plugin is not None:
-            self._google_trends_plugin.register_probe_templates(vocabulary.probe_templates)
-            self._google_trends_plugin.register_intent_keywords(vocabulary.search_intent)
         if self._language_detector is not None:
             self._language_detector.register_foreign_phrases(vocabulary.foreign_phrases)
             self._language_detector.register_portuguese_words(vocabulary.portuguese_words)
-        if self._tiktok_plugin is not None:
-            self._tiktok_plugin.register_ui_noise(vocabulary.tiktok_ui_noise)
-            self._tiktok_plugin.register_suggest_templates(vocabulary.tiktok_suggest_templates)
         # Mission host tickets load their own caller-local snapshots during preparation.
         # Tactical templates come only from packaged seeds, never repository synchronization.
         if stop_terms:

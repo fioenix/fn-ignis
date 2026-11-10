@@ -16,7 +16,7 @@ from ignis.application.ports.research_workspace_port import IResearchWorkspaceSt
 from ignis.application.use_cases.create_attention_mission import CreateAttentionMissionUseCase
 from ignis.application.use_cases.set_mission_declared_accounts import SetMissionDeclaredAccountsUseCase
 from ignis.domain.exceptions import IgnisDomainException
-from ignis.domain.research_workspace import MissionManifest, MissionOutputType
+from ignis.domain.research_workspace import MissionManifest, MissionOutputType, retired_resources
 from ignis.domain.watchlist import (
     Watchlist,
     ListeningPlan,
@@ -188,6 +188,17 @@ class StartWatchlistRunUseCase:
         if watchlist is None:
             return _refused("NOT_FOUND", "NOT_FOUND", "No watchlist has this id.", watchlist_id=str(watchlist_id))
         version = watchlist.current
+        resources = authority.get("allowed_resources", ())
+        if not isinstance(resources, (list, tuple)) or any(not isinstance(r, str) for r in resources):
+            return _refused("INVALID", "INVALID_REQUEST", "allowed_resources must be a list of strings.")
+        retired = retired_resources(resources)
+        retirement = [{"surface": surface, "reason_code": "SURFACE_RETIRED"} for surface in retired]
+        if retired:
+            remaining = [resource for resource in resources if resource not in retired]
+            if not remaining:
+                return _refused("BLOCKED", "SURFACE_RETIRED", "No requested collection surface remains active.",
+                                watchlist_id=watchlist.id, retired_resources=retirement)
+            authority = {**authority, "allowed_resources": remaining}
         try:
             manifest = build_manifest({**run_manifest_payload(watchlist.name, version.version), **authority})
             mission = await self._create_attention.execute(
@@ -215,6 +226,7 @@ class StartWatchlistRunUseCase:
             )
         return {
             "status": "CREATED",
+            "retired_resources": retirement,
             "watchlist_id": watchlist.id,
             "version": version.version,
             "mission_id": str(mission.id),

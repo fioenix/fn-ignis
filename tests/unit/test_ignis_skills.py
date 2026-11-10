@@ -118,17 +118,23 @@ def test_host_search_preserves_evidence_limits_and_finally_cleanup():
     section = _host_browser_section()
     for rule in ("verified no-results", "unknown", "bounded sample", "finally path",
                  "cancel a nonterminal request", "Preserve owner tabs and browser",
-                 "model-built records", "Reels keeps its flag-free Playwright path"):
+                 "model-built records", "Reels collection is retired",
+                 "Historical Reels evidence remains readable",
+                 "refused with `SURFACE_RETIRED` before collection"):
         assert rule in section, rule
 
 
 def test_routine_distinguishes_threads_host_search_from_saved_sign_in():
     routine = " ".join(ROUTINE.read_text(encoding="utf-8").split())
-    assert "`reels` and `tiktok_video_grid` need a saved sign-in: check `get_platform_auth_status`." in routine
-    assert "Leave `threads` out of a routine" in routine
-    assert "host-browser search section of the `ignis-collect` skill" in routine
-    assert "`execute_mission_ingress` refuses a mission whose channel it cannot collect" in routine
-    assert "`threads`, `reels` and `tiktok_video_grid` need a saved sign-in" not in routine
+    for rule in ("This routine runs `youtube` only",
+                 "TikTok (`tiktok_video`) and `threads` require the separately authorized host-browser flow",
+                 "this routine prompt does not execute that flow",
+                 "`start_watchlist_run` reports each removed resource with `SURFACE_RETIRED`",
+                 "uses the remaining resources, and blocks if none remain",
+                 "Never translate retirement into a measured zero, retry a retired source or rewrite old observations"):
+        assert rule in routine, rule
+    assert "need a saved sign-in" not in routine
+    assert "get_platform_auth_status" not in routine
 
 
 def test_manual_stage_requires_the_complete_envelope_and_reprepare_after_rejection():

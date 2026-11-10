@@ -166,6 +166,38 @@ class InvalidMissionAuthorizationError(IgnisDomainException):
         super().__init__(message)
 
 
+# Admission policy only: historical manifests and evidence retain these identifiers.
+RETIRED_CONNECTOR_SURFACES = frozenset({
+    "google", "tiktok_creative_center", "tiktok_video_grid", "reels",
+})
+
+
+class RetiredSurfaceError(InvalidMissionAuthorizationError):
+    """A new collection request names a surface retired by Spec 022."""
+
+    def __init__(self, surfaces: Sequence[str]):
+        self.retired_resources = tuple(dict.fromkeys(surfaces))
+        super().__init__("SURFACE_RETIRED", "Collection surfaces are retired: "
+                         + ", ".join(self.retired_resources))
+
+    def to_payload(self) -> Dict[str, Any]:
+        return {"status": "BLOCKED", "reason_code": self.reason_code,
+                "retired_resources": list(self.retired_resources), "error": str(self)}
+
+
+def retired_resources(resources: Sequence[str]) -> Tuple[str, ...]:
+    """Return retired exact surface identifiers in request order, without duplicates."""
+    return tuple(dict.fromkeys(resource for resource in resources
+                               if resource in RETIRED_CONNECTOR_SURFACES))
+
+
+def require_active_resources(resources: Sequence[str]) -> None:
+    """Refuse collection, never deserialization or a historical read."""
+    retired = retired_resources(resources)
+    if retired:
+        raise RetiredSurfaceError(retired)
+
+
 class MissionTerminalStateError(IgnisDomainException):
     """A one-run mission reached a terminal state and cannot continue itself."""
 
@@ -2178,6 +2210,7 @@ HANDOFF_OBSERVATIONS = 2
 HANDOFF_SOURCES = 2
 
 # The platforms whose surfaces measure content supply. Platform identifiers, not vocabulary.
+# Evidence qualification includes retained historical sources; this does not admit collection.
 SUPPLY_SURFACE_PLATFORMS = frozenset({"youtube", "tiktok", "reels"})
 
 

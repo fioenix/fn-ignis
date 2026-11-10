@@ -1,9 +1,7 @@
 import pytest
-import json
 from unittest.mock import AsyncMock, patch
 from ignis.domain.value_objects import GeoCode
 from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin
-from ignis.interfaces.mcp.server import handle_get_tiktok_search_suggestions
 
 
 @pytest.mark.asyncio
@@ -36,29 +34,3 @@ async def test_tiktok_plugin_fetch_suggestions_mocked():
         assert suggestions[0]["keyword"] == "ai agent"
         assert suggestions[0]["platform"] == "tiktok"
         assert len(suggestions[0]["suggestions"]) >= 1
-
-
-@pytest.mark.asyncio
-async def test_handle_get_tiktok_search_suggestions():
-    mock_comp = {
-        "registry": AsyncMock(),
-    }
-    mock_comp["registry"].fetch_suggestions_across_all.return_value = [
-        {
-            "keyword": "ai agent",
-            "platform": "tiktok",
-            "suggestions_count": 2,
-            "suggestions": [
-                {"query": "Trend Character Ai", "type": "search_guide"},
-                {"query": "#xiaozhi", "type": "trending_hashtag"},
-            ]
-        }
-    ]
-
-    with patch("ignis.interfaces.mcp.server.get_components", return_value=mock_comp):
-        resp_json = await handle_get_tiktok_search_suggestions(keywords=["ai agent"], geo="VN")
-        resp = json.loads(resp_json)
-        assert resp["status"] == "SUCCESS"
-        assert resp["total_keywords"] == 1
-        assert len(resp["data"]) == 1
-        assert resp["data"][0]["suggestions"][0]["query"] == "Trend Character Ai"

@@ -80,7 +80,8 @@ Use only this host path for search; these alternatives are excluded:
 - LLM agents reading/driving pages: periods lose comparability and the charter forbids model-built records.
 - Third-party scrape/unblocker services: data leaves the machine; proxy unblocking is evasion.
 - CDP / remote debugging: excluded by Spec 012; anti-detection tooling is also excluded.
-Reels keeps its flag-free Playwright path, outside this search guidance.
+Reels collection is retired. Historical Reels evidence remains readable; a new request
+for a retired surface is refused with `SURFACE_RETIRED` before collection.
 On cancellation, failure or completion, stop navigating, cancel a nonterminal request when possible,
 and close task-created tabs in the host's finally path. Preserve owner tabs and browser. The relay
 closes on submission, rejection, cancellation, expiry or server exit; it cannot close the browser itself.
