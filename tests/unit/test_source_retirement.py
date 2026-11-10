@@ -24,6 +24,32 @@ REMOVED = {
 
 
 @pytest.mark.asyncio
+async def test_follow_up_plan_refuses_a_retired_source():
+    from ignis.application.use_cases.execute_mission_follow_up import (
+        ExecuteMissionFollowUpUseCase, FollowUpRefusal,
+    )
+    from ignis.domain.value_objects import PlatformType
+    from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
+
+    executor = Mock(_registry=ConnectorPluginRegistry())
+    executor._collection_queries.return_value = ["synthetic demand"]
+    context = SimpleNamespace(
+        authority=SimpleNamespace(
+            sources=(SimpleNamespace(source="reels"),),
+            work=SimpleNamespace(requested_scope=SimpleNamespace(
+                queries=("synthetic demand",), sources=frozenset({"reels"}))),
+        ),
+        child=SimpleNamespace(platforms=[PlatformType.REELS]), brief=None, manifest=None,
+    )
+    service = ExecuteMissionFollowUpUseCase(Mock(), executor, selected_parent_id=uuid4())
+
+    with pytest.raises(FollowUpRefusal) as error:
+        await service._plan(context)
+
+    assert error.value.reason == "SURFACE_RETIRED"
+
+
+@pytest.mark.asyncio
 async def test_catalog_removes_exactly_twelve_and_preserves_survivor_parameters():
     schemas = json.loads(Path('tests/fixtures/source_retirement/survivor-schemas.json').read_text())
     tools = {tool.name: tool for tool in await server.mcp.list_tools()}

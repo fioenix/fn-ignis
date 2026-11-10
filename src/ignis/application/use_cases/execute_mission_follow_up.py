@@ -14,7 +14,7 @@ from ignis.domain.mission_follow_up import FollowUpExecutionRequest, FollowUpRel
 from ignis.domain.research_workspace import MissionTerminalStateError, MissionWriterConflictError
 from ignis.domain.exceptions import RepositoryException
 from ignis.application.use_cases.current_evidence_frame import frame_from_snapshot
-from ignis.domain.research_workspace import compute_frame_fingerprint
+from ignis.domain.research_workspace import compute_frame_fingerprint, retired_resources
 
 
 class FollowUpRefusal(FollowUpExecutionBoundaryError):
@@ -96,6 +96,8 @@ class ExecuteMissionFollowUpUseCase:
 
     async def _plan(self, context):
         authority = context.authority
+        if retired_resources(tuple(source.source for source in authority.sources)):
+            raise FollowUpRefusal("SURFACE_RETIRED")
         mission, brief, manifest = context.child, context.brief, context.manifest
         registry = self._executor._registry
         initial = self._executor._collection_plan_for_brief(mission, manifest, {}, brief)
