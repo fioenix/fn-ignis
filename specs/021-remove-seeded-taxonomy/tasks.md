@@ -3,8 +3,10 @@
 **Input**: `specs/021-remove-seeded-taxonomy/`
 **Prerequisites**: `spec.md`, `plan.md`, `research.md`, `data-model.md`, `contracts/`, `quickstart.md`
 **Route**: DEEP / migration; the Spec Kit depth gate requires this task list.
-**Evidence (2026-11-10)**: CI run 42676858860 at `4c5fe28` passed with PostgreSQL enabled: 6146 passed, 36 skipped, including all 18 cases of `test_postgres_taxonomy_retirement.py` and 24 of `test_postgres_migration_contract.py`, and Fresh Compose init. `uv build` produced a wheel and sdist, and the wheel contains migration 039. T022 stays open for an operator rehearsal with stored receipts on authorized copies, and T029 for the acceptance that depends on it; no real store has been migrated.
-**Status**: Local implementation and targeted checks complete (22/29 tasks). Evidence: `.handoff/021-taxonomy-verification.md`. Real PostgreSQL/Compose, built artifacts and independent review remain open.
+**Evidence (2026-11-10)**: CI run 42676858860 at `4c5fe28` passed with PostgreSQL enabled: 6146 passed, 36 skipped, including all 18 cases of `test_postgres_taxonomy_retirement.py` and 24 of `test_postgres_migration_contract.py`, and Fresh Compose init. `uv build` produced a wheel and sdist, and the wheel contains migration 039.
+**Operator rehearsal and cutover (2026-11-10, owner-approved)**: both authorized stores were projected read-only, backed up, stopped from writers, applied and verified, run `20261110-113308`. Caller SQLite store: 85 clusters, 30 reset (projected 30), verify passed all five invariants, retry changed 0. PostgreSQL store `ignis`: 1 cluster, 1 reset (projected 1), verify passed, retry reported `ALREADY_RETIRED` with 0 changes. Receipts are kept locally under each store's `reports/migrations/021/20261110-113308/`. The backups are separate local files: a SQLite online backup next to the caller store and a PostgreSQL custom-format dump under the caller's backup folder; their restorability was not tested. None is committed. After cutover the server started on the new wheel, `list_domain_lexicons` returned no `industry_taxonomies` key, and health was `HEALTHY`.
+**Acceptance (T029)**: FR-001 to FR-011 and SC-001 to SC-005 are met by the merged code (PR 125), its CI evidence above and this cutover; SC-003 holds on both stores (changed equals projected, non-category digest unchanged) and SC-005 by the zero-change retries. No released version contains this change yet.
+**Status (historical, before CI and cutover)**: Local implementation and targeted checks complete (22/29 tasks). Evidence: `.handoff/021-taxonomy-verification.md`. Real PostgreSQL/Compose, built artifacts and independent review remain open.
 
 ## Format and execution rules
 
@@ -79,7 +81,7 @@ actual rows/digests, inject rollback failures, and retry before/after new source
 - [x] T019 [US2] Implement explicit transactional `apply` in `src/ignis/infrastructure/migration/taxonomy_retirement.py` and `scripts/retire_industry_taxonomy.py`: baseline identity/drift validation under lock, individual SQLite statements under `BEGIN IMMEDIATE`, PostgreSQL 039 inside the owning transaction, actual post-state verification before commit and rollback on every failure. Turn T014/T016 GREEN; no repository bootstrap or secret discovery.
 - [X] T020 [US2] Add early legacy-taxonomy refusal before ordinary bootstrap in `src/ignis/infrastructure/persistence/sqlite_repository.py`; keep `open_existing_ready` validation-only and prove fresh/migrated core schema parity. Trace `src/ignis/infrastructure/caller_storage.py` and existing caller composition without broadening caller roots/config/authorization. Turn T015 GREEN.
 - [x] T021 [US2] Complete the packaging contract prepared RED in T017: update the expected latest migration names in `tests/unit/test_sql_packaging.py` and verify 039 is in the continuous wheel/sdist SQL chain but not SQLite seed replay. Verify historical SQL hashes remain identical and packaged-resource startup never recreates taxonomy. Do not widen `pyproject.toml` package members just to ship the operator script.
-- [ ] T022 [US2] Run T014–T017 and affected caller/packaging tests serially per `specs/021-remove-seeded-taxonomy/quickstart.md`; independently exercise project → publish → apply → verify → retry on both authorized rehearsal backends. Store local receipts in `reports/migrations/021/<run-id>/` and evidence links in `.handoff/021-taxonomy-verification.md`; if a backend is unavailable, keep this task open.
+- [x] T022 [US2] Run T014–T017 and affected caller/packaging tests serially per `specs/021-remove-seeded-taxonomy/quickstart.md`; independently exercise project → publish → apply → verify → retry on both authorized rehearsal backends. Store local receipts in `reports/migrations/021/<run-id>/` and evidence links in `.handoff/021-taxonomy-verification.md`; if a backend is unavailable, keep this task open.
 
 **Checkpoint**: Both backend migrations and fresh installs have observed evidence. No live apply
 is implied by fixture acceptance; the chosen store still needs its own exact baseline.
@@ -107,7 +109,7 @@ on the final targeted evidence and review.
 ## Phase 6: Polish and cross-cutting acceptance
 
 - [X] T028 Run `.venv/bin/pytest tests/unit/test_repo_conventions.py`, scoped lint/diff checks and only the affected consumer set from `specs/021-remove-seeded-taxonomy/quickstart.md`; record fresh results and skips in `.handoff/021-taxonomy-verification.md`. Run no full suite without the owner's request; do not repeat unchanged passing heavy jobs.
-- [ ] T029 Re-evaluate all FR-001–FR-011 and SC-001–SC-005 against source/test/receipt evidence in `.handoff/021-taxonomy-verification.md`; update `specs/021-remove-seeded-taxonomy/tasks.md` only for observed completed work. Keep missing real PostgreSQL/Compose, rehearsal or data-baseline evidence open. Obtain independent code/security review under the router gates before a later authorized merge; this task grants no commit/push/merge/release authority.
+- [x] T029 Re-evaluate all FR-001–FR-011 and SC-001–SC-005 against source/test/receipt evidence in `.handoff/021-taxonomy-verification.md`; update `specs/021-remove-seeded-taxonomy/tasks.md` only for observed completed work. Keep missing real PostgreSQL/Compose, rehearsal or data-baseline evidence open. Obtain independent code/security review under the router gates before a later authorized merge; this task grants no commit/push/merge/release authority.
 
 ## Dependencies and execution order
 
@@ -162,6 +164,8 @@ classifier, credential path or migration framework is needed.
 **Task inventory**: 29 tasks; setup 2, foundational 5, US1 6, US2 9, US3 5, final acceptance 2.
 
 ## Local acceptance notes
+
+Historical: written before the CI evidence and the cutover recorded at the top of this file.
 
 - SQLite retirement, read-only projection/verification, rollback, retries and startup refusal
   have observed local evidence. Full commands and counts are in
