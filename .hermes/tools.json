@@ -319,7 +319,7 @@
     "type": "function",
     "function": {
       "name": "register_domain_lexicon",
-      "description": "Register or expand domain vocabulary, slang, brand names, and industry keywords dynamically into the persistent database so Quality Gate and Ingress engines recognize new niche vernacular.",
+      "description": "Store lexicon terms in the persistent database. Market-domain terms are stored and listed without affecting topic matching or language detection; machinery domains retain their filtering roles.",
       "parameters": {
         "additionalProperties": false,
         "properties": {

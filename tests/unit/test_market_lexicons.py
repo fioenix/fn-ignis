@@ -63,7 +63,6 @@ async def test_handle_list_domain_lexicons():
 async def test_register_machinery_never_teaches_evaluators_market_terms(tmp_path, monkeypatch, domain):
     from ignis.interfaces.mcp import server
     from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
-    from ignis.infrastructure.config.vocabulary_loader import load_market_vocabulary
     from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
 
     repo = SqliteTrendRepository(str(tmp_path / "lexicons.db"))
@@ -78,7 +77,6 @@ async def test_register_machinery_never_teaches_evaluators_market_terms(tmp_path
         assert response["status"] == "SUCCESS"
         assert await repo.get_domain_lexicons(domain)
         assert (quality.is_localized(title), reasoner._is_vietnamese(title)) == before
-        await load_market_vocabulary(repo)
     finally:
         await repo.close()
 
