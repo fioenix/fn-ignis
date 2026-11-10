@@ -1744,16 +1744,16 @@ async def handle_get_platform_auth_status() -> str:
 async def handle_clear_platform_auth(platform: str) -> str:
     comp = get_components()
     repo: ITrendRepository = comp.get("credential_repository", comp["repository"])
-    key = platform.lower()
-    base = key.removesuffix("_browser")
-    keys = (base, base + "_browser") if base in ("instagram", "threads") else (key,)
+    name = platform.strip().lower()
+    base = name.removesuffix("_browser")
+    keys = (base, base + "_browser") if base in ("instagram", "threads") else (name,)
     success = False
     for key in keys:
         deleted = await repo.delete_platform_credentials(key)
         success = deleted or success
     return json.dumps(
         {
-            "platform": platform.lower(),
+            "platform": name,
             "cleared": success,
             "message": f"Cleared authentication session for {platform}." if success else f"No active session found for {platform}."
         },
