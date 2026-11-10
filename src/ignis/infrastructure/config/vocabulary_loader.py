@@ -1,9 +1,6 @@
-"""One reader for the vocabulary that used to be Python constants.
+"""Load persisted machinery vocabulary and synchronize its consuming engines.
 
-Both entrypoints load the same rows from `market_lexicons` and push them into the same engines,
-so the grouping lives here instead of being written twice. It also keeps one list of the domains
-that are machinery rather than market evidence: those must stay out of the positive relevance
-vocabulary, otherwise a stopword like "new" would count as a reason a signal is on topic.
+Market-domain rows remain stored and listed but feed no matching or language mechanism.
 """
 
 import logging
@@ -38,17 +35,6 @@ TIKTOK_SUGGEST_TEMPLATE_PREFIX = "tiktok_suggest_templates_"
 
 # Every domain holding query templates rather than terms. None of them is market evidence.
 TEMPLATE_PREFIXES = (PROBE_TEMPLATE_PREFIX, TIKTOK_SUGGEST_TEMPLATE_PREFIX)
-
-
-def _is_template_domain(domain: str) -> bool:
-    return any(domain.startswith(prefix) for prefix in TEMPLATE_PREFIXES)
-
-
-def is_market_vocabulary_domain(domain: str) -> bool:
-    """Keep mechanism labels and templates out of positive market vocabulary."""
-    domain = domain.lower()
-    return (domain not in MACHINERY_DOMAINS and not _is_template_domain(domain)
-            and not domain.startswith(("threads_action_labels_", "tiktok_attribution_")))
 
 
 @dataclass(frozen=True)

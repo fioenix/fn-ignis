@@ -2,7 +2,6 @@ import pytest
 from unittest.mock import AsyncMock
 from typing import List
 
-from ignis.application.use_cases.ingest_trends import IngestTrendsUseCase
 from ignis.domain.entities import TrendSignal
 from ignis.domain.exceptions import ConnectorExecutionException
 from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe
@@ -55,18 +54,10 @@ async def test_ingest_orchestration_with_error_isolation():
     registry.register(MockSuccessPlugin())
     registry.register(MockFailingPlugin())
 
-    mock_repo = AsyncMock()
-    mock_repo.save_signals = AsyncMock(return_value=1)
+    signals = await registry.fetch_from_all(geo=GeoCode.VN)
 
-    use_case = IngestTrendsUseCase(registry=registry, repository=mock_repo)
-    result = await use_case.execute(geo=GeoCode.VN)
-
-    assert result["total_fetched"] == 1
-    assert result["total_saved"] == 1
-    assert mock_repo.save_signals.called
-    saved_signals = mock_repo.save_signals.call_args[0][0]
-    assert len(saved_signals) == 1
-    assert saved_signals[0].platform == PlatformType.GOOGLE_TRENDS
+    assert len(signals) == 1
+    assert signals[0].platform == PlatformType.GOOGLE_TRENDS
 
 
 @pytest.mark.asyncio
@@ -93,13 +84,10 @@ async def test_retired_threads_does_not_dispatch_or_break_other_ingress():
     registry = ConnectorPluginRegistry()
     registry.register(MockSuccessPlugin())
     registry.register(threads)
-    repository = AsyncMock()
-    repository.get_domain_lexicons.return_value = [{"term": "synthetic", "domain": "synthetic"}]
-    repository.save_signals.return_value = 1
-    result = await IngestTrendsUseCase(registry=registry, repository=repository).execute()
-    assert result["total_fetched"] == result["total_saved"] == 1
-    assert result["scope_guard"]["unavailable_surfaces"] == {"threads": "HOST_BROWSER_REQUIRED"}
-    assert repository.save_signals.await_args.args[0][0].platform is PlatformType.GOOGLE_TRENDS
+    signals = await registry.fetch_from_all()
+    assert len(signals) == 1
+    assert registry.last_pass_report["unavailable_surfaces"] == {"threads": "HOST_BROWSER_REQUIRED"}
+    assert signals[0].platform is PlatformType.GOOGLE_TRENDS
     threads.search_signals.assert_not_awaited()
     threads._auth_manager.get_access_token.assert_not_awaited()
     threads._browser_auth_manager.get_storage_state.assert_not_awaited()

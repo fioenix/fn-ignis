@@ -49,7 +49,6 @@ from ignis.application.use_cases.submit_evidence_qualifications import (
     SubmitEvidenceQualificationsUseCase,
 )
 from ignis.application.use_cases.get_top_clusters import GetTopClustersUseCase
-from ignis.application.use_cases.ingest_trends import IngestTrendsUseCase
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.application.youtube_quota import YouTubeQuotaManager
 from ignis.domain.author_identity import (
@@ -884,7 +883,6 @@ def _init_components(*, caller_scope=None):
         repository=repository, store=workspace_store
     )
     top_clusters_use_case = GetTopClustersUseCase(repository=repository)
-    ingest_use_case = IngestTrendsUseCase(registry=registry, repository=repository)
 
     return {
         "repository": repository,
@@ -910,7 +908,6 @@ def _init_components(*, caller_scope=None):
         "submit_mission_claims_use_case": submit_mission_claims_use_case,
         "get_mission_claims_use_case": get_mission_claims_use_case,
         "top_clusters_use_case": top_clusters_use_case,
-        "ingest_use_case": ingest_use_case,
         "runtime_config_manager": runtime_config_manager,
     }
 

@@ -16,7 +16,7 @@
 
 ## Phase 3: User Story 3 — no dead reader (P3)
 
-- [ ] T007 [US3] Delete `src/ignis/application/use_cases/ingest_trends.py`, its construction and `"ingest_use_case"` entry in `server.py`, and `src/ignis/infrastructure/harness/refinement_orchestrator.py`. For each test using them (`test_corpus_correctness.py`, `test_vocabulary_loader.py`, `tests/integration/test_ingest_orchestration.py`), re-point it to `ConnectorRegistry.fetch_from_all` when it proves a gate that path still has, or delete it when it proves only the removed code; list each disposition in the commit body.
+- [x] T007 [US3] Delete `src/ignis/application/use_cases/ingest_trends.py`, its construction and `"ingest_use_case"` entry in `server.py`, and `src/ignis/infrastructure/harness/refinement_orchestrator.py`. For each test using them (`test_corpus_correctness.py`, `test_vocabulary_loader.py`, `tests/integration/test_ingest_orchestration.py`), re-point it to `ConnectorRegistry.fetch_from_all` when it proves a gate that path still has, or delete it when it proves only the removed code; list each disposition in the commit body.
 - [ ] T008 [US3] Correct guidance that promises domain terms improve matching or quality (`docs/`, `.agents/skills/ignis-*`, `src/ignis/interfaces/mcp/guides/`, README pair); leave dated history alone.
 
 ## Phase 4: Acceptance

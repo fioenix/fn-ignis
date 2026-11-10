@@ -20,7 +20,6 @@ from unittest.mock import AsyncMock
 import pytest
 
 from ignis.application.ports.connector_port import IConnectorPlugin
-from ignis.application.use_cases.ingest_trends import IngestTrendsUseCase
 from ignis.domain.entities import TrendSignal
 from ignis.domain.value_objects import GeoCode, IngressScope, PlatformType, Timeframe
 from ignis.infrastructure.clustering.semantic_clusterer import SemanticClusterer
@@ -164,14 +163,13 @@ async def test_one_pass_produces_clusters_that_span_more_than_one_platform():
         )
     )
 
-    use_case = IngestTrendsUseCase(registry=registry, repository=repo)
-    result = await use_case.execute(geo=GeoCode.VN, scope=IngressScope.PUBLIC_MARKET)
-
-    signals = repo.save_signals.call_args.args[0]
+    signals = await registry.fetch_from_all(
+        geo=GeoCode.VN, scope=IngressScope.PUBLIC_MARKET, seed_keywords=[topic],
+    )
     clusters = await SemanticClusterer().cluster_signals(signals)
     spanning = [c for c in clusters if len({s.platform for s in signals if s.cluster_id == c.id}) > 1]
 
-    assert result["total_fetched"] > 0
+    assert signals
     assert spanning, (
         "No cluster spans two platforms. Every connector reported on its own subject, so the "
         "40-point platform diversity term cannot fire."
@@ -180,8 +178,8 @@ async def test_one_pass_produces_clusters_that_span_more_than_one_platform():
 
 @pytest.mark.asyncio
 async def test_keyword_fan_out_stays_within_the_stated_api_unit_budget():
-    """One scheduled pass must fit inside the reserved daily search-call allocation."""
-    from ignis.application.use_cases.ingest_trends import MAX_TOPIC_KEYWORDS
+    """One requested pass must fit inside its explicit keyword budget."""
+    max_probe_keywords = 10
 
     repo = _repository([f"seed {i}" for i in range(40)])
     chart = PopularityChartPlugin(chart=[], by_keyword={})
@@ -189,19 +187,24 @@ async def test_keyword_fan_out_stays_within_the_stated_api_unit_budget():
     registry.register(DiscoveryFeedPlugin([f"discovered {i}" for i in range(40)]))
     registry.register(chart)
 
-    await IngestTrendsUseCase(registry=registry, repository=repo).execute(geo=GeoCode.VN)
+    await registry.fetch_from_all(
+        geo=GeoCode.VN, seed_keywords=[f"seed {i}" for i in range(40)],
+        max_probe_keywords=max_probe_keywords,
+    )
 
-    assert len(chart.searched_keywords) <= MAX_TOPIC_KEYWORDS, (
+    assert len(chart.searched_keywords) <= max_probe_keywords, (
         f"{len(chart.searched_keywords)} keywords probed in one pass; the budget allows "
-        f"{MAX_TOPIC_KEYWORDS}."
+        f"{max_probe_keywords}."
     )
 
 
-def test_requested_ingress_exposes_no_scheduled_cadence():
-    from ignis.application.use_cases import ingest_trends
+def test_retired_ingress_readers_are_absent():
+    from pathlib import Path
 
-    assert not hasattr(ingest_trends, "quota_safe_interval_seconds")
-    assert not hasattr(ingest_trends, "YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT")
+    src = Path(__file__).resolve().parents[2] / "src/ignis"
+    assert not (src / "application/use_cases/ingest_trends.py").exists()
+    assert not (src / "infrastructure/harness/refinement_orchestrator.py").exists()
+    assert '"ingest_use_case"' not in (src / "interfaces/mcp/server.py").read_text()
 
 
 @pytest.mark.asyncio
@@ -212,19 +215,21 @@ async def test_lexicon_seeds_do_not_crowd_out_the_topics_the_pass_discovered():
     ten topics Google Trends had just reported were collected and then never probed, and stage 2
     was topic-coupled to the lexicon alone.
     """
-    from ignis.application.use_cases.ingest_trends import MAX_TOPIC_KEYWORDS
+    max_probe_keywords = 10
 
-    seeds = [f"seed {i}" for i in range(MAX_TOPIC_KEYWORDS)]
+    seeds = [f"seed {i}" for i in range(max_probe_keywords)]
     repo = _repository(seeds)
     chart = PopularityChartPlugin(chart=[], by_keyword={})
     registry = ConnectorPluginRegistry(repository=repo)
-    registry.register(DiscoveryFeedPlugin([f"discovered {i}" for i in range(MAX_TOPIC_KEYWORDS)]))
+    registry.register(DiscoveryFeedPlugin([f"discovered {i}" for i in range(max_probe_keywords)]))
     registry.register(chart)
 
-    await IngestTrendsUseCase(registry=registry, repository=repo).execute(geo=GeoCode.VN)
+    await registry.fetch_from_all(
+        geo=GeoCode.VN, seed_keywords=seeds, max_probe_keywords=max_probe_keywords,
+    )
 
     probed = chart.searched_keywords
-    assert len(probed) <= MAX_TOPIC_KEYWORDS
+    assert len(probed) <= max_probe_keywords
     assert any(kw.startswith("discovered") for kw in probed), (
         f"Only lexicon seeds were probed: {probed}"
     )
