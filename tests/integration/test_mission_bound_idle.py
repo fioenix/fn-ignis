@@ -26,6 +26,11 @@ from ignis.infrastructure.connectors.registry import SearchPassResult, SurfacePr
 
 
 NOW = datetime(2026, 9, 30, 12, 0, tzinfo=timezone.utc)
+MIXED_STATE_CASES = (
+    (ChannelHealthStatus.HEALTHY, ChannelHealthStatus.EMPTY_NO_DATA),
+    (ChannelHealthStatus.AUTH_REQUIRED, ChannelHealthStatus.RATE_LIMITED),
+    (ChannelHealthStatus.DEGRADED, ChannelHealthStatus.FAILED),
+)
 
 
 class CountingClusterer:
@@ -135,15 +140,11 @@ class CredentialLeakingRegistry(CountingRegistry):
 
 
 class MixedStateRegistry:
-    required = (
-        "youtube",
-        "google",
-        "tiktok_video_grid",
-        "tiktok_creative_center",
-        "threads",
-        "reels",
-    )
-    optional = ("tiktok_optional",)
+    required = ("youtube", "threads")
+    optional = ("tiktok_video",)
+
+    def __init__(self, statuses):
+        self.statuses = statuses
 
     async def resolve_execution_requirements(self, **_kwargs):
         return {
@@ -157,20 +158,12 @@ class MixedStateRegistry:
     async def search_with_outcomes(self, **kwargs):
         keywords = tuple(kwargs["keywords"])
         window = kwargs["custom_timeframe"]
-        statuses = (
-            ("youtube", "youtube", ChannelHealthStatus.HEALTHY, 1),
-            ("google", "google", ChannelHealthStatus.EMPTY_NO_DATA, 0),
-            ("tiktok", "tiktok_video_grid", ChannelHealthStatus.AUTH_REQUIRED, 0),
-            ("tiktok", "tiktok_creative_center", ChannelHealthStatus.RATE_LIMITED, 0),
-            ("threads", "threads", ChannelHealthStatus.DEGRADED, 0),
-            ("reels", "reels", ChannelHealthStatus.FAILED, 0),
-        )
         outcomes = [
             SurfaceProbeResult(
-                platform=platform,
+                platform=surface,
                 connector_surface=surface,
                 status=status,
-                signals_collected=count,
+                signals_collected=int(status is ChannelHealthStatus.HEALTHY),
                 note=(None if status is ChannelHealthStatus.HEALTHY else f"{status.value} test"),
                 queried_keywords=keywords if status in {
                     ChannelHealthStatus.HEALTHY,
@@ -181,7 +174,7 @@ class MixedStateRegistry:
                     ChannelHealthStatus.EMPTY_NO_DATA,
                 } else None,
             )
-            for platform, surface, status, count in statuses
+            for surface, status in zip(self.required, self.statuses, strict=True)
         ]
         signal = TrendSignal(
             platform=PlatformType.YOUTUBE,
@@ -192,7 +185,8 @@ class MixedStateRegistry:
             captured_at=NOW,
             metadata={"connector_surface": "youtube"},
         )
-        return SearchPassResult(signals=[signal], outcomes=outcomes)
+        signals = [signal] if self.statuses[0] is ChannelHealthStatus.HEALTHY else []
+        return SearchPassResult(signals=signals, outcomes=outcomes)
 
 
 def _manifest():
@@ -429,17 +423,26 @@ async def test_market_quota_preflight_includes_falsification_queries(repository_
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "statuses",
+    MIXED_STATE_CASES,
+    ids=["healthy-empty", "auth-rate-limited", "degraded-failed"],
+)
 async def test_mixed_channel_states_are_complete_and_match_persisted_outcomes(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, statuses
 ):
     from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
     from ignis.interfaces.mcp import server as mcp_server
 
+    # The retained surfaces exercise every state across runs, including the optional channel.
+    assert {status for pair in MIXED_STATE_CASES for status in pair} | {
+        ChannelHealthStatus.NOT_REQUESTED
+    } == set(ChannelHealthStatus)
     repository = SqliteTrendRepository(db_path=str(tmp_path / "mixed-states.db"))
     store = WorkspaceRepository(repository=repository)
     executor = ExecuteMissionUseCase(
         repository=repository,
-        registry=MixedStateRegistry(),
+        registry=MixedStateRegistry(statuses),
         clusterer=CountingClusterer(),
         workspace_store=store,
     )
@@ -472,7 +475,7 @@ async def test_mixed_channel_states_are_complete_and_match_persisted_outcomes(
         _mixed_manifest().allowed_resources
     )
     assert {item["status"] for item in result["channel_outcomes"]} == {
-        status.value for status in ChannelHealthStatus
+        status.value for status in (*statuses, ChannelHealthStatus.NOT_REQUESTED)
     }
     persisted_by_surface = {item.connector_surface: item for item in persisted}
     assert result["channel_outcomes"] == [
@@ -480,10 +483,15 @@ async def test_mixed_channel_states_are_complete_and_match_persisted_outcomes(
         for surface in _mixed_manifest().allowed_resources
     ]
     by_surface = {item.connector_surface: item for item in persisted}
-    assert by_surface["google"].measures_zero is True
-    assert by_surface["tiktok_optional"].status is ChannelHealthStatus.NOT_REQUESTED
+    assert {surface: outcome.status for surface, outcome in by_surface.items()} == {
+        **dict(zip(MixedStateRegistry.required, statuses, strict=True)),
+        "tiktok_video": ChannelHealthStatus.NOT_REQUESTED,
+    }
+    for outcome in persisted:
+        assert outcome.measures_zero is (outcome.status is ChannelHealthStatus.EMPTY_NO_DATA)
+    assert by_surface["tiktok_video"].status is ChannelHealthStatus.NOT_REQUESTED
     optional_plan = result["collection_plan"]["probes"][-1]
-    assert optional_plan["connector_surface"] == "tiktok_optional"
+    assert optional_plan["connector_surface"] == "tiktok_video"
     assert optional_plan["authority_tier"] == "not-requested"
     assert optional_plan["connector_path"] == "unavailable"
     assert optional_plan["sampling"] == {"limit": 0, "ordering": "not_requested"}
