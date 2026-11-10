@@ -22,7 +22,7 @@
 ## Phase 4: Acceptance
 
 - [x] T009 Run the touched modules (at most two per command, `uptime` first), `tests/unit/test_public_mcp_contract.py`, `tests/unit/test_sql_packaging.py` and `tests/unit/test_repo_conventions.py`; record results in `.handoff/023-verification.md`.
-- [ ] T010 Rerun the read-only localization measurement over the development store's 634 titles against the new code without applying the migration to it; expect 572 localized. Record it in `.handoff/023-verification.md`.
+- [x] T010 Rerun the read-only localization measurement over the development store's 634 titles against the new code without applying the migration to it; expect 572 localized. Record it in `.handoff/023-verification.md`.
 - [x] T011 Close the backlog item in `BACKLOG.md` with the measured numbers and add `fetch_from_all` as the remaining dead-code debt.
 
 ## Delegated verification — 2026-11-11
@@ -32,5 +32,5 @@ are in `.handoff/023-verification.md`; all pytest commands use `PYTHONPATH=src` 
 wrapper, at most two modules at a time. The mock-only ingest orchestration module passes.
 PostgreSQL/Compose database tests and the dual-backend Meta evidence module were not run,
 as required by the delegation brief; their changed contracts remain unverified on PostgreSQL.
-T010 remains coordinator-owned and was not run. No migration was applied to the development
+T010 was run by the coordinator on 2026-11-11 against `src/` with the store opened read-only: 572 of 634 titles localized, unchanged; the synthetic English title is no longer localized; the store file was not modified. No migration was applied to the development
 store; no push, PR, merge or release was performed.
