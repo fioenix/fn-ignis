@@ -1,11 +1,12 @@
 # 📋 FN-IGNIS BACKLOG & SYSTEM STATUS
 
-> - **Cập nhật lần cuối:** 09/11/2026 (dọn cấu trúc; ghi quyết định đóng băng Market verdict và đóng các mục đã kiểm)
+> - **Cập nhật lần cuối:** 10/11/2026 (Spec 022 trên nhánh riêng; chưa merge hay phát hành)
 > - **Phiên bản:** `v0.9.0`
 > - **Kiến trúc:** Clean Architecture + Dual-Backend (Postgres TimescaleDB & Zero-Docker SQLite)
->   + FastMCP Server (53 tools); watchlist có phiên bản, kế hoạch nghe và hai trục `seen` / `created`.
+>   + FastMCP Server (42 tools; nhánh Spec 022 chưa phát hành); watchlist có phiên bản, kế hoạch nghe và hai trục `seen` / `created`.
 > - **Schema:** Migration mới nhất là `sql/039_remove_seeded_taxonomy.sql`.
-> - **Thu thập:** Threads và TikTok qua trình duyệt host; Reels dùng Playwright không có cờ che giấu tự động hóa.
+> - **Thu thập:** YouTube Data API, Threads và TikTok qua trình duyệt host, bình luận TikTok theo URL.
+>   Spec 022 ngừng RSS, Creative Center, tìm kiếm TikTok headless và Reels; giữ nguyên dữ liệu cũ.
 >   Ignis không có worker hay lịch khám phá hằng ngày; routine chạy trên host khi được yêu cầu.
 > - **Trạng thái:** `v0.9.0` đã tag và publish ngày 28/10/2026 qua source, GitHub Release và GHCR
 >   (`ghcr.io/fioenix/fn-ignis:0.9.0`); PyPI tiếp tục được hoãn. Kiểm tra trạng thái thật bằng
@@ -21,6 +22,10 @@ Spec 014 chuyển xuống mục đóng băng bên dưới. Ba task baseline củ
 xóa và chưa đọc lại kho đó.
 
 ### Có task cụ thể, chưa nghiệm thu
+
+- [~] **Spec 022 — ngừng nguồn không còn dùng được:** nhánh `022-retire-unusable-sources` có 42 tool;
+  đã gỡ 11 tool và chặn các nguồn đã nghỉ trước thu thập, giữ nguyên đường đọc dữ liệu cũ.
+  Kiểm thử cục bộ dùng SQLite tạm và nguồn giả; PostgreSQL và review độc lập chưa nghiệm thu.
 
 - [x] **TikTok trên profile Finos bị fail-closed** — đóng 09/11/2026. Đo trực tiếp: trang có `lang=en` trong khi
   `tiktok_attribution_en` chưa có mẫu, nên validator loại toàn bộ. Đã đổi giao diện profile sang Tiếng Việt (`vi-VN`);
@@ -143,7 +148,8 @@ hoặc cách dùng đủ rõ với người dùng; PATCH dành cho các thay đ�
 kể trải nghiệm sản phẩm. Chốt mục tiêu không đồng nghĩa đã bump metadata, merge hay phát hành;
 các cổng pilot và release vẫn giữ nguyên.
 
-`main` có **53 tools** từ ngày 26/10/2026, khi PR #88 (Spec 018 phần A) được merge tại
+Nhánh Spec 022 hiện có **42 tools**, chưa merge hay phát hành. Mốc lịch sử ngày 26/10/2026
+đã thêm tool thứ 53 khi PR #88 (Spec 018 phần A) được merge tại
 `25d10c3`. PR này thêm `set_watchlist_listening_plan` để lưu mục tiêu, kỳ so sánh và nhịp lấy mẫu
 do người dùng chọn; khi không truyền `period_kind`, `get_watchlist_period_snapshot` dùng kỳ so sánh
 đã lưu. Bộ tool này có `save_watchlist`,

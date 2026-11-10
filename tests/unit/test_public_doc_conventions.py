@@ -167,7 +167,7 @@ def test_current_guides_explain_mission_bound_work_and_release_boundary():
         text = _read(relative)
         assert "Spec 011" in text, relative
         assert "025_evidence_grounded_claim_ledger.sql" in text, relative
-        assert "53 tools" in text, relative
+        assert "42 tools" in text, relative
         assert "ignis-track" in text and "open_mission_relay" not in text, relative
         assert "028_research_work.sql" in text, relative
         assert "v0.7.0" in text, relative
@@ -413,7 +413,7 @@ def test_spec020_public_docs_explain_the_browser_only_boundary(relative):
     text = _read(relative)
     for term in ('source="threads"', 'source="tiktok"', "threads-search-top-v2", "Playwright",
                  "Reels", "collection_path_changed", "collection_path_mixed", "collection_path_unknown",
-                 "53", "sql/039_remove_seeded_taxonomy.sql"):
+                 "42", "sql/039_remove_seeded_taxonomy.sql"):
         assert term in text, f"{relative} must explain {term}"
     assert "AutomationControlled" not in text, "Do not publish an evasion recipe"
 
@@ -424,3 +424,19 @@ def test_spec020_quickstart_separates_automated_proof_from_live_authority():
     for term in ('source="threads"', 'source="tiktok"', "both unknown", "verified empty",
                  "T047", "T049", "T050", "T051", "T052", "spec020-dist"):
         assert term in text, term
+
+
+def test_current_collection_guides_do_not_offer_retired_tools_or_sources():
+    from tests.unit.test_source_retirement import REMOVED
+
+    paths = [Path(p) for p in ('README.md', 'README.vi.md', 'docs/USER_GUIDE.md',
+                              'docs/USER_GUIDE.vi.md', 'docs/META_INTEGRATION_GUIDE.md',
+                              'docs/META_INTEGRATION_GUIDE.vi.md')]
+    paths += list(Path('src/ignis/interfaces/mcp/guides').glob('*.md'))
+    paths += list(Path('.agents/skills').glob('ignis-*/SKILL.md'))
+    for path in paths:
+        text = path.read_text()
+        assert not [name for name in REMOVED if name in text], str(path)
+        assert 'Reels keeps its flag-free Playwright path' not in text, str(path)
+        assert 'Reels stays on Playwright' not in text, str(path)
+        assert 'need a saved sign-in' not in text, str(path)

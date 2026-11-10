@@ -40,13 +40,13 @@ requests create nothing, and old manifests/observations/outcomes/sessions remain
 Independent proof: shipped catalogs match runtime, all governed tool counts are 42, and current
 instructions route only to retained collection. Historical evidence documentation is labelled.
 
-- [ ] T015 [US3] Add source-guidance regression checks in tests/unit/test_public_doc_conventions.py; update catalog and smoke expectations in tests/unit/test_tool_manifests_drift.py, test_public_distribution_contract.py and scripts/wheel_mcp_smoke.py.
-- [ ] T016 [US3] Update AGENTS.md Collection/count, CLAUDE.md, README*.md, docs/USER_GUIDE*.md, BACKLOG.md, active docs/agents/ guidance; verify dated source diagrams remain historical; update .agents/skills/ignis-*/ and src/ignis/interfaces/mcp/guides/ together.
-- [ ] T017 [US3] Update openclaw.json and verify server.json has no stale catalog claim; regenerate hermes_manifest.json and .hermes/tools.json with scripts/sync_tool_manifests.py --write; run distribution/doc/convention gates and commit the seam.
+- [x] T015 [US3] Add source-guidance regression checks in tests/unit/test_public_doc_conventions.py; update catalog and smoke expectations in tests/unit/test_tool_manifests_drift.py, test_public_distribution_contract.py and scripts/wheel_mcp_smoke.py.
+- [x] T016 [US3] Update AGENTS.md Collection/count, CLAUDE.md, README*.md, docs/USER_GUIDE*.md, BACKLOG.md, active docs/agents/ guidance; verify dated source diagrams remain historical; update .agents/skills/ignis-*/ and src/ignis/interfaces/mcp/guides/ together.
+- [x] T017 [US3] Update openclaw.json and verify server.json has no stale catalog claim; regenerate hermes_manifest.json and .hermes/tools.json with scripts/sync_tool_manifests.py --write; run distribution/doc/convention gates and commit the seam.
 
 ## Phase 6: Final verification
 
-- [ ] T018 Review final diff, perform specs/022-retire-unusable-sources/quickstart.md checks, run Spec Kit convergence, and record completed/open tasks and review limits in .handoff/022-verification.md.
+- [x] T018 Review final diff, perform specs/022-retire-unusable-sources/quickstart.md checks, run Spec Kit convergence, and record completed/open tasks and review limits in .handoff/022-verification.md.
 
 ## Dependencies and execution
 

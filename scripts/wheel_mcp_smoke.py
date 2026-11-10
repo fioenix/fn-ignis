@@ -31,15 +31,10 @@ import sys
 import threading
 from dataclasses import dataclass
 
-EXPECTED_TOOL_COUNT = 53
+EXPECTED_TOOL_COUNT = 42
 EXPECTED_TOOL_NAMES = {
-    "authenticate_instagram",
-    "authenticate_threads",
-    "authenticate_tiktok",
     "cancel_host_browser_search",
-    "clear_instagram_auth",
     "clear_platform_auth",
-    "clear_threads_auth",
     "confirm_market_brief",
     "confirm_research_workspace",
     "create_attention_mission",
@@ -51,7 +46,6 @@ EXPECTED_TOOL_NAMES = {
     "extract_customer_pain_points",
     "generate_mission_artifact",
     "get_current_session_mission",
-    "get_instagram_auth_status",
     "get_mission_analysis",
     "get_mission_claims",
     "get_mission_evidence_qualification_batch",
@@ -59,11 +53,6 @@ EXPECTED_TOOL_NAMES = {
     "get_platform_auth_status",
     "get_runtime_config",
     "get_system_logs",
-    "get_threads_auth_status",
-    "get_threads_search_suggestions",
-    "get_threads_trending_topics",
-    "get_tiktok_creative_center_trends",
-    "get_tiktok_search_suggestions",
     "get_tiktok_video_comments",
     "get_watchlist",
     "list_domain_lexicons",

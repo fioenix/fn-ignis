@@ -6,11 +6,9 @@ Ignis là bộ công cụ tự lưu trữ để nghiên cứu thị trường t�
 lập: thu thập có thể kết thúc bằng một khung chứng cứ; phân tích có thể kết thúc bằng báo cáo
 thiếu chứng cứ thay vì cố đưa ra kết luận.
 
-**Ranh giới phát hành:** v0.9.0 bổ sung tìm kiếm Threads và TikTok qua trình duyệt host, Reels
-không dùng cờ che giấu tự động hóa và migration tới `038`; watchlist và bản xem theo kỳ gắn với
-mục tiêu đã lưu vẫn được giữ. Mã nguồn
-và image v0.7.0 đã công bố vẫn thuộc kiến trúc Dual-Track cũ; chúng không có bộ 53 tool theo
-nhiệm vụ được mô tả ở đây.
+**Phạm vi nhánh:** Spec 022 có 42 tools và ngừng các đường thu thập không còn dùng được.
+Thay đổi này chưa phát hành. Bản v0.9.0 đã công bố giữ hợp đồng trình duyệt host và migration
+tới `038` của thời điểm phát hành; v0.7.0 thuộc kiến trúc Dual-Track cũ.
 
 ## Hợp đồng sản phẩm
 
@@ -83,7 +81,7 @@ trong source checkout là `reports/` không được commit. Mã template báo c
 
 ## Năng lực dành cho agent
 
-MCP server của nhánh hiện có **53 tools**. Mô tả tool do server đang chạy trả về là nguồn
+MCP server của nhánh hiện có **42 tools**. Mô tả tool do server đang chạy trả về là nguồn
 chuẩn cho tham số. Một số thao tác đại diện:
 
 - `create_attention_mission` và `confirm_market_brief` xác lập câu hỏi và phạm vi;
@@ -107,8 +105,7 @@ chuẩn cho tham số. Một số thao tác đại diện:
   13 tháng và chỉ xóa khi có `--apply`, giữ các quan sát còn được claim hoặc công việc nghiên cứu
   tham chiếu. Với guide `ignis_routine`, agent có thể tạo một scheduled task hằng ngày
   trong Claude Code Desktop để chạy một watchlist; bản thân Ignis vẫn không tự lên lịch việc gì.
-- Các tool nguồn riêng lẻ như `get_tiktok_search_suggestions` và
-  `get_tiktok_video_comments` có thể trả lời câu hỏi cụ thể mà không cần kết luận thị trường.
+- Tool `get_tiktok_video_comments` có thể trả lời câu hỏi cụ thể mà không cần kết luận thị trường.
 - Ba tool `prepare_host_browser_search`, `submit_host_browser_search` và
   `cancel_host_browser_search` thu thập lưới TikTok và kết quả Threads Top có giới hạn qua trình duyệt được
   cho phép. Đây là đường chủ động chọn, không phải phương án tự động dự phòng;
@@ -140,17 +137,16 @@ biểu diễn nhánh này.
 ### Thu thập Threads qua host và so sánh đường thu thập
 
 `prepare_host_browser_search` có tham số tùy chọn `source="threads"`. Khi bỏ qua tham số này,
-tool giữ `source="tiktok"`. Submit và cancel vẫn nhận ba tham số ID. Tổng số tool vẫn là 53.
-Threads chỉ thu thập qua trình duyệt host được cho phép. Phần thu thập Threads bằng Playwright
-đã bị loại bỏ. Hai tool gợi ý và xu hướng cũ trả về `UNAVAILABLE/HOST_BROWSER_REQUIRED`.
-Credential Threads đã lưu không chứng minh có thể thu thập. Ignis không kích hoạt đường API,
-không probe quyền API và không tự chuyển sang cách thu thập dự phòng khi lỗi.
+tool giữ `source="tiktok"`. Submit và cancel vẫn nhận ba tham số ID. Tổng số tool hiện là 42.
+Threads chỉ thu thập qua trình duyệt host được cho phép. Phần thu thập bằng Playwright và
+các tool gợi ý, xu hướng chỉ trả kết quả không khả dụng đã bị gỡ. Credential Threads đã lưu
+không chứng minh có thể thu thập; Ignis không probe quyền API hay tự chuyển sang đường API.
 
-Reels vẫn dùng Playwright, không dùng cờ che giấu tự động hóa. Trang yêu cầu đăng nhập,
-checkpoint, challenge, phản hồi không đọc được hoặc thiếu search envelope đều là kết quả
-không khả dụng có lý do, không phải số 0 đã đo. Search envelope rỗng, đúng cấu trúc và đã được
-xác minh có thể trả về `EMPTY_NO_DATA` cho từ khóa đã chạy. Kết quả này không chứng minh đã
-bao phủ từ khóa khác hay biết rõ khoảng thời gian.
+Spec 022 ngừng thu thập qua Google Trends RSS, Creative Center, tìm kiếm TikTok headless và Reels.
+Quan sát, kết quả từng kênh và session cũ vẫn đọc được, không bị sửa hay xóa.
+Mission có nguồn đã ngừng hoạt động trả `BLOCKED / SURFACE_RETIRED` trước khi thu thập.
+Lượt chạy watchlist loại những nguồn đó khỏi danh sách được yêu cầu và nêu rõ từng nguồn;
+nếu không còn nguồn nào, lượt chạy bị từ chối. Nguồn đã ngừng hoạt động không được tính là số 0 đã đo.
 
 TikTok hiện dùng `tiktok-public-grid-v3`; Threads dùng `threads-search-top-v2`. Các kỳ watchlist
 trải qua thời điểm nâng cấp trả về `not_comparable` với lý do `collection_path_changed` hoặc

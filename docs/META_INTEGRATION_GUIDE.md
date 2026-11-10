@@ -1,147 +1,44 @@
-# fnIgnis 🔥 — Meta Integration Guide (Threads & Instagram Reels)
-## Dual-UX Architecture: 1-Click Zero-Setup for Non-Tech & Deep Graph API for Power Users
+# Meta collection: Threads and historical Instagram evidence
 
-This document defines the integration architecture, step-by-step instructions, and **Agent-Operable Runbooks** for connecting Meta platforms: **Threads** and **Instagram Reels**.
+On the Spec 022 branch, Threads collection runs only through the user's explicitly authorized
+host browser. Reels collection and the platform-specific login tools have been retired.
+Stored observations, channel outcomes and sessions remain readable; this change deletes no data.
+The branch exposes 42 tools and has not been released as a new version.
 
----
+## Collect Threads
 
-## 📑 Table of Contents
-1. [Dual-UX Model: Selecting Your Integration Tier](#1-dual-ux-model-selecting-your-integration-tier)
-2. [Tier 1: 1-Click Experience for Non-Tech Users (Zero-Setup Onboarding)](#2-tier-1-1-click-experience-for-non-tech-users-zero-setup-onboarding)
-   - [How It Works](#how-tier-1-works)
-   - [Data Yield & Trade-offs](#data-yield--trade-offs)
-3. [Tier 2: Deep Meta Graph API for Power Users & Enterprise](#3-tier-2-deep-meta-graph-api-for-power-users--enterprise)
-   - [Step 1: Register Application on Meta Developer Portal](#step-1-register-application-on-meta-developer-portal)
-   - [Step 2: Configure Scopes & Redirect URIs](#step-2-configure-scopes--redirect-uris)
-   - [Step 3: Add Credentials to .env](#step-3-add-credentials-to-env)
-   - [Step 4: Execute OAuth 2.0 Flow via FastMCP Tools](#step-4-execute-oauth-20-flow-via-fastmcp-tools)
-4. [🤖 Agent Automation Runbook](#4--agent-automation-runbook)
-5. [Credential Security Architecture & Token Lifecycle](#5-credential-security-architecture--token-lifecycle)
-6. [Troubleshooting & FAQ](#6-troubleshooting--faq)
+Use the [collection guide](../.agents/skills/ignis-collect/SKILL.md) for a bounded request.
+`prepare_host_browser_search` with `source="threads"` prepares the authorized scope;
+`submit_host_browser_search` validates the captured public evidence, and
+`cancel_host_browser_search` cancels that scope. Preparation is not permission to access a browser.
+The host uses its own browser capability and preserves the user's tabs.
 
----
+The `threads-search-top-v2` path collects a bounded visible Top sample. Loading, a login wall,
+a challenge or an unparseable page is unavailable, never proof of an empty market. Stored Graph
+credentials do not enable this flow. Ignis does not probe an API grant or fall back to Graph API
+or an internal Playwright collector. See the [user guide](USER_GUIDE.md#explicit-host-browser-tiktok-and-threads-search)
+for scope, counter precision, identity handling and period comparability.
 
-## 1. Dual-UX Model: Selecting Your Integration Tier
+## Existing sessions and evidence
 
-`fn-ignis` solves the friction of developer account setup through a two-tier approach:
+`get_platform_auth_status` still reads generic credential metadata. Only an explicitly requested
+`clear_platform_auth` removes a saved credential locally.
+To revoke provider-side access, use the platform's own security settings.
+Retirement itself never clears sessions. Self-content exclusion may still read stored account
+identity; that does not open a collection session or establish readiness.
 
-| Capability | Tier 1: Zero-Setup Ingress (Default) | Tier 2: Deep Graph API (Advanced) |
-|---|---|---|
-| **Target Audience** | Marketers, Indie Founders, Casual Analysts | Tech Leads, Data Engineers, Enterprise Ops |
-| **Setup Time** | 0 minutes (instant) | 15–30 minutes (app registration required) |
-| **Meta App Required** | No | Yes (Threads API & Instagram Basic Display) |
-| **Data Yield** | Public trending topics, search autocomplete, top public posts | The authenticated account's own posts and their insights |
-| **Public market listening** | Yes | **Only with `threads_keyword_search` approved through Meta App Review** |
-| **Reliability** | Public endpoints with defensive rate limiting | Official SLAs, but capped at 2,200 keyword searches per 24h |
+A new mission or rerun naming `reels` returns `BLOCKED / SURFACE_RETIRED` before collection.
+A watchlist run drops retired requested surfaces with that typed reason, or blocks when none
+remain. Old Reels observations and outcomes remain visible under their original platform labels.
 
-> **Which tier listens to the market?** Tier 1. This matters more than the table suggests: Meta
-> grants `threads_keyword_search` only after App Review, and until it is granted the endpoint still
-> answers HTTP 200 while searching **the authenticated account's own posts only**. A Tier-2 install
-> without that approval therefore listens to itself. `authenticate_threads()` probes for this and
-> reports `keyword_search_access`; a `SELF_ONLY` or `NOT_PERMITTED` verdict means the Graph tier
-> cannot do market listening on that app.
->
-> `fn-ignis` is self-hosted open source, so App Review is not treated as a prerequisite for
-> anything. Tier 1 — a one-click browser login on the operator's own machine, no app, no review —
-> is the supported path for Threads and Instagram listening. Tier 2 is worth having for insights on
-> your own content, and for the rare install that already holds the approval.
+## Credential security
 
----
+Existing credential storage uses Fernet (AES-128-CBC + HMAC-SHA256) with `IGNIS_ENCRYPTION_KEY`.
+`key_version` is an envelope label. There is no dual-key decryption or automatic re-encryption;
+replacing the key makes records encrypted with the old key unreadable. Never paste credentials
+into chat. Output sanitization covers project-controlled paths, not external tools or transcripts.
+Pattern-based PII filtering reduces exposure but cannot certify removal of every personal name.
 
-## 2. Tier 1: 1-Click Experience for Non-Tech Users (Zero-Setup Onboarding)
-
-### How Tier 1 Works
-When no API keys are provided in `.env`, `fn-ignis` automatically falls back to:
-- Direct GraphQL public queries for trending threads and keyword expansion.
-- Public search suggestions for slang and user phrasing.
-- PII-sanitized public snippet ingestion.
-
-### Data Yield & Trade-offs
-- **Yield**: Immediate signal ingestion without entering credentials or configuring OAuth.
-- **Trade-off**: Lower rate limit ceilings compared to authenticated API quotas.
-
----
-
-## 3. Tier 2: Deep Meta Graph API for Power Users & Enterprise
-
-### Step 1: Register Application on Meta Developer Portal
-1. Navigate to [Meta for Developers](https://developers.facebook.com/).
-2. Click **My Apps** $
-ightarrow$ **Create App**.
-3. Select **Other** $
-ightarrow$ **Business** (or Consumer).
-4. Add the **Threads** product and/or **Instagram** product to your app.
-
-### Step 2: Configure Scopes & Redirect URIs
-Ensure the following OAuth scopes are requested:
-- Threads: `threads_basic`, `threads_content_publish`, `threads_read_replies`
-- Instagram: `instagram_basic`, `instagram_manage_insights`
-
-Set the Valid OAuth Redirect URI to:
-```
-http://localhost:8080/auth/callback
-```
-
-### Step 3: Add Credentials to .env
-Add the App ID and App Secret to your `.env`:
-```ini
-THREADS_APP_ID=your_threads_app_id
-THREADS_APP_SECRET=your_threads_app_secret
-INSTAGRAM_APP_ID=your_instagram_app_id
-INSTAGRAM_APP_SECRET=your_instagram_app_secret
-```
-
-### Step 4: Execute OAuth 2.0 Flow via FastMCP Tools
-Use the built-in MCP authentication tools:
-```json
-{
-  "tool": "authenticate_threads",
-  "arguments": {
-    "code": "AQB..."
-  }
-}
-```
-
----
-
-## 4. 🤖 Agent Automation Runbook
-
-When an AI Agent is tasked with connecting Meta channels, it follows this sequence:
-
-1. **Check Status**:
-   Call `get_threads_auth_status()` and `get_instagram_auth_status()`.
-2. **Handle Unauthenticated State**:
-   - If user provided API keys, guide or assist with OAuth exchange.
-   - If no keys are provided, inform user and proceed with Tier 1 public listening automatically.
-3. **Verify Health**:
-   Call `verify_connectors_health()` to ensure connectors report `HEALTHY` or `DEGRADED_FALLBACK`.
-
----
-
-## 5. Credential Security Architecture & Token Lifecycle
-
-- **Encryption at Rest**: Tokens and secrets are encrypted with Fernet (AES-128-CBC + HMAC-SHA256, 256-bit key) using `IGNIS_ENCRYPTION_KEY`.
-- **Key version label**: Each encrypted record carries `key_version: "v1"`. This is an envelope
-  label, not a mechanism — `decrypt_credentials()` builds one Fernet from the current
-  `IGNIS_ENCRYPTION_KEY` and does not read it. There is no dual-key decryption and no automatic
-  re-encryption, so replacing the key makes existing records unreadable and each connector has to
-  be re-authenticated.
-- **Output sanitization**: Credential fields are redacted from the outputs and log lines the
-  project controls, and settings holding secrets are typed so a failing assertion does not print
-  them. This covers the paths in this codebase; it is not a guarantee about every future code path
-  or about tooling outside it. **Do not paste long-lived credentials into a chat session** — an
-  agent transcript is outside what this project can scrub.
-- **PII filtering**: Inbound social payloads are passed through a pattern-based sanitizer that
-  targets phone numbers, email addresses and token-shaped strings. Pattern matching cannot certify
-  that every identifier in third-party content has been found, so treat it as risk reduction rather
-  than removal.
-
----
-
-## 6. Troubleshooting & FAQ
-
-### Q: Why did Threads return fewer signals than expected?
-A: Public endpoints may apply temporary rate limits if hit too rapidly. If deep ingestion is required, upgrade to Tier 2 with official Meta API keys.
-
-### Q: How do I wipe saved credentials?
-A: Call `clear_threads_auth()` or `clear_instagram_auth()`.
+The [source-connection decision](decisions/2026-11-10-source-connection-boundary.md) governs future
+connections: an official platform-owner MCP is used by the host; otherwise a working built-in
+connection remains eligible. Community MCPs do not qualify as official.

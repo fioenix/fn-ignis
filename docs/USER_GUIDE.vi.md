@@ -1,9 +1,8 @@
-# Hướng dẫn sử dụng Ignis — v0.9.0
+# Hướng dẫn sử dụng Ignis — Spec 022
 
-Tài liệu này mô tả v0.9.0: tìm kiếm Threads và TikTok qua trình duyệt host, Reels không dùng
-cờ che giấu tự động hóa, migration tới `038` và watchlist được giữ lại. Worker và sơ đồ Dual-Track của v0.7.0
-là lịch sử, không mô tả phiên bản này. Xem
-[README tiếng Việt](../README.vi.md) để biết hợp đồng sản phẩm và ranh giới phát hành.
+Tài liệu mô tả nhánh Spec 022 hiện tại với 42 tools. Việc ngừng các nguồn không còn dùng được
+chưa phát hành; bản v0.9.0 đã công bố vẫn có danh mục và cách thu thập trước thay đổi này.
+Bản v0.7.0 thuộc kiến trúc Dual-Track cũ, không mô tả nhánh theo nhiệm vụ này.
 
 ## 1. Khởi động và kiểm tra
 
@@ -59,25 +58,21 @@ owner, nguồn, trình duyệt hoặc phiên đăng nhập. Credential, phiên t
 thực đã lưu tự chúng không cấp quyền đó.
 
 - `get_tiktok_video_comments(video_url, limit=30)` đọc bình luận công khai dưới một video TikTok
-  bằng trình duyệt headless, dùng phiên TikTok đã lưu nếu có. Kết quả gồm `status`, `video_url`,
-  `total_comments` và danh sách bình luận. URL không có đoạn `/video/<id>` hoặc máy chưa cài
-  Playwright trả về `SUCCESS` với 0 bình luận. Trang bị chặn hoặc không phân tích được cũng có thể
+  bằng trình duyệt headless, không dùng phiên TikTok đã lưu. Kết quả gồm `status`, `video_url`,
+  `total_comments` và danh sách bình luận. URL video TikTok không hợp lệ trả `ERROR`.
+  Nếu thiếu package Python Playwright, bộ đọc hiện trả `SUCCESS` với 0 bình luận. Trang bị chặn hoặc không phân tích được cũng có thể
   cho 0 bình luận, hoặc trả về `ERROR`, tùy chỗ bị lỗi. Vì vậy con số 0 không chứng minh video
   không có thảo luận.
-- `get_tiktok_search_suggestions(keywords, geo="VN")` trả về gợi ý tìm kiếm.
-  `get_tiktok_creative_center_trends(geo="VN", period=7, limit=20, industry=None)` trả về xu hướng
-  vĩ mô (`limit` tối đa 50). Các kết quả này mở rộng chủ đề, không đo nhu cầu.
-  Hai chữ ký cũ `get_threads_search_suggestions(keyword, geo="VN", limit=10)` và
-  `get_threads_trending_topics(geo="VN", limit=15)` trả về `UNAVAILABLE/HOST_BROWSER_REQUIRED`.
-  Không có phương án dự phòng qua browser, cookie hay OAuth.
+- Lệnh `extract_customer_pain_points` cũ trả `BLOCKED / SURFACE_RETIRED` vì tìm kiếm theo
+  từ khóa bằng headless đã ngừng hoạt động. Chỉ dùng tool bình luận khi đã có URL video.
 - `execute_mission_ingress(mission_id)` là lựa chọn riêng cho nhiệm vụ đã xác nhận: tool này chỉ
   chạy kế hoạch đã ghi của nhiệm vụ đó và ghi kết quả cho từng kênh được yêu cầu.
 
 Các tool này không ép theo quy trình thu thập rồi mới phân tích, không tự lên lịch thu thập tiếp
 và không cần gọi nối nhau. Mỗi tool vẫn có điều kiện riêng: quyền truy cập nguồn thực tế, phạm vi
 nguồn và nhiệm vụ, giới hạn tài nguyên. Riêng `execute_mission_ingress` còn cần nhiệm vụ đã xác
-nhận cùng kế hoạch đã ghi (với nhiệm vụ Market là Market Brief đã xác nhận). `verify_connectors_health` chỉ chạy chẩn đoán tổng hợp, còn tool xác thực có thể chạy
-probe truy cập, nên đừng gọi chúng chỉ để xem một nguồn có dùng được hay không.
+nhận cùng kế hoạch đã ghi (với nhiệm vụ Market là Market Brief đã xác nhận). `verify_connectors_health` có chạy probe trên các connector đang hoạt động;
+chỉ gọi khi đã có quyền truy cập những nguồn đó.
 
 Nếu cần quyết định kinh doanh, hãy nêu quyết định cần đưa ra, đối tượng, địa lý, thời gian,
 giả thuyết, cách giải thích thay thế và điều gì khiến quyết định thay đổi. Agent tạo Attention mission
@@ -129,15 +124,14 @@ thành một file trên máy, trình bày hai trục riêng:
 Mỗi kênh giữ đơn vị riêng; kênh đo trên mẫu phải ghi rõ số liệu chỉ tính trên mẫu đã thu thập.
 Trạng thái so sánh của
 hai trục độc lập với nhau; không cộng dồn giữa các kênh hay hai trục. Chỉ số chưa biết không phải
-bằng 0. Google Trends RSS chỉ cung cấp chủ đề vĩ mô và traffic do feed báo; phép đo Trends theo
-từ khóa hiện chưa có và trả `DEGRADED`, không phải điểm nhu cầu.
+bằng 0. Dữ liệu Google Trends cũ giữ nhãn nguồn ban đầu; đó không phải phép đo nhu cầu mới theo từ khóa.
 
 Mỗi kênh có một trần request theo ngày. Một request là một lần tìm một từ khóa trên kênh đó và
 mọi phiên dùng chung một store đều dùng chung bộ đếm của ngày đó theo giờ Việt Nam. Mặc định YouTube
 được 200 request, các kênh khác 50; muốn nâng trần thì đặt `connector.<platform>.daily_request_ceiling`
 bằng `update_runtime_config`. Lượt tìm nào vượt trần sẽ không gửi gì tới kênh đó và được ghi
 `RATE_LIMITED` kèm ghi chú `daily_ceiling`, còn các kênh khác vẫn chạy. Mỗi lượt tìm tính mọi từ
-khóa nó tìm (Reels chỉ đọc tối đa 10 từ khóa), nên watchlist có nhiều từ khóa hơn trần của
+khóa nó tìm, nên watchlist có nhiều từ khóa hơn trần của
 một kênh sẽ bỏ qua kênh đó cho tới khi bạn nâng trần. Ignis không tự xóa
 lịch sử: `scripts/prune_expired_observations.py` liệt kê các quan sát
 thu thập cách đây hơn 13 tháng và xóa chúng khi có `--apply`, trừ những quan sát mà một
@@ -149,8 +143,8 @@ scheduled task trong Claude Code Desktop: mỗi watchlist tối đa một task, 
 ngày, và chỉ được tạo sau khi bạn xác nhận những gì sẽ chạy. Mỗi lần kích hoạt là đúng một lần chạy
 watchlist. Hãy tạo task từ một phiên mở trong thư mục repository của research workspace, vì lần kích
 hoạt bắt đầu trong thư mục đó. Trước khi tạo, agent kiểm tra từng kênh có thu thập được cho
-workspace của bạn không: YouTube cần key trong `.fnignis/.env` riêng của workspace, còn các kênh
-browser cần phiên đăng nhập đã lưu. Routine không bao giờ chạy ở chế độ quyền Bypass, và chỉ chạy ở
+workspace của bạn không: YouTube cần key trong `.fnignis/.env` riêng của workspace, routine này chỉ chạy YouTube.
+TikTok và Threads cần luồng trình duyệt host được cho phép riêng. Routine không bao giờ chạy ở chế độ quyền Bypass, và chỉ chạy ở
 chế độ Auto khi bạn đồng ý lúc cài đặt. Mỗi lần chạy, agent còn đánh giá xem item nào thu được thuộc
 đúng chủ đề của bạn, vì period view chỉ đếm những item đã được đánh giá. Bước cài đặt kết thúc bằng
 một lần chạy có bạn theo dõi; ở chế độ có hỏi quyền, bạn chỉ duyệt `start_watchlist_run`,
@@ -168,10 +162,9 @@ cập được hoặc đo thất bại là thiếu bao phủ, còn bề mặt n�
 ủng hộ, phản bác hay chỉ cung cấp bối cảnh và kiểm tra khung chứng cứ đã đi đến trạng thái
 cuối trước khi lập nhận định Market.
 
-Thu thập Threads cần trình duyệt host được cho phép riêng. Credential Graph đã lưu chỉ là trạng
-thái tương thích, không chứng minh quyền tìm kiếm công khai. `authenticate_threads`,
-`get_threads_auth_status` và `clear_threads_auth` giữ chữ ký cũ; chúng không kích hoạt thu thập
-hay probe quyền API. Hãy chuẩn bị host một cách tường minh hoặc báo phần thiếu dữ liệu.
+Thu thập Threads cần trình duyệt host được cho phép riêng. Credential Graph đã lưu không
+cấp quyền tìm kiếm công khai và không kích hoạt thu thập. Hãy dùng luồng host đã xác nhận
+hoặc báo rõ phần thiếu chứng cứ.
 
 Mỗi nhận định chiến lược phải nằm trong Claim Ledger được lưu. `submit_mission_claims` gắn
 nó với quan sát hoặc kết quả không thấy dữ liệu đã được đo hợp lệ;
@@ -263,7 +256,7 @@ cấp quyền thực hiện.
 
 ## 4. Ranh giới tool và triển khai
 
-MCP server cục bộ có **53 tools**. Xem mô tả trực tiếp từ server để biết tham số chính xác;
+MCP server cục bộ có **42 tools**. Xem mô tả trực tiếp từ server để biết tham số chính xác;
 các tool khám phá hằng ngày và nghiên cứu không giới hạn đã bị loại.
 Với PostgreSQL hiện có ở `035`, áp dụng lần lượt `036`, `037` và `038` bằng tài khoản sở hữu
 bảng. Nếu thiếu `038`, tìm kiếm TikTok qua trình duyệt host ở chế độ MISSION bị từ chối ngay từ đầu.
@@ -302,17 +295,16 @@ khuyến nghị kinh doanh. Host chỉ đóng tab do nhiệm vụ tạo, giữ n
 ### Thu thập Threads qua host và so sánh đường thu thập
 
 `prepare_host_browser_search` có tham số tùy chọn `source="threads"`. Khi bỏ qua tham số này,
-tool giữ `source="tiktok"`. Submit và cancel vẫn nhận ba tham số ID. Tổng số tool vẫn là 53.
-Threads chỉ thu thập qua trình duyệt host được cho phép. Phần thu thập Threads bằng Playwright
-đã bị loại bỏ. Hai tool gợi ý và xu hướng cũ trả về `UNAVAILABLE/HOST_BROWSER_REQUIRED`.
-Credential Threads đã lưu không chứng minh có thể thu thập. Ignis không kích hoạt đường API,
-không probe quyền API và không tự chuyển sang cách thu thập dự phòng khi lỗi.
+tool giữ `source="tiktok"`. Submit và cancel vẫn nhận ba tham số ID. Tổng số tool hiện là 42.
+Threads chỉ thu thập qua trình duyệt host được cho phép. Phần thu thập bằng Playwright và
+các tool gợi ý, xu hướng chỉ trả kết quả không khả dụng đã bị gỡ. Credential Threads đã lưu
+không chứng minh có thể thu thập; Ignis không probe quyền API hay tự chuyển sang đường API.
 
-Reels vẫn dùng Playwright, không dùng cờ che giấu tự động hóa. Trang yêu cầu đăng nhập,
-checkpoint, challenge, phản hồi không đọc được hoặc thiếu search envelope đều là kết quả
-không khả dụng có lý do, không phải số 0 đã đo. Search envelope rỗng, đúng cấu trúc và đã được
-xác minh có thể trả về `EMPTY_NO_DATA` cho từ khóa đã chạy. Kết quả này không chứng minh đã
-bao phủ từ khóa khác hay biết rõ khoảng thời gian.
+Spec 022 ngừng thu thập qua Google Trends RSS, Creative Center, tìm kiếm TikTok headless và Reels.
+Quan sát, kết quả từng kênh và session cũ vẫn đọc được, không bị sửa hay xóa.
+Mission có nguồn đã ngừng hoạt động trả `BLOCKED / SURFACE_RETIRED` trước khi thu thập.
+Lượt chạy watchlist loại những nguồn đó khỏi danh sách được yêu cầu và nêu rõ từng nguồn;
+nếu không còn nguồn nào, lượt chạy bị từ chối. Nguồn đã ngừng hoạt động không được tính là số 0 đã đo.
 
 TikTok hiện dùng `tiktok-public-grid-v3`; Threads dùng `threads-search-top-v2`. Các kỳ watchlist
 trải qua thời điểm nâng cấp trả về `not_comparable` với lý do `collection_path_changed` hoặc

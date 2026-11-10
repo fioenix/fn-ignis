@@ -37,8 +37,11 @@ markers, and the only identities kept are accounts a requester declares for one 
 
 The product has two independent capability families:
 
-1. **Collection**: integrated connectors and skills pull source observations for an explicit
-   tactical probe or mission. The result retains source identity, query, collection time, channel
+1. **Collection**: the host collects through a platform-owner official MCP when one exists;
+   otherwise Ignis keeps a working built-in connection through a usable official API or the
+   user-authorized host browser. Community MCPs do not qualify as official. A built-in connection
+   that no longer returns evidence is retired. Every collection remains an explicit tactical
+   probe or mission (see `docs/decisions/2026-11-10-source-connection-boundary.md`). The result retains source identity, query, collection time, channel
    outcome, and access limitations. Collected data is not yet a Market conclusion.
 2. **Senior Market Analytics**: the analysis skill and report templates work on an eligible Ignis
    evidence frame. A confirmed Market Brief includes alternatives, a null hypothesis, falsifiers,
@@ -160,7 +163,7 @@ Versions use `MAJOR.MINOR.PATCH`. During `0.x`, the bump follows user-visible pr
 
 Before completing a change, `.venv/bin/pytest tests/unit/test_repo_conventions.py` passes. Read `docs/agents/release-gates.md` for Checklists A, B, and C before cutting a release.
 
-- [ ] **Atomic Independence**: Ensure all 53 FastMCP tools are independently callable within their authority and evidence contracts.
+- [ ] **Atomic Independence**: Ensure all 42 FastMCP tools are independently callable within their authority and evidence contracts.
 
 ## 📁 7. Artifact Output vs. Committed Samples
 

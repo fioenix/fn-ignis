@@ -123,7 +123,7 @@ async def test_taxonomy_removal_keeps_real_mcp_inventory_and_request_schema():
     from test_public_mcp_contract import EXPECTED_TOOLS
     from ignis.interfaces.mcp.server import mcp
     tools = {tool.name: tool for tool in await mcp.list_tools()}
-    assert len(tools) == 53
+    assert len(tools) == 42
     assert set(tools) == EXPECTED_TOOLS
     schema = tools['list_domain_lexicons'].parameters
     assert set(schema['properties']) == {'domain'}
