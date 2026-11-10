@@ -166,8 +166,14 @@ Historical snapshot, read from the live Postgres on 10/09/2026 at 08:10 UTC.
 
 Spec 021 retires `industry_taxonomies` through migration 039. Fresh SQLite stores no longer
 create it; PostgreSQL reaches the same schema after the full migration chain. Categories now
-come only from usable source labels, with `unclassified` as the fallback. The 69 seeded domain
-terms, platform-interface labels and language-detection vocabulary in `market_lexicons` remain.
+come only from usable source labels, with `unclassified` as the fallback. Spec 021 preserved
+the seeded market terms and machinery vocabulary. Spec 023 now removes the
+104 system-owned market-domain rows (69 local and 35 global) through migration 040 and retires
+their synonym and localization mechanisms. Operator rows remain stored and listed, inert;
+platform-interface labels, stopwords, noise and language-detection vocabulary keep their roles.
+`IngestTrendsUseCase` and `AutonomousRefinementOrchestrator` are removed.
+`ConnectorRegistry.fetch_from_all` remains unreachable from tools; deleting it is deferred until
+its gate proofs move to the live mission path.
 The historical measurements below do not establish that any live store has been migrated.
 
 | | |

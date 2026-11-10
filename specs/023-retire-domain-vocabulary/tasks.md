@@ -17,10 +17,20 @@
 ## Phase 3: User Story 3 — no dead reader (P3)
 
 - [x] T007 [US3] Delete `src/ignis/application/use_cases/ingest_trends.py`, its construction and `"ingest_use_case"` entry in `server.py`, and `src/ignis/infrastructure/harness/refinement_orchestrator.py`. For each test using them (`test_corpus_correctness.py`, `test_vocabulary_loader.py`, `tests/integration/test_ingest_orchestration.py`), re-point it to `ConnectorRegistry.fetch_from_all` when it proves a gate that path still has, or delete it when it proves only the removed code; list each disposition in the commit body.
-- [ ] T008 [US3] Correct guidance that promises domain terms improve matching or quality (`docs/`, `.agents/skills/ignis-*`, `src/ignis/interfaces/mcp/guides/`, README pair); leave dated history alone.
+- [x] T008 [US3] Correct guidance that promises domain terms improve matching or quality (`docs/`, `.agents/skills/ignis-*`, `src/ignis/interfaces/mcp/guides/`, README pair); leave dated history alone.
 
 ## Phase 4: Acceptance
 
-- [ ] T009 Run the touched modules (at most two per command, `uptime` first), `tests/unit/test_public_mcp_contract.py`, `tests/unit/test_sql_packaging.py` and `tests/unit/test_repo_conventions.py`; record results in `.handoff/023-verification.md`.
+- [x] T009 Run the touched modules (at most two per command, `uptime` first), `tests/unit/test_public_mcp_contract.py`, `tests/unit/test_sql_packaging.py` and `tests/unit/test_repo_conventions.py`; record results in `.handoff/023-verification.md`.
 - [ ] T010 Rerun the read-only localization measurement over the development store's 634 titles against the new code without applying the migration to it; expect 572 localized. Record it in `.handoff/023-verification.md`.
-- [ ] T011 Close the backlog item in `BACKLOG.md` with the measured numbers and add `fetch_from_all` as the remaining dead-code debt.
+- [x] T011 Close the backlog item in `BACKLOG.md` with the measured numbers and add `fetch_from_all` as the remaining dead-code debt.
+
+## Delegated verification — 2026-11-11
+
+T005–T009 and T011 are implemented and locally verified. RED/GREEN commands and exact output
+are in `.handoff/023-verification.md`; all pytest commands use `PYTHONPATH=src` and the load-aware
+wrapper, at most two modules at a time. The mock-only ingest orchestration module passes.
+PostgreSQL/Compose database tests and the dual-backend Meta evidence module were not run,
+as required by the delegation brief; their changed contracts remain unverified on PostgreSQL.
+T010 remains coordinator-owned and was not run. No migration was applied to the development
+store; no push, PR, merge or release was performed.

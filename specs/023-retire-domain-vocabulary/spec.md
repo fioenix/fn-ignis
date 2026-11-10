@@ -118,7 +118,7 @@ promise a tool does not keep.
 
 ### Key Entities
 
-- **Market vocabulary domain**: a `market_lexicons` domain that `is_market_vocabulary_domain` accepts; after this change no engine reads it.
+- **Market vocabulary domain**: one of the seven retired `market_lexicons` domains listed above; after this change no engine reads it.
 - **Machinery domain**: a domain that drives a mechanism (stopwords, noise, detection, attribution, templates); unchanged.
 
 ## Success Criteria *(mandatory)*
