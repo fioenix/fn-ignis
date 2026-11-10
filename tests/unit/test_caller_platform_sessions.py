@@ -132,6 +132,26 @@ async def test_caller_clear_removes_installation_platform_sessions(
     assert json.loads(await server.handle_clear_platform_auth(platform))["cleared"] is False
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("platform", [" instagram", "Instagram_Browser ", "\tthreads\n"])
+async def test_caller_clear_trims_the_platform_name_before_pairing_keys(caller_root, monkeypatch, platform):
+    _, scope = caller_root
+    base = platform.strip().lower().removesuffix("_browser")
+    installation = create_repository()
+    await installation.save_platform_credentials(base + "_browser", "session_cookies", {"cookies": []})
+    await installation.save_platform_credentials(base, "oauth2", {"access_token": "synthetic"})
+    components = server._init_components(caller_scope=scope)
+    monkeypatch.setattr(server, "get_components", lambda: components)
+
+    result = json.loads(await server.handle_clear_platform_auth(platform))
+
+    credentials = components["credential_repository"]
+    assert result["cleared"] is True
+    assert result["platform"] == platform.strip().lower()
+    assert await credentials.get_platform_credentials(base + "_browser") is None
+    assert await credentials.get_platform_credentials(base) is None
+
+
 def test_caller_closes_only_the_installation_repository_it_created(caller_root, tmp_path, monkeypatch):
     installation, scope = caller_root
     installation.touch()
