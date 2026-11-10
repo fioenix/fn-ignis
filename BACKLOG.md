@@ -1,15 +1,15 @@
 # 📋 FN-IGNIS BACKLOG & SYSTEM STATUS
 
-> - **Cập nhật lần cuối:** 11/11/2026 (Spec 021 và 022 đã merge vào `main`; chưa phát hành)
-> - **Phiên bản:** `v0.9.0`
+> - **Cập nhật lần cuối:** 11/11/2026
+> - **Phiên bản:** `v0.10.0`
 > - **Kiến trúc:** Clean Architecture + Dual-Backend (Postgres TimescaleDB & Zero-Docker SQLite)
->   + FastMCP Server (41 tools trên `main`, chưa phát hành; `v0.9.0` có 53); watchlist có phiên bản, kế hoạch nghe và hai trục `seen` / `created`.
-> - **Schema:** Nhánh Spec 023 có migration mới nhất là `sql/040_retire_market_domain_vocabulary.sql`; chưa merge, `main` vẫn ở 039.
+>   + FastMCP Server (41 tools); watchlist có phiên bản, kế hoạch nghe và hai trục `seen` / `created`.
+> - **Schema:** Migration mới nhất là `sql/040_retire_market_domain_vocabulary.sql`.
 > - **Thu thập:** YouTube Data API, Threads và TikTok qua trình duyệt host, bình luận TikTok theo URL.
->   Spec 022 ngừng RSS, Creative Center, tìm kiếm TikTok headless và Reels; giữ nguyên dữ liệu cũ.
->   Ignis không có worker hay lịch khám phá hằng ngày; routine chạy trên host khi được yêu cầu.
-> - **Trạng thái:** `v0.9.0` đã tag và publish ngày 28/10/2026 qua source, GitHub Release và GHCR
->   (`ghcr.io/fioenix/fn-ignis:0.9.0`); PyPI tiếp tục được hoãn. Kiểm tra trạng thái thật bằng
+>   Đã ngừng RSS, Creative Center, tìm kiếm TikTok headless và Reels; bỏ taxonomy ngành và từ vựng
+>   thị trường nạp sẵn. Ignis không có worker hay lịch khám phá hằng ngày.
+> - **Trạng thái:** Phát hành `v0.10.0` ngày 11/11/2026 qua mã nguồn, GitHub Release và GHCR
+>   (`ghcr.io/fioenix/fn-ignis:0.10.0`); PyPI tiếp tục được hoãn. Kiểm tra trạng thái thật bằng
 >   `python scripts/check_release_state.py`.
 
 ---
@@ -27,7 +27,7 @@ xóa và chưa đọc lại kho đó.
   đã gỡ 12 tool và chặn các nguồn đã nghỉ trước thu thập, giữ nguyên đường đọc dữ liệu cũ.
   Review code và security độc lập: vòng đầu REWORK, vòng hai APPROVE ở `abd3323`. Kiểm thử chạy trên SQLite;
   kiểm tra riêng cho PostgreSQL chưa chạy và không còn chặn, vì store dev đã chuyển sang SQLite từ 10/11/2026.
-- [ ] **Phát hành bản kế tiếp:** Spec 021 và 022 đã nằm trên `main` từ sau `v0.9.0`; version bump và tag chờ chủ sở hữu.
+- [x] **Phát hành `v0.10.0`** — 11/11/2026, chủ sở hữu cho phép: gộp Spec 021, 022 và 023 (53 → 41 tools, migration tới `040`).
 
 - [x] **TikTok trên profile Finos bị fail-closed** — đóng 09/11/2026. Đo trực tiếp: trang có `lang=en` trong khi
   `tiktok_attribution_en` chưa có mẫu, nên validator loại toàn bộ. Đã đổi giao diện profile sang Tiếng Việt (`vi-VN`);

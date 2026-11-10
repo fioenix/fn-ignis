@@ -5,9 +5,9 @@ inspectable evidence from accessible social sources, then challenge a market hyp
 acting on it. Its two capabilities are independent: source collection can end with an evidence
 frame, while Market analysis can end with a Gap Report rather than a forced verdict.
 
-**Branch boundary:** Spec 022 exposes 41 tools and retires unusable source collection. This
-change is not released. Published v0.9.0 includes the earlier host-browser contract and migrations
-through `038`; v0.7.0 is a historical Dual-Track artifact, not the mission-bound surface here.
+**Release boundary:** v0.10.0 exposes 41 tools, retires unusable source collection and the seeded
+taxonomy and market vocabulary, with migrations through `040`. v0.9.0 still lists the removed tools; v0.7.0 is a
+historical Dual-Track artifact, not the mission-bound surface here.
 
 ## Product contract
 
@@ -78,8 +78,8 @@ CHECK before 026 can run. Replay verification for 026 is not whole-history repla
 For an existing PostgreSQL database on `035`, apply `036`, `037` and `038` in order as the
 table owner. Without `038`, a MISSION TikTok host-browser search is refused before it starts.
 
-The release workflow builds `ghcr.io/fioenix/fn-ignis:0.9.0` when the `v0.9.0` tag is pushed.
-The v0.8.0 image does not contain the v0.9.0 host-browser contract described here.
+The release workflow builds `ghcr.io/fioenix/fn-ignis:0.10.0` when the `v0.10.0` tag is pushed.
+The v0.9.0 image still carries the removed tools and the retired sources.
 PyPI publication is not advertised. Admitted mission calls write HTML to
 `<root>/.fnignis/reports/`; the source-checkout fallback is gitignored `reports/`.
 Committed report templates live only in `src/ignis/infrastructure/templates/html/`.

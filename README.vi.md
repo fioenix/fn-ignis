@@ -6,9 +6,9 @@ Ignis là bộ công cụ tự lưu trữ để nghiên cứu thị trường t�
 lập: thu thập có thể kết thúc bằng một khung chứng cứ; phân tích có thể kết thúc bằng báo cáo
 thiếu chứng cứ thay vì cố đưa ra kết luận.
 
-**Phạm vi nhánh:** Spec 022 có 41 tools và ngừng các đường thu thập không còn dùng được.
-Thay đổi này chưa phát hành. Bản v0.9.0 đã công bố giữ hợp đồng trình duyệt host và migration
-tới `038` của thời điểm phát hành; v0.7.0 thuộc kiến trúc Dual-Track cũ.
+**Phạm vi phát hành:** v0.10.0 có 41 tools, ngừng các đường thu thập không còn dùng được, bỏ taxonomy
+ngành và từ vựng thị trường nạp sẵn, với migration tới `040`. Bản v0.9.0 vẫn có các tool đã gỡ; v0.7.0 thuộc
+kiến trúc Dual-Track cũ.
 
 ## Hợp đồng sản phẩm
 
@@ -80,8 +80,8 @@ trước khi 026 chạy. Kiểm chứng chạy lại 026 không đồng nghĩa c
 Với PostgreSQL hiện có ở `035`, áp dụng lần lượt `036`, `037` và `038` bằng tài khoản sở hữu
 bảng. Nếu thiếu `038`, tìm kiếm TikTok qua trình duyệt host ở chế độ MISSION bị từ chối ngay từ đầu.
 
-Workflow phát hành tạo image `ghcr.io/fioenix/fn-ignis:0.9.0` khi tag `v0.9.0` được push.
-Image v0.8.0 không có hợp đồng thu thập qua trình duyệt host của v0.9.0 được mô tả ở đây. Chưa công bố
+Workflow phát hành tạo image `ghcr.io/fioenix/fn-ignis:0.10.0` khi tag `v0.10.0` được push.
+Image v0.9.0 vẫn có các tool đã gỡ và các nguồn đã ngừng. Chưa công bố
 gói PyPI. Lệnh mission được chấp nhận ghi HTML vào `<root>/.fnignis/reports/`; phương án dự phòng
 trong source checkout là `reports/` không được commit. Mã template báo cáo chỉ nằm tại
 `src/ignis/infrastructure/templates/html/`.
