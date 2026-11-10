@@ -5,16 +5,6 @@ from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
 from ignis.interfaces.mcp.server import handle_register_domain_lexicon, handle_list_domain_lexicons
 
 
-def test_quality_evaluator_dynamic_lexicon():
-    evaluator = QualityEvaluator()
-    # Initially without custom term
-    assert evaluator.is_vietnamese("retinol bha obagi") is False
-
-    # Dynamically register beauty terms
-    evaluator.register_terms(["retinol", "bha", "obagi"])
-    assert evaluator.is_vietnamese("retinol bha obagi") is True
-
-
 @pytest.mark.asyncio
 async def test_handle_register_domain_lexicon():
     mock_repo = AsyncMock()
@@ -37,7 +27,7 @@ async def test_handle_register_domain_lexicon():
         assert resp["domain"] == "fashion"
         assert resp["terms_registered"] == 3
         assert mock_repo.register_lexicon_terms.called
-        assert mock_qe.is_vietnamese("ao linen oversize") is True
+        assert mock_qe.is_vietnamese("linen oversize local brand") is False
 
 
 @pytest.mark.asyncio
@@ -81,15 +71,14 @@ async def test_register_machinery_never_teaches_evaluators_market_terms(tmp_path
     reasoner = StrategicMarketReasoner()
     monkeypatch.setattr(server, "get_components", lambda: {
         "repository": repo, "quality_evaluator": quality, "strategic_reasoner": reasoner})
-    before = (set(quality._custom_lexicon), set(reasoner._custom_lexicon))
+    title = "Synthetic Machinery"
+    before = (quality.is_localized(title), reasoner._is_vietnamese(title))
     try:
         response = json.loads(await server.handle_register_domain_lexicon(domain, ["Synthetic Machinery"], "likes"))
         assert response["status"] == "SUCCESS"
         assert await repo.get_domain_lexicons(domain)
-        assert (set(quality._custom_lexicon), set(reasoner._custom_lexicon)) == before
-        vocabulary = await load_market_vocabulary(repo)
-        assert "synthetic machinery" not in vocabulary.positive_terms
-        assert all(key[0] != domain for key in vocabulary.by_domain_and_category)
+        assert (quality.is_localized(title), reasoner._is_vietnamese(title)) == before
+        await load_market_vocabulary(repo)
     finally:
         await repo.close()
 

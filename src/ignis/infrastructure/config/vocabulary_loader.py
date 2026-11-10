@@ -55,7 +55,6 @@ def is_market_vocabulary_domain(domain: str) -> bool:
 class MarketVocabulary:
     """The persisted vocabulary, split by the mechanism each domain feeds."""
 
-    positive_terms: List[str] = field(default_factory=list)
     foreign_stopwords: List[str] = field(default_factory=list)
     noise_blacklist: List[str] = field(default_factory=list)
     ambiguous_unigrams: List[str] = field(default_factory=list)
@@ -67,7 +66,6 @@ class MarketVocabulary:
     portuguese_words: List[str] = field(default_factory=list)
     probe_templates: Dict[str, List[str]] = field(default_factory=dict)
     tiktok_suggest_templates: Dict[str, List[str]] = field(default_factory=dict)
-    by_domain_and_category: Dict[tuple, List[str]] = field(default_factory=dict)
 
 
 def seeded_lexicon_terms(filename: str, domain: str) -> List[str]:
@@ -89,7 +87,6 @@ async def load_market_vocabulary(repository: ITrendRepository) -> MarketVocabula
     rows = await repository.get_domain_lexicons() or []
 
     grouped: Dict[str, List[str]] = {}
-    buckets: Dict[tuple, List[str]] = {}
     for row in rows:
         # Terms are passed on exactly as stored. Whitespace can be load-bearing: the TikTok
         # live badge is registered as "live " so it cannot match inside "livestream", and
@@ -99,8 +96,6 @@ async def load_market_vocabulary(repository: ITrendRepository) -> MarketVocabula
             continue
         domain = str(row.get("domain") or "")
         grouped.setdefault(domain, []).append(term)
-        if is_market_vocabulary_domain(domain):
-            buckets.setdefault((domain, row.get("category")), []).append(term)
 
     def _templates_for(prefix: str) -> Dict[str, List[str]]:
         return {
@@ -110,7 +105,6 @@ async def load_market_vocabulary(repository: ITrendRepository) -> MarketVocabula
         }
 
     return MarketVocabulary(
-        positive_terms=[t for terms in buckets.values() for t in terms],
         foreign_stopwords=grouped.get("foreign_stopwords", []),
         noise_blacklist=grouped.get("noise_blacklist", []),
         ambiguous_unigrams=grouped.get("ambiguous_unigrams", []),
@@ -122,7 +116,6 @@ async def load_market_vocabulary(repository: ITrendRepository) -> MarketVocabula
         portuguese_words=grouped.get("portuguese_words", []),
         probe_templates=_templates_for(PROBE_TEMPLATE_PREFIX),
         tiktok_suggest_templates=_templates_for(TIKTOK_SUGGEST_TEMPLATE_PREFIX),
-        by_domain_and_category=buckets,
     )
 
 
@@ -175,21 +168,9 @@ class VocabularySynchronizer:
                 f"Could not read the persisted vocabulary from the configured database: {exc}"
             ) from exc
 
-        pos_terms = vocabulary.positive_terms
         stop_terms = vocabulary.foreign_stopwords
         noise_terms = vocabulary.noise_blacklist
 
-        if pos_terms:
-            for engine in (self._quality_evaluator, self._strategic_reasoner):
-                if engine is not None:
-                    engine.register_terms(pos_terms)
-            if self._strategic_reasoner is not None:
-                # Terms sharing a (domain, category) bucket are treated as expansions of each
-                # other, so keyword matching uses the persisted vocabulary instead of hardcoded
-                # synonyms.
-                self._strategic_reasoner.register_synonym_groups(
-                    [g for g in vocabulary.by_domain_and_category.values() if len(g) > 1]
-                )
         if self._clusterer is not None:
             self._clusterer.register_ambiguous_unigrams(vocabulary.ambiguous_unigrams)
         if self._language_detector is not None:

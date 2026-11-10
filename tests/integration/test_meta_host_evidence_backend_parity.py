@@ -68,7 +68,7 @@ async def test_threads_seed_is_available_to_repository_mission_vocabulary(reposi
     rows = await repository_case.repository.get_domain_lexicons("threads_attribution")
     assert [(r["term"], r["category"], r["created_by"]) for r in rows] == [
         ("Photo by {author} on", "ui_attribution", "system")]
-    assert "Photo by {author} on" not in vocabulary.positive_terms
+    assert vocabulary.threads_attribution == ["Photo by {author} on"]
 
 
 @pytest.mark.asyncio
@@ -294,7 +294,7 @@ async def test_action_labels_seed_replay_and_operator_locale_rows(repository_cas
     assert len(rows) == 8
     assert action_labels_from_rows(rows) == seeded_action_labels()
     vocabulary = await load_market_vocabulary(repo)
-    assert not set(r["term"] for r in rows).intersection(vocabulary.positive_terms)
+    assert not hasattr(vocabulary, "positive_terms")
     before = storage_snapshot(repository_case)
     for _ in range(2):
         if repository_case.name == "sqlite":

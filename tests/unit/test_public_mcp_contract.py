@@ -144,3 +144,14 @@ async def test_threads_host_search_remains_available_without_placeholder_tools()
     tools = {tool.name: tool for tool in await mcp.list_tools()}
     prepare = tools["prepare_host_browser_search"]
     assert "threads" in prepare.description.lower() and "tiktok" in prepare.description.lower()
+
+
+@pytest.mark.asyncio
+async def test_lexicon_registration_describes_storage_without_market_recognition():
+    from ignis.interfaces.mcp.server import mcp
+    tools = {tool.name: tool for tool in await mcp.list_tools()}
+    tool = tools["register_domain_lexicon"]
+    assert "recognize new niche vernacular" not in tool.description
+    assert "stored and listed" in tool.description
+    assert set(tool.parameters["properties"]) == {"domain", "terms", "category"}
+    assert tool.parameters["required"] == ["domain", "terms"]
