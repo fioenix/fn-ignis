@@ -436,14 +436,9 @@ def test_review_synchronizer_cannot_receive_the_process_global_host_template_ser
 
 
 @pytest.mark.asyncio
-async def test_synchronizer_never_reads_taxonomy_and_preserves_all_domain_terms(tmp_path, monkeypatch):
+async def test_synchronizer_never_reads_taxonomy_and_preserves_machinery(tmp_path, monkeypatch):
     from ignis.infrastructure.config.vocabulary_loader import VocabularySynchronizer
     repo = SqliteTrendRepository(str(tmp_path / 'retained.sqlite3'))
-    expected = sorted(row for row in re.findall(
-        r"\('([^']+)',\s*'([^']+)',\s*'([^']+)',\s*'system'\)",
-        (SQL / '003_market_lexicons.sql').read_text(),
-    ) if row[0] in ('fashion', 'tech', 'ecommerce', 'common_vi'))
-    assert len(expected) == 69
     async def forbidden():
         pytest.fail('taxonomy read is forbidden')
     monkeypatch.setattr(repo, 'get_industry_taxonomies', forbidden, raising=False)
@@ -452,9 +447,6 @@ async def test_synchronizer_never_reads_taxonomy_and_preserves_all_domain_terms(
     vocabulary = await VocabularySynchronizer(
         repo, clusterer=clusterer, language_detector=detector,
     ).synchronize_vocabulary()
-    actual = {(row['domain'], row['term'], row['category']) for row in await repo.get_domain_lexicons()}
-    assert set(expected) <= actual
-    assert sorted(row for row in actual if row[0] in ('fashion', 'tech', 'ecommerce', 'common_vi')) == expected
     assert clusterer._ambiguous_unigrams and clusterer._custom_stopwords
     assert vocabulary.foreign_phrases and vocabulary.portuguese_words
     assert vocabulary.tiktok_ui_noise
@@ -525,3 +517,51 @@ async def test_synchronization_preserves_machinery_registration(tmp_path):
         assert clusterer.register_stopwords.call_count == 2
     finally:
         await repo.close()
+
+
+MARKET_DOMAIN_COUNTS = {
+    "tech": 24, "ecommerce": 21, "fashion": 15, "common_vi": 9,
+    "global_saas_ai": 15, "global_ecommerce": 11, "global_fashion": 9,
+}
+
+
+@pytest.mark.asyncio
+async def test_fresh_store_has_no_system_market_domain_vocabulary(tmp_path):
+    repo = SqliteTrendRepository(str(tmp_path / "fresh-retired.db"))
+    try:
+        rows = await repo.get_domain_lexicons()
+        assert [r for r in rows if r["domain"] in MARKET_DOMAIN_COUNTS and r["created_by"] == "system"] == []
+        assert len([r for r in rows if r["domain"] == "foreign_stopwords"]) == 19
+        assert len([r for r in rows if r["domain"] == "noise_blacklist"]) == 19
+    finally:
+        await repo.close()
+
+
+@pytest.mark.asyncio
+async def test_upgrade_retires_104_system_rows_but_preserves_operator_and_machinery(tmp_path):
+    import sqlite3
+    from uuid import uuid4
+    path = str(tmp_path / "upgrade-retired.db")
+    repo = SqliteTrendRepository(path)
+    await repo._ensure_schema()
+    await repo.close()
+    with sqlite3.connect(path) as conn:
+        conn.execute("DELETE FROM market_lexicons WHERE domain IN (%s)" % ','.join('?' for _ in MARKET_DOMAIN_COUNTS), tuple(MARKET_DOMAIN_COUNTS))
+        conn.executemany(
+            "INSERT INTO market_lexicons (id, domain, term, category, created_by, created_at) VALUES (?, ?, ?, 'fixture', 'system', '2026-11-11')",
+            [(str(uuid4()), domain, f"legacy term {i}") for domain, count in MARKET_DOMAIN_COUNTS.items() for i in range(count)],
+        )
+        conn.execute("INSERT INTO market_lexicons (id, domain, term, created_by, created_at) VALUES (?, 'tech', 'operator term', 'operator', '2026-11-11')", (str(uuid4()),))
+        before = conn.execute("SELECT * FROM market_lexicons WHERE domain NOT IN (%s) ORDER BY id" % ','.join('?' for _ in MARKET_DOMAIN_COUNTS), tuple(MARKET_DOMAIN_COUNTS)).fetchall()
+        assert conn.execute("SELECT count(*) FROM market_lexicons WHERE category='fixture'").fetchone() == (104,)
+    for _ in range(2):
+        repo = SqliteTrendRepository(path)
+        try:
+            rows = await repo.get_domain_lexicons()
+            assert [r for r in rows if r["domain"] in MARKET_DOMAIN_COUNTS and r["created_by"] == "system"] == []
+            assert [(r["term"], r["created_by"]) for r in rows if r["domain"] == "tech"] == [("operator term", "operator")]
+        finally:
+            await repo.close()
+        with sqlite3.connect(path) as conn:
+            after = conn.execute("SELECT * FROM market_lexicons WHERE domain NOT IN (%s) ORDER BY id" % ','.join('?' for _ in MARKET_DOMAIN_COUNTS), tuple(MARKET_DOMAIN_COUNTS)).fetchall()
+            assert after == before
