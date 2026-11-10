@@ -1724,7 +1724,7 @@ async def handle_get_system_logs(level: Optional[str] = None, component: Optiona
 
 async def handle_get_platform_auth_status() -> str:
     comp = get_components()
-    repo: ITrendRepository = comp["repository"]
+    repo: ITrendRepository = comp.get("credential_repository", comp["repository"])
     creds = await repo.list_platform_credentials()
     refresh_plan = plan_staggered_refresh(creds)
     warnings = [e for e in refresh_plan if e["status"] in (STATUS_EXPIRING_SOON, STATUS_EXPIRED)]
@@ -1743,8 +1743,14 @@ async def handle_get_platform_auth_status() -> str:
 
 async def handle_clear_platform_auth(platform: str) -> str:
     comp = get_components()
-    repo: ITrendRepository = comp["repository"]
-    success = await repo.delete_platform_credentials(platform.lower())
+    repo: ITrendRepository = comp.get("credential_repository", comp["repository"])
+    key = platform.lower()
+    base = key.removesuffix("_browser")
+    keys = (base, base + "_browser") if base in ("instagram", "threads") else (key,)
+    success = False
+    for key in keys:
+        deleted = await repo.delete_platform_credentials(key)
+        success = deleted or success
     return json.dumps(
         {
             "platform": platform.lower(),

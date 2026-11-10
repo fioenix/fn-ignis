@@ -90,6 +90,48 @@ async def test_channel_audit_reads_the_sessions_the_connectors_use(caller_root):
     assert auth_status["threads"] is True and auth_status["reels"] is False
 
 
+@pytest.mark.asyncio
+async def test_caller_auth_status_reads_installation_sessions(caller_root, monkeypatch):
+    _, scope = caller_root
+    await create_repository().save_platform_credentials(
+        "threads_browser", "session_cookies", {"cookies": []})
+    components = server._init_components(caller_scope=scope)
+    monkeypatch.setattr(server, "get_components", lambda: components)
+
+    result = json.loads(await server.handle_get_platform_auth_status())
+
+    assert result["count"] == 1
+    assert result["platforms"][0]["platform"] == "threads_browser"
+    assert "credentials_data" not in result["platforms"][0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("platform", ["threads", "threads_browser", "instagram", "instagram_browser"])
+@pytest.mark.parametrize("browser_only", [True, False])
+async def test_caller_clear_removes_installation_platform_sessions(
+    caller_root, monkeypatch, platform, browser_only
+):
+    _, scope = caller_root
+    base = platform.removesuffix("_browser")
+    installation = create_repository()
+    await installation.save_platform_credentials(base + "_browser", "session_cookies", {"cookies": []})
+    if not browser_only:
+        await installation.save_platform_credentials(base, "oauth2", {"access_token": "synthetic"})
+    await installation.save_platform_credentials("tiktok", "session_cookies", {"cookies": []})
+    components = server._init_components(caller_scope=scope)
+    monkeypatch.setattr(server, "get_components", lambda: components)
+    assert await components["repository"].get_platform_credentials(base + "_browser") is None
+
+    result = json.loads(await server.handle_clear_platform_auth(platform))
+
+    credentials = components["credential_repository"]
+    assert await credentials.get_platform_credentials(base + "_browser") is None
+    assert await credentials.get_platform_credentials(base) is None
+    assert result["cleared"] is True
+    assert await credentials.get_platform_credentials("tiktok") is not None
+    assert json.loads(await server.handle_clear_platform_auth(platform))["cleared"] is False
+
+
 def test_caller_closes_only_the_installation_repository_it_created(caller_root, tmp_path, monkeypatch):
     installation, scope = caller_root
     installation.touch()
