@@ -25,6 +25,7 @@ from ignis.domain.research_workspace import (
     WorkspaceScopeMismatchError,
     missing_brief_fields,
 )
+from ignis.domain.research_workspace import require_active_resources
 from ignis.domain.value_objects import GeoCode, PlatformType, resolve_geo, timeframe_to_days
 from ignis.application.use_cases.create_attention_mission import _platforms_from_resources
 
@@ -61,6 +62,7 @@ class ConfirmMarketBriefUseCase:
         kill_criteria: Optional[Sequence[str]] = None,
         revision_rule: Optional[str] = None,
     ) -> Tuple[ResearchMission, MarketBriefRevision]:
+        require_active_resources(manifest.allowed_resources)
         workspace = await self._store.get_research_workspace(workspace_id)
         if workspace is None:
             raise WorkspaceScopeMismatchError(

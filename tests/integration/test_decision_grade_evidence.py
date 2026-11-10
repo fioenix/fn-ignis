@@ -454,13 +454,13 @@ async def test_a_workspace_run_records_every_surface_outcome_before_it_completes
         repository,
         store,
         workspace,
-        channels=("google", "youtube", "tiktok"),
+        channels=("threads", "youtube", "tiktok"),
     )
     registry = OutcomeRegistry(
-        [_signal("ai cho cửa hàng", PlatformType.GOOGLE_TRENDS, keyword="ai cho cửa hàng",
-                 connector_surface="google")],
+        [_signal("ai cho cửa hàng", PlatformType.THREADS, keyword="ai cho cửa hàng",
+                 connector_surface="threads")],
         [
-            _surface("google", "HEALTHY", 1),
+            _surface("threads", "HEALTHY", 1),
             _surface("youtube", "EMPTY_NO_DATA"),
             _surface("tiktok", "AUTH_REQUIRED"),
         ],
@@ -471,7 +471,7 @@ async def test_a_workspace_run_records_every_surface_outcome_before_it_completes
     assert result["status"] == "COMPLETED"
     outcomes = await store.get_latest_completed_probe_outcomes(mission.id)
     assert sorted((o.connector_surface, o.status.value, o.signals_collected) for o in outcomes) == [
-        ("google", "HEALTHY", 1), ("tiktok", "AUTH_REQUIRED", 0), ("youtube", "EMPTY_NO_DATA", 0),
+        ("threads", "HEALTHY", 1), ("tiktok", "AUTH_REQUIRED", 0), ("youtube", "EMPTY_NO_DATA", 0),
     ]
     assert {str(o.run_id) for o in outcomes} == {result["run"]["run_id"]}
     for outcome in outcomes:
@@ -506,47 +506,22 @@ async def test_a_run_whose_outcomes_cannot_be_stored_does_not_complete(repositor
 
 # --- User Story 1: the first mission after startup matches a warmed process ----------------------
 #
-# The post-v0.5 validation's first two missions got no TikTok signals although the database held
-# the vocabulary: the TikTok grid rejects every card until its UI-noise vocabulary is registered,
-# and only an analysis call had ever registered it. These plugins are the real classes with the
-# network replaced, so the mechanism under test is the production one.
-
-from ignis.infrastructure.connectors.google_trends.rss_plugin import GoogleTrendsRssPlugin  # noqa: E402
+# Retained collection must see persisted shared vocabulary on its first run.
 from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry  # noqa: E402
-from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin  # noqa: E402
+from ignis.infrastructure.connectors.youtube.youtube_plugin import YouTubeDataPlugin  # noqa: E402
 
-# Test data: persisted vocabulary, written through the same repository path an operator uses.
 PERSISTED_VOCABULARY = {
-    ("probe_templates_vn", "template"): ["{} là gì", "{} giá bao nhiêu"],
-    ("tiktok_ui_noise", "notification"): ["thông báo", "tin nhắn"],
+    ("foreign_phrases", "phrase"): ["bonjour tout le monde"],
     ("retail_ops", "vernacular"): ["quản lý kho", "phần mềm bán hàng"],
 }
-TIKTOK_CARDS = ["Quản lý kho bằng AI cho shop nhỏ", "thông báo mới: có 3 tin nhắn"]
 
 
-class OfflineGoogle(GoogleTrendsRssPlugin):
-    """Google demand probe with the network removed: one signal per registered template."""
+class OfflineYouTube(YouTubeDataPlugin):
+    """Retained source with no network; fail if shared vocabulary was not bound first."""
 
-    async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=None, custom_timeframe=None, limit=20):
-        return [
-            _signal(pattern.format(keywords[0]), PlatformType.GOOGLE_TRENDS, keyword=keywords[0],
-                    external=f"g{index}-{keywords[0]}")
-            for index, pattern in enumerate(self._get_probe_patterns(geo.value))
-        ]
-
-
-class OfflineTikTok(TikTokPlugin):
-    """The video grid with the browser removed: fixed cards through the real public-card guard."""
-
-    async def keyword_search_blocked_reason(self):
-        return None
-
-    async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=None, custom_timeframe=None, limit=20):
-        return [
-            _signal(card, PlatformType.TIKTOK, external=f"t{index}", keyword=keywords[0])
-            for index, card in enumerate(TIKTOK_CARDS)
-            if not self._is_private_or_notification(card)
-        ]
+    async def search_signals(self, keywords, **kwargs):
+        assert "bonjour tout le monde" in self.detector._foreign_phrases
+        return [_signal("Quản lý kho bằng AI cho shop nhỏ", keyword=keywords[0])]
 
 
 async def _persist_vocabulary(repository_case):
@@ -578,23 +553,21 @@ def _fresh_process(repository):
     from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
     from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
 
-    google, tiktok = OfflineGoogle(), OfflineTikTok()
+    youtube = OfflineYouTube(api_key="synthetic")
     registry = ConnectorPluginRegistry(repository=repository)
-    registry.register(google)
-    registry.register(tiktok)
+    registry.register(youtube)
     detector = HeuristicLanguageDetector()
+    youtube.detector = detector
     clusterer = SemanticClusterer()
     synchronizer = VocabularySynchronizer(
         repository,
         quality_evaluator=QualityEvaluator(detector=detector),
         strategic_reasoner=StrategicMarketReasoner(detector=detector),
         clusterer=clusterer,
-        google_trends_plugin=google,
         language_detector=detector,
-        tiktok_plugin=tiktok,
         registry=registry,
     )
-    return {"registry": registry, "google": google, "tiktok": tiktok, "sync": synchronizer}
+    return {"registry": registry, "youtube": youtube, "detector": detector, "sync": synchronizer}
 
 
 async def _run_first_mission(repository, store, workspace, process):
@@ -602,7 +575,7 @@ async def _run_first_mission(repository, store, workspace, process):
         repository,
         store,
         workspace,
-        channels=("google", "tiktok_video_grid"),
+        channels=("youtube",),
     )
     result = await _executor(repository, store, process["registry"], process["sync"]).execute(mission.id)
     outcomes = await store.get_latest_completed_probe_outcomes(mission.id)
@@ -622,7 +595,7 @@ async def test_cold_start_first_mission_registers_persisted_vocabulary_before_an
     repository_case, host_workspace
 ):
     repository = repository_case.repository
-    templates = await _persist_vocabulary(repository_case)
+    await _persist_vocabulary(repository_case)
     store, workspace = await _workspace(repository, host_workspace)
     cold = _fresh_process(repository)
 
@@ -630,13 +603,9 @@ async def test_cold_start_first_mission_registers_persisted_vocabulary_before_an
 
     assert result["status"] == "COMPLETED"
     surfaces, titles = _observed(outcomes, signals)
-    assert surfaces == [
-        ("google", "HEALTHY", len(templates)), ("tiktok_video_grid", "HEALTHY", 1),
-    ], (
-        "the first mission must see the persisted TikTok UI noise and probe templates"
-    )
-    assert "Quản lý kho bằng AI cho shop nhỏ" in titles
-    assert "ai cho cửa hàng là gì" in titles and "ai cho cửa hàng giá bao nhiêu" in titles
+    assert surfaces == [("youtube", "HEALTHY", 1)]
+    assert titles == ["Quản lý kho bằng AI cho shop nhỏ"]
+
 
 
 @pytest.mark.asyncio
@@ -655,8 +624,7 @@ async def test_cold_start_and_warm_process_invoke_the_same_surfaces_with_the_sam
     warm_observed = _observed(*(await _run_first_mission(repository, store, workspace, warm))[1:])
 
     assert cold_observed == warm_observed
-    assert cold["tiktok"]._ui_noise and len(cold["tiktok"]._ui_noise) == len(warm["tiktok"]._ui_noise)
-    assert cold["google"]._probe_templates == warm["google"]._probe_templates
+    assert cold["detector"]._foreign_phrases == warm["detector"]._foreign_phrases
 
 
 @pytest.mark.asyncio
@@ -719,7 +687,7 @@ async def test_cold_start_execute_mission_ingress_handler_needs_no_prior_analysi
         repository,
         store,
         workspace,
-        channels=("google", "tiktok_video_grid"),
+        channels=("youtube",),
     )
     process = _fresh_process(repository)
     components = {
@@ -733,8 +701,8 @@ async def test_cold_start_execute_mission_ingress_handler_needs_no_prior_analysi
 
     assert payload["status"] == "COMPLETED", payload
     outcomes = {o.connector_surface: o for o in await store.get_latest_completed_probe_outcomes(mission.id)}
-    assert outcomes["tiktok_video_grid"].status.value == "HEALTHY"
-    assert outcomes["tiktok_video_grid"].signals_collected == 1
+    assert outcomes["youtube"].status.value == "HEALTHY"
+    assert outcomes["youtube"].signals_collected == 1
 
 
 # --- User Story 2: unsupported Market evidence fails closed --------------------------------------
@@ -824,12 +792,28 @@ async def _market_with(repository, store, workspace, items, keywords, brief=None
     from ignis.domain.research_workspace import compute_query_fingerprint
 
     channels = tuple(surface for surface, _platform, _status, _count in outcomes)
-    mission, revision = await ConfirmMarketBriefUseCase(repository, store).execute(
-        workspace_id=workspace.workspace_id,
-        confirmed_by="requester",
-        keywords=list(keywords),
-        manifest=_manifest(MissionOutputType.MARKET_ANALYSIS, channels or ("youtube",)),
-        **(brief or MARKET_BRIEF),
+    from ignis.domain.entities import ResearchMission
+    from ignis.domain.research_workspace import MarketBriefRevision
+
+    payload = brief or MARKET_BRIEF
+    mission_id = uuid4()
+    revision = MarketBriefRevision(
+        brief_revision_id=uuid4(), workspace_id=workspace.workspace_id, mission_id=mission_id,
+        revision_number=1, confirmed_by="requester", **payload,
+    )
+    manifest = dataclasses.replace(
+        _manifest(MissionOutputType.MARKET_ANALYSIS, channels or ("youtube",)), mission_id=mission_id,
+    )
+    from ignis.application.use_cases.create_attention_mission import _platforms_from_resources
+    mission = ResearchMission(
+        id=mission_id, title=payload["decision"], keywords=list(keywords),
+        workspace_id=workspace.workspace_id, surface="MARKET", status="PENDING",
+        geo_code=GeoCode(payload["geo"]), timeframe=payload["timeframe"],
+        platforms=_platforms_from_resources(manifest.allowed_resources),
+        brief_revision_id=revision.brief_revision_id,
+    )
+    mission, revision, _ = await store.create_market_mission_with_brief_and_manifest(
+        mission, revision, manifest,
     )
     signals = [_corpus_signal(item) for item in items]
     held = await _hold(repository, mission, signals)
@@ -1294,7 +1278,7 @@ async def test_terminal_mission_refuses_evidence_replacement_and_preserves_quali
         store,
         workspace,
         keywords=CONTROL_KEYWORDS,
-        channels=("youtube", "google"),
+        channels=("youtube", "threads"),
     )
     positives = {c["case_id"]: c for c in CORPUS["semantic_controls"]["positive"]}
     supply, demand = positives["ctl-dm-012"], positives["ctl-dm-038"]
@@ -1302,7 +1286,7 @@ async def test_terminal_mission_refuses_evidence_replacement_and_preserves_quali
 
     await _executor(repository, store, OutcomeRegistry(
         [_corpus_signal(supply), _corpus_signal(demand)],
-        [_surface("youtube", "HEALTHY", 1), _surface("google", "HEALTHY", 1)],
+        [_surface("youtube", "HEALTHY", 1), _surface("threads", "HEALTHY", 1)],
     )).execute(mission.id)
     first_pass = {s.source_url: s for s in await repository.get_mission_signals(mission.id)}
     await _qualify_through_handlers(mission=mission, mcp_server=mcp_server, judgments=_judgments_by_observation(
@@ -1319,7 +1303,7 @@ async def test_terminal_mission_refuses_evidence_replacement_and_preserves_quali
 
     replacement = OutcomeRegistry(
         [_corpus_signal(demand, T0 + timedelta(hours=1))],
-        [_surface("youtube", "RATE_LIMITED"), _surface("google", "HEALTHY", 1)],
+        [_surface("youtube", "RATE_LIMITED"), _surface("threads", "HEALTHY", 1)],
     )
     with pytest.raises(MissionTerminalStateError):
         await _executor(repository, store, replacement).execute(mission.id)
@@ -1600,95 +1584,6 @@ async def test_a_vocabulary_failure_behind_an_active_writer_is_a_conflict_that_c
 
 
 
-@pytest.mark.asyncio
-async def test_a_measured_zero_never_covers_a_keyword_the_surfaces_did_not_query(
-    repository_case, host_workspace, monkeypatch
-):
-    """Reels truncates at its limit; TikTok probes every root and falsification query, without a window."""
-    from unittest.mock import AsyncMock, patch
-
-    from ignis.infrastructure.connectors.reels.reels_plugin import ReelsPlugin
-    from ignis.interfaces.mcp import server as mcp_server
-
-    # The limit is 20 since 26/10/2026; pin it at ten so eleven keywords still exercise truncation.
-    monkeypatch.setattr(ReelsPlugin, "max_search_keywords", 10)
-    keywords = [f"topic{index}" for index in range(1, 12)]
-
-    class DemandFor:
-        """Google demand for the first and the eleventh keyword only."""
-
-        platform, name, plugin_id, supports_search = PlatformType.GOOGLE_TRENDS, "Google", "google", True
-        http_authority, requires_paid_quota = "public_http", False
-
-        async def resolve_ingest_runtime(self):
-            from ignis.application.ports.connector_port import IngestRuntime
-
-            return IngestRuntime.HTTP_API
-
-        async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=None, custom_timeframe=None, limit=20):
-            return [
-                _signal(f"Google Search Trends: {k}", PlatformType.GOOGLE_TRENDS, external=f"g-{k}", keyword=k,
-                        connector_surface="google")
-                for k in (keywords[0], keywords[10])
-            ]
-
-    class AnsweredEmptyTikTok(TikTokPlugin):
-        """The real keyword loop; each page it reaches answers with an empty search response."""
-
-        async def keyword_search_blocked_reason(self):
-            return None
-
-        async def _fetch_via_playwright(self, url, storage_state, geo, limit=30, keyword=None,
-                                        seen_urls=None, attestation=None):
-            attestation.executed(keyword)
-            return []
-
-    oauth, browser = AsyncMock(), AsyncMock()
-    oauth.get_access_token.return_value = None
-    browser.get_storage_state.return_value = {"cookies": [{"name": "sessionid", "value": "test"}]}
-    registry = ConnectorPluginRegistry(repository=repository_case.repository)
-    registry.register(DemandFor())
-    registry.register(AnsweredEmptyTikTok())
-    registry.register(ReelsPlugin(auth_manager=oauth, browser_auth_manager=browser))
-
-    repository = repository_case.repository
-    store, workspace = await _workspace(repository, host_workspace)
-    mission, _brief = await _market_mission(
-        repository,
-        store,
-        workspace,
-        keywords=keywords,
-        channels=("google", "tiktok_video_grid", "reels"),
-    )
-    empty_page = {"data": {"recent": {"sections": []}}}
-    with patch("ignis.infrastructure.connectors.reels.reels_plugin.collect_json_payloads",
-               AsyncMock(return_value=[empty_page])):
-        await _executor(repository, store, registry).execute(mission.id)
-
-    outcomes = {o.connector_surface: o for o in await store.get_latest_completed_probe_outcomes(mission.id)}
-    assert outcomes["reels"].status.value == outcomes["tiktok_video_grid"].status.value == "EMPTY_NO_DATA"
-    assert outcomes["reels"].queried_keywords == tuple(keywords[:10])
-    assert outcomes["tiktok_video_grid"].queried_keywords == tuple(keywords) + (
-        "No repeated operational pain is observed among small retailers",
-    )
-    # Neither real search restricts results to a window, so neither measured the 7d frame.
-    assert outcomes["reels"].queried_window is None
-    assert outcomes["tiktok_video_grid"].queried_window is None
-
-    monkeypatch.setattr(mcp_server, "get_components", lambda: _handler_components(repository, store))
-    held = await repository.get_mission_signals(mission.id)
-    judgments = {
-        str(s.observation_id): {"relation": "QUALIFIED_SUPPORT", "purpose": "DEMAND", "confidence": 0.9,
-                                "reason_code": "DIRECT_TO_FRAME"}
-        for s in held
-    }
-    await _qualify_through_handlers(mcp_server, mission, judgments)
-    analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id)))
-
-    assert analysis["analysis_status"] == "INSUFFICIENT_EVIDENCE"
-    assert "MISSING_SUPPLY_EVIDENCE" in analysis["gap_report"]["failed_gates"]
-    for forbidden in analysis["gap_report"]["withheld_outputs"]:
-        assert forbidden not in analysis
 
 
 @pytest.mark.asyncio
@@ -1702,12 +1597,12 @@ async def test_a_windowed_measured_zero_still_covers_only_the_ten_keywords_each_
 
     class DemandForFirstAndEleventh(DemandOnly):
         async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=None, custom_timeframe=None, limit=20):
-            return [_signal(f"Google Search Trends: {k}", PlatformType.GOOGLE_TRENDS, external=f"g-{k}",
-                            keyword=k, connector_surface="google") for k in (keywords[0], keywords[10])]
+            return [_signal(f"Google Search Trends: {k}", PlatformType.THREADS, external=f"g-{k}",
+                            keyword=k, connector_surface="threads") for k in (keywords[0], keywords[10])]
 
     registry = ConnectorPluginRegistry(repository=repository_case.repository)
-    for plugin in (DemandForFirstAndEleventh(), WindowedSupply("reels", PlatformType.REELS),
-                   WindowedSupply("tiktok_video_grid", PlatformType.TIKTOK)):
+    for plugin in (DemandForFirstAndEleventh(), WindowedSupply("youtube", PlatformType.YOUTUBE),
+                   WindowedSupply("tiktok_video", PlatformType.TIKTOK)):
         registry.register(plugin)
     repository = repository_case.repository
     store, workspace = await _workspace(repository, host_workspace)
@@ -1716,7 +1611,7 @@ async def test_a_windowed_measured_zero_still_covers_only_the_ten_keywords_each_
         store,
         workspace,
         keywords=keywords,
-        channels=("google", "reels", "tiktok_video_grid"),
+        channels=("threads", "youtube", "tiktok_video"),
     )
     await _executor(repository, store, registry).execute(mission.id)
 
@@ -1768,7 +1663,7 @@ class WindowedSupply:
 
 
 class DemandOnly:
-    platform, name, plugin_id, supports_search = PlatformType.GOOGLE_TRENDS, "Google", "google", True
+    platform, name, plugin_id, supports_search = PlatformType.THREADS, "Google", "threads", True
     http_authority, requires_paid_quota = "public_http", False
 
     async def resolve_ingest_runtime(self):
@@ -1777,8 +1672,8 @@ class DemandOnly:
         return IngestRuntime.HTTP_API
 
     async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=None, custom_timeframe=None, limit=20):
-        return [_signal(f"Google Search Trends: {keywords[0]}", PlatformType.GOOGLE_TRENDS,
-                        external=f"g-{keywords[0]}", keyword=keywords[0], connector_surface="google")]
+        return [_signal(f"Google Search Trends: {keywords[0]}", PlatformType.THREADS,
+                        external=f"g-{keywords[0]}", keyword=keywords[0], connector_surface="threads")]
 
 
 @pytest.mark.parametrize("mismatch", [False, True])
@@ -1795,11 +1690,11 @@ async def test_a_surface_that_executed_another_window_is_not_a_measured_zero_for
         store,
         workspace,
         keywords=["ai cho cửa hàng"],
-        channels=("google", "reels", "tiktok_video_grid"),
+        channels=("threads", "youtube", "tiktok_video"),
         timeframe="30d",
     )
-    reels = WindowedSupply("reels", PlatformType.REELS)
-    tiktok = WindowedSupply("tiktok_video_grid", PlatformType.TIKTOK, fixed_window="24h" if mismatch else None)
+    reels = WindowedSupply("youtube", PlatformType.YOUTUBE)
+    tiktok = WindowedSupply("tiktok_video", PlatformType.TIKTOK, fixed_window="24h" if mismatch else None)
     registry = ConnectorPluginRegistry(repository=repository)
     for plugin in (DemandOnly(), reels, tiktok):
         registry.register(plugin)
@@ -1810,8 +1705,8 @@ async def test_a_surface_that_executed_another_window_is_not_a_measured_zero_for
         "a connector that reads only `timeframe` must receive the mission's window"
     )
     outcomes = {o.connector_surface: o for o in await store.get_latest_completed_probe_outcomes(mission.id)}
-    assert outcomes["reels"].queried_window == "30d"
-    assert outcomes["tiktok_video_grid"].queried_window == ("24h" if mismatch else "30d")
+    assert outcomes["youtube"].queried_window == "30d"
+    assert outcomes["tiktok_video"].queried_window == ("24h" if mismatch else "30d")
 
     monkeypatch.setattr(mcp_server, "get_components", lambda: _handler_components(repository, store))
     held = await repository.get_mission_signals(mission.id)
@@ -1952,7 +1847,7 @@ async def test_taxonomy_category_only_reset_preserves_analysis(
     if surface == "market":
         mission, _, held = await _market_with(
             repository, store, workspace, items, CONTROL_KEYWORDS,
-            outcomes=[("google", "google", "HEALTHY", 1), ("youtube", "youtube", "HEALTHY", 5)],
+            outcomes=[("threads", "threads", "HEALTHY", 1), ("youtube", "youtube", "HEALTHY", 5)],
         )
         cluster = TopicCluster(canonical_name="Synthetic category parity", category="beauty")
         for signal in held:

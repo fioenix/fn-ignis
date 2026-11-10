@@ -29,9 +29,8 @@ for name in ('_create_tables_and_seed', '_create_progress_tables', '_ensure_rese
     setattr(SqliteTrendRepository, name, traced)
 from ignis.interfaces.mcp import server
 providers = [httpx.AsyncClient, httpx.Client]
-for name in ('TikTokAuthManager', 'ThreadsAuthManager', 'InstagramAuthManager', 'ThreadsBrowserAuthManager',
-             'InstagramBrowserAuthManager', 'TikTokCreativeCenterPlugin', 'GoogleTrendsRssPlugin', 'TikTokPlugin',
-             'ThreadsPlugin', 'ReelsPlugin', 'YouTubeDataPlugin', 'ConnectorPluginRegistry', 'RuntimeConfigManager'):
+for name in ('TikTokPlugin',
+             'ThreadsPlugin', 'YouTubeDataPlugin', 'ConnectorPluginRegistry', 'RuntimeConfigManager'):
     providers.append(getattr(server, name))
 for provider in providers:
     def recording(self, *args, _init=provider.__init__, _label=provider.__name__, **kwargs):

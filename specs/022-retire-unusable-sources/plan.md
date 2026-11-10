@@ -46,13 +46,13 @@ Removing MCP tools is explicitly owner-approved. No data transformation or schem
 | Catalog/composition | `src/ignis/interfaces/mcp/server.py`: remove eleven decorators, wrappers and exclusive handlers; unregister Google RSS, Creative Center, TikTok grid and Reels. Keep Threads host-required compatibility port and conditional YouTube registration. Instantiate TikTok comments without a stored session. |
 | Other composition | `src/ignis/interfaces/cli/setup_bundle.py::run_synthetic_diagnostics`, `scripts/generate_sample_case_studies.py`: remove RSS probe and retired registrations. Never run these live. |
 | Health/auth | `diagnose_system_health`, `verify_connectors_health`: active registry only, no retired login remediation or expiry alerts from dormant sessions. Generic auth status/clear keep direct repository behavior and signatures; no automatic deletion. |
-| Self-content | `config/vocabulary_loader.py`, `security/self_identity_registry.py`: retain credential repository and self-identity loading; do not instantiate removed login managers. |
+| Self-content | `config/vocabulary_loader.py`, `auth/self_identity.py`: retain credential repository and self-identity loading; do not instantiate removed login managers. |
 | Vocabulary/ingest | Remove Google probe and TikTok suggest registrations from `VocabularySynchronizer`; retain historical seed rows and exclusion prefixes so `ingest_trends.py::load_seed_keywords` never probes template text. Preserve common language/quality machinery. |
 | Admission | `domain/research_workspace.py`, create Attention/Market use cases, `execute_mission.py`, `host_browser_mission.py`, registry execution requirements: one deterministic retired-resource check, invoked before writes/probes; never in manifest deserialization. |
 | Watchlist runs | `application/use_cases/watchlists.py`: reduce the caller's resource list; report each removed entry with `SURFACE_RETIRED`; refuse all-retired requests without creating a mission. The stored watchlist model contains topics/brands, not allowed resources: host routines supply authority each run. |
 | Historical reads | `domain/watchlist_period.py`: keep `CHANNEL_ORDER` and `SAMPLED_CHANNELS` as historical measurement metadata, not an active connector catalog. `SUPPLY_SURFACE_PLATFORMS` stays for existing evidence qualification. Preserve platform enums, repository reads, channel outcomes and report/template fields. |
-| Dead code | Remove exclusive connector acquisition paths where no kept consumer remains; retain TikTok URL validation/comments, privacy/navigation checks and pure mapping code used by retained-evidence conformance. Do not remove shared browser/HTTP, auth storage, identity or cache helpers solely by directory name. |
-| Guidance | `.agents/skills/ignis-*`, `src/ignis/interfaces/mcp/guides/`, `docs/agents/`, active README/user guides/source map and templates: no instruction to invoke retired sources. Historic rendering labels remain. |
+| Dead code | Remove exclusive MCP acquisition bodies and registrations. Retain unregistered leaf modules for legacy parser/conformance fixtures and TikTok URL comments; see research R8 for exact retention reasons. Keep shared browser/HTTP, auth storage, identity and cache helpers. |
+| Guidance | `.agents/skills/ignis-*`, `src/ignis/interfaces/mcp/guides/`, `docs/agents/`, active README/user guides and templates (the dated source map remains historical): no instruction to invoke retired sources. Historic rendering labels remain. |
 | Counts | `AGENTS.md`, `CLAUDE.md`, `openclaw.json`, `server.json`, Hermes catalogs, `scripts/wheel_mcp_smoke.py`, public-distribution fixtures, README pair, user-guide pair, current `BACKLOG.md`; inspect governed tests and CI/setup-generated counts. Generate both Hermes catalogs with `scripts/sync_tool_manifests.py --write`. |
 
 ## Execution and validation
@@ -72,13 +72,15 @@ Use a clean allowlisted process environment and temporary HOME; never read crede
 PostgreSQL parity, real browser/platform behavior and external review stay unverified locally.
 Commit each complete seam with explicit paths and the requested Co-Authored-By trailer.
 
+## Implementation decisions
+
+- `extract_customer_pain_points` keeps its name and parameters but returns `BLOCKED /
+  SURFACE_RETIRED` before components, quota or collection. FR-001 freezes signatures, not a
+  retired acquisition behavior; FR-003 requires refusal. This settles the earlier optional
+  question without treating silence as owner approval. No replacement search workflow is added.
+
 ## Open
 
-- Owner decision pending: `extract_customer_pain_points` is a surviving tool but directly invokes
-  `TikTokPlugin.fetch_top_comments_for_keywords → search_signals`, bypassing registry removal.
-  Proposed minimal contract: keep its name/parameters and return `BLOCKED / SURFACE_RETIRED`
-  before quota or collection. No replacement search workflow is in scope. Stop edits to this
-  dependent path until the owner answers; do not retain a hidden headless collection fallback.
 - Independent code/security reviews cannot be represented as completed without a permitted
   reviewer run. They are a later merge gate; no PR or merge is requested here.
 

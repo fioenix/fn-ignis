@@ -46,6 +46,8 @@ is gone from the catalog, and stored observations from removed sources stay read
 - Q: What happens to the session tools that lose their consumer? → A: `authenticate_instagram`, `clear_instagram_auth`, `get_instagram_auth_status`, `clear_threads_auth` and `get_threads_auth_status` are removed too (owner decided). Planning confirms that `clear_platform_auth`, `get_platform_auth_status` and the self-content guard do not depend on them.
 - Q: Which rule decides what stays built in? → A: The decision record `2026-11-10-source-connection-boundary.md`, accepted by the owner: an official MCP means integrate with it, otherwise build in.
 
+- Q: How does the surviving keyword pain-point tool avoid its retired headless search dependency? → A: Preserve its name and parameters; return `BLOCKED / SURFACE_RETIRED` before components or quota, pointing to URL-based comments (agent decided; basis: FR-001 preserves names/parameters and FR-003 requires refusal before retired collection; no replacement workflow).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - An agent sees only sources that work (Priority: P1)

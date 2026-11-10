@@ -1,4 +1,4 @@
-"""A caller root's missions read the platform sessions authenticate_* saved in the installation store.
+"""A caller root retains installation credentials for identity and historical audit reads.
 
 The sessions live in the installation store; the caller store keeps only the caller's own evidence.
 Found in the Spec 017 T006 acceptance: Threads and Reels reported AUTH_REQUIRED inside a caller root
@@ -35,12 +35,11 @@ async def test_caller_missions_read_sessions_saved_in_the_installation_store(cal
         "threads_browser", "session_cookies", {"cookies": [{"name": "synthetic", "value": "1"}]})
     components = server._init_components(caller_scope=scope)
 
-    for name in AUTH_MANAGERS:
-        credentials = components[name]._repository
-        assert credentials is not components["repository"], f"{name} reads the caller store"
-        assert credentials._db_path == str(installation), f"{name} reads another store"
-    record = await components["threads_browser_auth_manager"]._repository.get_platform_credentials(
-        "threads_browser")
+    assert all(name not in components for name in AUTH_MANAGERS)
+    credentials = components["credential_repository"]
+    assert credentials is not components["repository"]
+    assert credentials._db_path == str(installation)
+    record = await credentials.get_platform_credentials("threads_browser")
     assert record is not None and record["credentials_data"]["cookies"][0]["name"] == "synthetic"
     assert await components["repository"].get_platform_credentials("threads_browser") is None
 
@@ -62,7 +61,8 @@ def test_caller_never_creates_an_absent_installation_store(caller_root):
     installation, scope = caller_root
     components = server._init_components(caller_scope=scope)
 
-    assert all(components[name]._repository is components["repository"] for name in AUTH_MANAGERS)
+    assert components["credential_repository"] is components["repository"]
+    assert all(name not in components for name in AUTH_MANAGERS)
     assert components["repository"]._db_path == str(scope.database)
     assert components["registry"]._repository is components["repository"]
     assert not installation.exists()
@@ -74,7 +74,8 @@ def test_caller_reuses_the_composed_installation_repository(tmp_path, monkeypatc
     root = tmp_path / "caller"
     (root / ".fnignis").mkdir(parents=True)
     components = server._init_components(caller_scope=CallerStorageScope(root))
-    assert all(components[name]._repository is shared for name in AUTH_MANAGERS)
+    assert components["credential_repository"] is shared
+    assert all(name not in components for name in AUTH_MANAGERS)
 
 
 @pytest.mark.asyncio

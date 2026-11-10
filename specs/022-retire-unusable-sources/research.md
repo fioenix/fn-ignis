@@ -35,11 +35,27 @@ composition. Search tools, health, auth and vocabulary consumers are enumerated 
 Rationale: only changing MCP initialization leaves other entry points advertising dead collection.
 
 ## R6 — Surviving keyword pain-point tool
-Decision: pending owner response, tracked under Open in plan.md. Its current implementation depends
-on the retired grid. No new search or URL-selection feature is inferred from the retirement request.
+Decision: preserve the name and parameters, but refuse with `BLOCKED / SURFACE_RETIRED`
+before components or quota. FR-001 permits unchanged signatures with a typed refusal required by
+FR-003. No new search or URL-selection feature is inferred from the retirement request.
 
 ## R7 — Distribution and verification
 Decision: runtime tools are authoritative; freeze surviving schemas before edits, regenerate Hermes
 catalogs using the existing script, and update every governed count and smoke fixture to 42.
 Rationale: hand-editing generated schemas can hide drift. Use only fake platforms and temporary
 SQLite. PostgreSQL checks stay in CI; no live probe repeats the owner's already-settled decisions.
+
+## R8 — Removal boundary and retained modules
+Remove the eleven exclusive MCP wrappers/handlers, their OAuth/status helpers, the keyword
+pain-point acquisition body, four composition registrations, setup RSS probe, sample registrations,
+and vocabulary wiring. Keep dormant `google_trends/rss_plugin.py`, `tiktok/creative_center_plugin.py`
+and `reels/reels_plugin.py` for offline legacy parser/conformance fixtures; no shipped composition
+constructs them. Their acquisition methods have no production caller. Whole-file deletion is not
+required by FR-002 and would also remove those parser fixtures. `TikTokPlugin` remains shared by
+URL comments and legacy parser tests; its keyword helpers have no production caller after the
+pain-point refusal. Shared browser/navigation, credential storage and identity helpers stay.
+
+The source-map HTML/SVG/PNG is a dated 29/09/2026 historical diagram, already excluded from current
+README embeds by `test_public_doc_conventions`. No replacement diagram is added. Report templates
+retain old platform colors, Macro Radar and suggestion sections for historical rendering; no
+template issues collection calls. `server.json` has no tool list/count and needs no byte change.

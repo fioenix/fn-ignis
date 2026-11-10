@@ -116,10 +116,8 @@ async def test_pain_points_name_no_commenter_or_creator():
             fetch.return_value = legacy_payload
             response = json.loads(await handle_extract_customer_pain_points(keywords=["áo khoác"], geo="VN", max_videos=1))
 
-    assert response["status"] == "SUCCESS"
-    assert [i["inquiry"] for i in response["top_inquiries_and_pain_points"]] == ["Giá bao nhiêu vậy shop?"]
-    assert "author" not in response["top_inquiries_and_pain_points"][0]
-    assert response["videos_breakdown"][0]["video_url"] == SHARE_LINK
+    assert response["status"] == "BLOCKED" and response["reason_code"] == "SURFACE_RETIRED"
+    fetch.assert_not_awaited()
     assert _leaks(response) == []
 
 
@@ -182,7 +180,7 @@ async def test_video_comments_report_concentration_without_any_author():
 
 
 @pytest.mark.asyncio
-async def test_pain_points_report_concentration_across_videos():
+async def test_retired_pain_points_do_not_report_a_fabricated_concentration():
     payload = [
         {"video_url": SHARE_LINK, "video_title": "Áo khoác", "views": 1, "total_comments_fetched": 2,
          "comments": [
@@ -197,8 +195,9 @@ async def test_pain_points_report_concentration_across_videos():
             fetch.return_value = payload
             response = json.loads(await handle_extract_customer_pain_points(keywords=["áo khoác"], geo="VN", max_videos=2))
 
-    assert isinstance(fetch.await_args.kwargs["author_key"], bytes)
-    assert response["author_concentration"]["distinct_authors"] == 2
+    assert response["status"] == "BLOCKED"
+    fetch.assert_not_awaited()
+    assert "author_concentration" not in response
     assert "author_assignment" not in json.dumps(response)
 
 

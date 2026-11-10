@@ -17,6 +17,7 @@ from ignis.domain.value_objects import resolve_platform, resolve_timeframe
 from ignis.domain.exceptions import VocabularySynchronizationError
 from ignis.domain.research_workspace import (
     REQUIRED_BRIEF_FIELDS,
+    require_active_resources,
     IncompleteMarketBriefError,
     InvalidMissionAuthorizationError,
     InvalidMissionManifestError,
@@ -107,6 +108,7 @@ class ExecuteMissionUseCase:
             await self._repo.update_mission(mission)
             raise InvalidMissionManifestError(mission.summary)
 
+        require_active_resources(manifest.allowed_resources)
         resolver = getattr(self._registry, "resolve_execution_requirements", None)
         if resolver is None:
             raise InvalidMissionAuthorizationError(

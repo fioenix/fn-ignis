@@ -189,8 +189,8 @@ async def test_in_memory_reservations_are_serialised():
 
 
 @pytest.mark.asyncio
-async def test_pain_point_extraction_reserves_its_tiktok_searches(store):
-    """extract_customer_pain_points searches TikTok outside the registry, so it reserves itself."""
+async def test_retired_pain_point_extraction_never_reserves_tiktok_searches(store):
+    """Retirement refuses before quota admission, regardless of the requested keyword count."""
     import json
     from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -208,10 +208,10 @@ async def test_pain_point_extraction_reserves_its_tiktok_searches(store):
             refused = json.loads(await server.handle_extract_customer_pain_points(keywords=["áo khoác", "áo len"]))
             admitted = json.loads(await server.handle_extract_customer_pain_points(keywords=["áo khoác"]))
 
-    assert refused["status"] == "RATE_LIMITED" and refused["reason"] == "daily_ceiling"
-    assert admitted["status"] == "SUCCESS"
-    assert fetch.await_count == 1
-    assert _counts(store) == {"tiktok": 1}
+    assert refused["status"] == admitted["status"] == "BLOCKED"
+    assert refused["reason_code"] == admitted["reason_code"] == "SURFACE_RETIRED"
+    fetch.assert_not_awaited()
+    assert _counts(store) == {}
 
 
 class _CappedPlugin(_SearchPlugin):
@@ -235,8 +235,8 @@ async def test_the_count_is_what_a_capped_connector_sends(store):
 
 
 @pytest.mark.asyncio
-async def test_pain_points_count_every_tiktok_keyword_searched(store):
-    """TikTok search reads every keyword it is given, so fifteen keywords need fifteen requests."""
+async def test_retirement_precedes_the_daily_search_ceiling(store):
+    """A retired surface must not be misreported as temporarily rate limited."""
     from unittest.mock import AsyncMock, MagicMock, patch
 
     import json
@@ -254,7 +254,8 @@ async def test_pain_points_count_every_tiktok_keyword_searched(store):
             refused = json.loads(await server.handle_extract_customer_pain_points(
                 keywords=[f"từ khoá {index}" for index in range(15)]))
 
-    assert refused["status"] == "RATE_LIMITED" and fetch.await_count == 0
+    assert refused["status"] == "BLOCKED" and refused["reason_code"] == "SURFACE_RETIRED"
+    fetch.assert_not_awaited()
 
 
 class _FlakyPlugin(_SearchPlugin):

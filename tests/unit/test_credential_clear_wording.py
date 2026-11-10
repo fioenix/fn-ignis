@@ -10,9 +10,7 @@ constant cannot make them pass while the user-visible string still says revoked.
 """
 
 import asyncio
-import json
 import re
-from unittest.mock import AsyncMock
 
 import pytest
 
@@ -43,7 +41,7 @@ def _claims_revocation(text: str) -> bool:
         return True
     return False
 
-CLEAR_TOOLS = ("clear_threads_auth", "clear_instagram_auth", "clear_platform_auth")
+CLEAR_TOOLS = ("clear_platform_auth",)
 
 
 def _tool_descriptions() -> dict:
@@ -66,41 +64,4 @@ def test_clear_tool_description_does_not_claim_remote_revocation(tool_name):
     )
     assert re.search(r"(?i)(delete|clear|remove)", description), (
         f"The {tool_name} description does not say what it actually does: {description!r}"
-    )
-
-
-@pytest.mark.parametrize(
-    "handler_name, manager_key, browser_key",
-    [
-        ("handle_clear_threads_auth", "threads_auth_manager", "threads_browser_auth_manager"),
-        ("handle_clear_instagram_auth", "instagram_auth_manager", "instagram_browser_auth_manager"),
-    ],
-)
-def test_clear_handler_reports_local_deletion_not_revocation(
-    monkeypatch, handler_name, manager_key, browser_key
-):
-    auth_manager = AsyncMock()
-    auth_manager.clear_auth = AsyncMock(return_value=True)
-    browser_manager = AsyncMock()
-    browser_manager.clear_auth = AsyncMock(return_value=True)
-
-    monkeypatch.setattr(
-        mcp_server,
-        "get_components",
-        lambda: {manager_key: auth_manager, browser_key: browser_manager},
-    )
-
-    payload = json.loads(asyncio.run(getattr(mcp_server, handler_name)()))
-    message = payload["message"]
-
-    assert payload["cleared"] is True
-    assert not _claims_revocation(message), (
-        f"{handler_name} tells the operator the credential was revoked: {message!r}. Nothing was "
-        "sent to the provider, so the token is still valid there."
-    )
-    assert re.search(r"(?i)(delete|cleared|removed)", message), (
-        f"{handler_name} does not state that local storage was cleared: {message!r}"
-    )
-    assert re.search(r"(?i)(local|stored)", message), (
-        f"{handler_name} does not scope its claim to local storage: {message!r}"
     )

@@ -10,12 +10,7 @@ EXPECTED_TOOLS = {
     "prepare_host_browser_search",
     "submit_host_browser_search",
     "cancel_host_browser_search",
-    "authenticate_instagram",
-    "authenticate_threads",
-    "authenticate_tiktok",
-    "clear_instagram_auth",
     "clear_platform_auth",
-    "clear_threads_auth",
     "confirm_market_brief",
     "confirm_research_workspace",
     "create_attention_mission",
@@ -27,7 +22,6 @@ EXPECTED_TOOLS = {
     "extract_customer_pain_points",
     "generate_mission_artifact",
     "get_current_session_mission",
-    "get_instagram_auth_status",
     "get_mission_analysis",
     "get_mission_relay_snapshot",
     "record_mission_research_work",
@@ -36,11 +30,6 @@ EXPECTED_TOOLS = {
     "get_platform_auth_status",
     "get_runtime_config",
     "get_system_logs",
-    "get_threads_auth_status",
-    "get_threads_search_suggestions",
-    "get_threads_trending_topics",
-    "get_tiktok_creative_center_trends",
-    "get_tiktok_search_suggestions",
     "get_tiktok_video_comments",
     "get_watchlist",
     "list_domain_lexicons",
@@ -63,6 +52,18 @@ EXPECTED_TOOLS = {
 }
 
 REMOVED_TOOLS = {
+    "authenticate_instagram",
+    "authenticate_threads",
+    "authenticate_tiktok",
+    "clear_instagram_auth",
+    "clear_threads_auth",
+    "get_instagram_auth_status",
+    "get_threads_auth_status",
+    "get_threads_search_suggestions",
+    "get_threads_trending_topics",
+    "get_tiktok_creative_center_trends",
+    "get_tiktok_search_suggestions",
+
     "run_autonomous_research_mission",
     "create_research_mission",
     "get_trending_topics",
@@ -140,11 +141,7 @@ def test_mcp_instructions_resources_and_prompts_respect_the_claim_gate():
 
 
 @pytest.mark.asyncio
-async def test_threads_compatibility_descriptions_do_not_offer_cookie_collection():
+async def test_threads_host_search_remains_available_without_placeholder_tools():
     tools = {tool.name: tool for tool in await mcp.list_tools()}
-    for name in ("get_threads_search_suggestions", "get_threads_trending_topics"):
-        description = tools[name].description
-        assert "HOST_BROWSER_REQUIRED" in description
-        assert "unavailable" in description.lower()
     prepare = tools["prepare_host_browser_search"]
     assert "threads" in prepare.description.lower() and "tiktok" in prepare.description.lower()

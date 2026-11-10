@@ -64,7 +64,7 @@ def _manifest(output_type=MissionOutputType.ATTENTION_REPORT):
             if output_type is MissionOutputType.MARKET_ANALYSIS
             else None
         ),
-        required_channels=("google", "tiktok_video_grid"),
+        required_channels=("threads", "tiktok_video"),
         optional_channels=(),
         authority_boundary=AuthorityBoundary(
             public_http=True,
@@ -116,8 +116,8 @@ class StubRegistry:
     async def search_with_outcomes(self, **kwargs):
         signals = await self.search_across_all(**kwargs)
         counts = {
-            "google": sum(signal.platform is PlatformType.GOOGLE_TRENDS for signal in signals),
-            "tiktok_video_grid": sum(signal.platform is PlatformType.TIKTOK for signal in signals),
+            "threads": sum(signal.platform is PlatformType.THREADS for signal in signals),
+            "tiktok_video": sum(signal.platform is PlatformType.TIKTOK for signal in signals),
         }
         from ignis.infrastructure.connectors.registry import SurfaceProbeResult
 
@@ -125,7 +125,7 @@ class StubRegistry:
             signals=signals,
             outcomes=[
                 SurfaceProbeResult(
-                    platform=("google" if surface == "google" else "tiktok"),
+                    platform=("threads" if surface == "threads" else "tiktok"),
                     connector_surface=surface,
                     status=(
                         ChannelHealthStatus.HEALTHY
@@ -160,13 +160,13 @@ def _probe_signals():
     now = datetime.now(timezone.utc)
     return [
         TrendSignal(
-            platform=PlatformType.GOOGLE_TRENDS,
+            platform=PlatformType.THREADS,
             raw_title="ai customer service",
             metric_value=88.0,
             growth_velocity=14.0,
-            source_url="https://trends.google.com/trends/explore?q=ai+customer+service",
+            source_url="https://www.threads.com/t/fixture1234",
             geo_code=GeoCode.VN,
-            metadata={"keyword": "ai customer service", "connector_surface": "google_rss"},
+            metadata={"keyword": "ai customer service", "connector_surface": "threads"},
             captured_at=now,
         ),
         TrendSignal(
@@ -242,7 +242,7 @@ async def test_attention_runs_without_a_hypothesis_and_cites_real_observations(
         clusters=[],
         scorecard=QualityScorecard(),
         connector_health={
-            "google_rss": {"platform": "google", "circuit_state": "CLOSED"},
+            "threads": {"platform": "threads", "circuit_state": "CLOSED"},
             "tiktok": {"platform": "tiktok", "circuit_state": "CLOSED"},
         },
     )
@@ -280,7 +280,7 @@ async def test_two_surfaces_of_one_platform_are_reported_separately(
         clusters=[],
         scorecard=QualityScorecard(),
         connector_health={
-            "google_rss": {"platform": "google", "circuit_state": "CLOSED"},
+            "threads": {"platform": "threads", "circuit_state": "CLOSED"},
             # The video grid answered; the comments probe did not.
             "tiktok": {"platform": "tiktok", "circuit_state": "CLOSED"},
             "tiktok_comments": {
@@ -401,7 +401,7 @@ async def test_direct_market_reasoner_exposes_audit_not_unpersisted_conclusions(
         clusters=[],
         scorecard=QualityScorecard(),
         connector_health={
-            "google_rss": {"platform": "google", "circuit_state": "CLOSED"},
+            "threads": {"platform": "threads", "circuit_state": "CLOSED"},
             "tiktok": {"platform": "tiktok", "circuit_state": "CLOSED"},
         },
         market_brief=revision.to_payload(),
@@ -463,7 +463,7 @@ class ProbeCountingRegistry(StubRegistry):
 
     def get_health_status(self):
         return {
-            "google_rss": {"platform": "google", "circuit_state": "CLOSED"},
+            "threads": {"platform": "threads", "circuit_state": "CLOSED"},
             "tiktok": {"platform": "tiktok", "circuit_state": "CLOSED"},
         }
 

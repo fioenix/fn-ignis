@@ -28,5 +28,7 @@ URL-based TikTok comments retain validation/redaction/error shapes; no retired s
 YouTube and host-browser TikTok/Threads contracts stay unchanged. Historical period channels and
 sample flags remain, including Reels; their existence is not current connector availability.
 
-## Pending boundary
-`extract_customer_pain_points`: see plan Open; keep its schema while awaiting owner disposition.
+## Surviving dependent tool
+`extract_customer_pain_points` preserves its parameter schema and returns `BLOCKED /
+SURFACE_RETIRED` naming `tiktok_video_grid` before component access or quota. `next_step`
+points to `get_tiktok_video_comments` for a caller that already has a video URL.

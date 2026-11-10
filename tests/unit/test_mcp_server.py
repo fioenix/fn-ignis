@@ -69,23 +69,6 @@ async def test_mcp_generate_mission_artifact():
         assert "file://" in res["file_url"]
 
 
-@pytest.mark.asyncio
-async def test_mcp_authenticate_tiktok():
-    from ignis.interfaces.mcp.server import handle_authenticate_tiktok
-
-    with patch("ignis.interfaces.mcp.server.get_components") as mock_get_comp:
-        mock_auth = AsyncMock()
-        mock_auth.authenticate_interactive.return_value = {
-            "success": True,
-            "platform": "tiktok",
-            "message": "Auth OK",
-        }
-        mock_get_comp.return_value = {"tiktok_auth_manager": mock_auth}
-
-        res_str = await handle_authenticate_tiktok(headless=True, timeout_seconds=10)
-        res = json.loads(res_str)
-        assert res["success"] is True
-        assert res["platform"] == "tiktok"
 
 
 @pytest.mark.asyncio
@@ -162,11 +145,9 @@ def test_the_server_wires_one_synchronizer_into_mission_ingress(monkeypatch):
 
     synchronizer = comp["vocabulary_synchronizer"]
     assert comp["execute_mission_use_case"]._vocabulary_sync is synchronizer
-    assert synchronizer._tiktok_plugin is comp["tiktok_plugin"]
-    assert synchronizer._google_trends_plugin is comp["google_trends_plugin"]
     assert synchronizer._registry is comp["registry"]
     assert synchronizer._clusterer is comp["clusterer"]
-    assert comp["registry"].get_plugin_by_id("tiktok_video_grid") is comp["tiktok_plugin"]
+    assert comp["registry"].get_plugin_by_id("tiktok_video_grid") is None
 
 
 def test_the_server_wires_youtube_to_the_shared_repository_quota_manager(monkeypatch):

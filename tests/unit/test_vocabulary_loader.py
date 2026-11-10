@@ -476,14 +476,13 @@ async def test_synchronizer_never_reads_taxonomy_and_preserves_all_domain_terms(
     monkeypatch.setattr(repo, 'get_industry_taxonomies', forbidden, raising=False)
     clusterer = SemanticClusterer()
     detector = HeuristicLanguageDetector()
-    plugin = TikTokPlugin()
     vocabulary = await VocabularySynchronizer(
-        repo, clusterer=clusterer, language_detector=detector, tiktok_plugin=plugin,
+        repo, clusterer=clusterer, language_detector=detector,
     ).synchronize_vocabulary()
     actual = {(row['domain'], row['term'], row['category']) for row in await repo.get_domain_lexicons()}
     assert set(expected) <= actual
     assert sorted(row for row in actual if row[0] in ('fashion', 'tech', 'ecommerce', 'common_vi')) == expected
     assert clusterer._ambiguous_unigrams and clusterer._custom_stopwords
     assert vocabulary.foreign_phrases and vocabulary.portuguese_words
-    assert plugin._ui_noise
+    assert vocabulary.tiktok_ui_noise
     await repo.close()
