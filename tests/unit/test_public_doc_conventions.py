@@ -431,7 +431,7 @@ def test_current_collection_guides_do_not_offer_retired_tools_or_sources():
 
     paths = [Path(p) for p in ('README.md', 'README.vi.md', 'docs/USER_GUIDE.md',
                               'docs/USER_GUIDE.vi.md', 'docs/META_INTEGRATION_GUIDE.md',
-                              'docs/META_INTEGRATION_GUIDE.vi.md')]
+                              'docs/META_INTEGRATION_GUIDE.vi.md', '.codex/instructions.md')]
     paths += list(Path('src/ignis/interfaces/mcp/guides').glob('*.md'))
     paths += list(Path('.agents/skills').glob('ignis-*/SKILL.md'))
     for path in paths:
