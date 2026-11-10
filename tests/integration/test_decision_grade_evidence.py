@@ -1595,13 +1595,13 @@ async def test_a_windowed_measured_zero_still_covers_only_the_ten_keywords_each_
 
     keywords = [f"topic{index}" for index in range(1, 12)]
 
-    class DemandForFirstAndEleventh(DemandOnly):
+    class SyntheticDemandForFirstAndEleventh(SyntheticDemandOnly):
         async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=None, custom_timeframe=None, limit=20):
-            return [_signal(f"Google Search Trends: {k}", PlatformType.THREADS, external=f"g-{k}",
+            return [_signal(f"Synthetic demand: {k}", PlatformType.THREADS, external=f"demand-{k}",
                             keyword=k, connector_surface="threads") for k in (keywords[0], keywords[10])]
 
     registry = ConnectorPluginRegistry(repository=repository_case.repository)
-    for plugin in (DemandForFirstAndEleventh(), WindowedSupply("youtube", PlatformType.YOUTUBE),
+    for plugin in (SyntheticDemandForFirstAndEleventh(), WindowedSupply("youtube", PlatformType.YOUTUBE),
                    WindowedSupply("tiktok_video", PlatformType.TIKTOK)):
         registry.register(plugin)
     repository = repository_case.repository
@@ -1662,18 +1662,20 @@ class WindowedSupply:
         return []
 
 
-class DemandOnly:
-    platform, name, plugin_id, supports_search = PlatformType.THREADS, "Google", "threads", True
-    http_authority, requires_paid_quota = "public_http", False
+class SyntheticDemandOnly:
+    """Offline demand fixture using the Threads schema, without a real platform transport."""
+
+    platform, name, plugin_id, supports_search = PlatformType.THREADS, "Synthetic demand", "threads", True
+    requires_paid_quota = False
 
     async def resolve_ingest_runtime(self):
         from ignis.application.ports.connector_port import IngestRuntime
 
-        return IngestRuntime.HTTP_API
+        return IngestRuntime.BROWSER
 
     async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=None, custom_timeframe=None, limit=20):
-        return [_signal(f"Google Search Trends: {keywords[0]}", PlatformType.THREADS,
-                        external=f"g-{keywords[0]}", keyword=keywords[0], connector_surface="threads")]
+        return [_signal(f"Synthetic demand: {keywords[0]}", PlatformType.THREADS,
+                        external=f"demand-{keywords[0]}", keyword=keywords[0], connector_surface="threads")]
 
 
 @pytest.mark.parametrize("mismatch", [False, True])
@@ -1696,7 +1698,7 @@ async def test_a_surface_that_executed_another_window_is_not_a_measured_zero_for
     reels = WindowedSupply("youtube", PlatformType.YOUTUBE)
     tiktok = WindowedSupply("tiktok_video", PlatformType.TIKTOK, fixed_window="24h" if mismatch else None)
     registry = ConnectorPluginRegistry(repository=repository)
-    for plugin in (DemandOnly(), reels, tiktok):
+    for plugin in (SyntheticDemandOnly(), reels, tiktok):
         registry.register(plugin)
 
     await _executor(repository, store, registry).execute(mission.id)
