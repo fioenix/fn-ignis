@@ -525,24 +525,14 @@ class OfflineYouTube(YouTubeDataPlugin):
 
 
 async def _persist_vocabulary(repository_case):
-    """Persist the vocabulary a first mission depends on, on either backend.
+    """Persist shared vocabulary without requiring retired Google probe templates.
 
-    The shared PostgreSQL fixture applies the source/observation migrations only, so the
-    vocabulary tables are created here from 003 exactly as shipped; SQLite's bootstrap already
-    holds them. Returns the VN probe templates the database now holds.
+    Both repository fixtures create market_lexicons. PostgreSQL does not seed the historical
+    templates from 012; retained collection must work without those rows on either backend.
     """
-    from ignis.infrastructure.config.vocabulary_loader import load_market_vocabulary
-
-    if repository_case.name == "postgres":
-        import psycopg
-        from conftest import REPO_SQL
-
-        with psycopg.connect(repository_case.dsn) as conn:
-            conn.execute((REPO_SQL / "003_market_lexicons.sql").read_text(encoding="utf-8"))
     repository = repository_case.repository
     for (domain, category), terms in PERSISTED_VOCABULARY.items():
         await repository.register_lexicon_terms(domain, terms, category)
-    return (await load_market_vocabulary(repository)).probe_templates["VN"]
 
 
 def _fresh_process(repository):
