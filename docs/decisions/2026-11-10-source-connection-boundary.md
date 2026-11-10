@@ -40,7 +40,7 @@ connection is built into Ignis.)
 - YouTube stays built in through its official API. TikTok and Threads stay built in through host-browser
   search, and TikTok public comments stay built in.
 - Google Trends RSS, TikTok Creative Center, TikTok headless keyword search and Reels headless collection
-  are removed (Spec 022), together with the eleven tools that only served them, which takes the catalog from 53 to 42 tools.
+  are removed (Spec 022), together with the twelve tools that only served them, which takes the catalog from 53 to 41 tools.
 - When a platform publishes an official MCP server, its built-in connection becomes a candidate for
   removal in a spec of its own.
 

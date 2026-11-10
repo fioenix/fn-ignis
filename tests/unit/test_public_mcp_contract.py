@@ -19,7 +19,6 @@ EXPECTED_TOOLS = {
     "evaluate_mission_quality",
     "execute_mission_ingress",
     "execute_mission_follow_up",
-    "extract_customer_pain_points",
     "generate_mission_artifact",
     "get_current_session_mission",
     "get_mission_analysis",

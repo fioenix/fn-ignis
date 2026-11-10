@@ -19,17 +19,17 @@ REMOVED = {
     'get_threads_trending_topics', 'get_threads_search_suggestions',
     'authenticate_tiktok', 'authenticate_threads', 'authenticate_instagram',
     'clear_instagram_auth', 'get_instagram_auth_status',
-    'clear_threads_auth', 'get_threads_auth_status',
+    'clear_threads_auth', 'get_threads_auth_status', 'extract_customer_pain_points',
 }
 
 
 @pytest.mark.asyncio
-async def test_catalog_removes_exactly_eleven_and_preserves_survivor_parameters():
+async def test_catalog_removes_exactly_twelve_and_preserves_survivor_parameters():
     schemas = json.loads(Path('tests/fixtures/source_retirement/survivor-schemas.json').read_text())
     tools = {tool.name: tool for tool in await server.mcp.list_tools()}
-    assert len(tools) == 42
-    assert tools.keys() == schemas.keys()
     assert not tools.keys() & REMOVED
+    assert len(tools) == 41
+    assert tools.keys() == schemas.keys()
     for name, schema in schemas.items():
         assert tools[name].parameters == schema, name
     for name in REMOVED:
@@ -199,16 +199,6 @@ def test_sample_generator_does_not_reintroduce_retired_registrations():
         assert name not in text
 
 
-@pytest.mark.asyncio
-async def test_keyword_pain_points_refuses_before_components_or_quota(monkeypatch):
-    acquire = Mock(side_effect=AssertionError('No component or session may be opened'))
-    monkeypatch.setattr(server, 'get_components', acquire)
-    result = json.loads(await server.handle_extract_customer_pain_points(['tea']))
-    assert result['status'] == 'BLOCKED'
-    assert result['reason_code'] == 'SURFACE_RETIRED'
-    assert result['retired_resources'] == ['tiktok_video_grid']
-    assert 'get_tiktok_video_comments' in result['next_step']
-    acquire.assert_not_called()
 
 
 @pytest.mark.asyncio

@@ -3245,36 +3245,6 @@ async def get_tiktok_video_comments(video_url: str, limit: int = 30) -> str:
     return await handle_get_tiktok_video_comments(video_url=video_url, limit=limit)
 
 
-async def handle_extract_customer_pain_points(
-    keywords: List[str],
-    geo: str = "VN",
-    max_videos: int = 3,
-    inquiry_patterns: Optional[List[str]] = None,
-) -> str:
-    # FR-001 preserves this tool's parameters; FR-003 forbids its retired search dependency.
-    payload = RetiredSurfaceError(("tiktok_video_grid",)).to_payload()
-    payload["next_step"] = (
-        "Use get_tiktok_video_comments with a known video URL for a bounded comments request."
-    )
-    return json.dumps(payload, ensure_ascii=False)
-
-
-@mcp.tool(name="extract_customer_pain_points", description="Keyword-based TikTok pain-point extraction is blocked with SURFACE_RETIRED. Use get_tiktok_video_comments with a known video URL; this tool keeps its parameter schema for existing callers.")
-async def extract_customer_pain_points(
-    keywords: list[str],
-    geo: str = "VN",
-    max_videos: int = 3,
-    inquiry_patterns: Optional[list[str]] = None,
-) -> str:
-    return await handle_extract_customer_pain_points(
-        keywords=keywords,
-        geo=geo,
-        max_videos=max_videos,
-        inquiry_patterns=inquiry_patterns,
-    )
-
-
-
 async def handle_register_domain_lexicon(
     domain: str,
     terms: list[str],
@@ -3902,8 +3872,9 @@ def prompt_voice_of_customer_audit(keywords: str = "Chatbot AI") -> str:
     """Frame a bounded source-specific customer-voice probe."""
     return f"""
 The requester wants customer-voice evidence about '{keywords}'. Confirm the source surface,
-geography, time window, sampling cap, and stop condition. Use an authorized atomic comments
-or pain-point tool, report provenance and unavailable states, and distinguish observations
+geography, time window, sampling cap, and stop condition. Use get_tiktok_video_comments only
+with a known video URL and explicit task authority. Report provenance and unavailable states,
+and distinguish observations
 from inference. Do not claim market prevalence or a strategic verdict from this probe alone.
 """
 

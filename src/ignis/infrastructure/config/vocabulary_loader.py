@@ -23,7 +23,7 @@ MACHINERY_DOMAINS = frozenset({
     "noise_blacklist",
     "ambiguous_unigrams",
     "search_intent",
-    "customer_inquiry",
+    "customer_inquiry",  # Retired inquiry terms must stay excluded from market evidence.
     "tiktok_ui_noise",
     "tiktok_attribution",
     "threads_attribution",
@@ -60,7 +60,6 @@ class MarketVocabulary:
     noise_blacklist: List[str] = field(default_factory=list)
     ambiguous_unigrams: List[str] = field(default_factory=list)
     search_intent: List[str] = field(default_factory=list)
-    customer_inquiry: List[str] = field(default_factory=list)
     tiktok_ui_noise: List[str] = field(default_factory=list)
     tiktok_attribution: List[str] = field(default_factory=list)
     threads_attribution: List[str] = field(default_factory=list)
@@ -116,7 +115,6 @@ async def load_market_vocabulary(repository: ITrendRepository) -> MarketVocabula
         noise_blacklist=grouped.get("noise_blacklist", []),
         ambiguous_unigrams=grouped.get("ambiguous_unigrams", []),
         search_intent=grouped.get("search_intent", []),
-        customer_inquiry=grouped.get("customer_inquiry", []),
         tiktok_ui_noise=grouped.get("tiktok_ui_noise", []),
         tiktok_attribution=grouped.get("tiktok_attribution", []),
         threads_attribution=grouped.get("threads_attribution", []),

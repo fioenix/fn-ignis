@@ -167,7 +167,7 @@ def test_current_guides_explain_mission_bound_work_and_release_boundary():
         text = _read(relative)
         assert "Spec 011" in text, relative
         assert "025_evidence_grounded_claim_ledger.sql" in text, relative
-        assert "42 tools" in text, relative
+        assert "41 tools" in text, relative
         assert "ignis-track" in text and "open_mission_relay" not in text, relative
         assert "028_research_work.sql" in text, relative
         assert "v0.7.0" in text, relative
@@ -413,7 +413,7 @@ def test_spec020_public_docs_explain_the_browser_only_boundary(relative):
     text = _read(relative)
     for term in ('source="threads"', 'source="tiktok"', "threads-search-top-v2", "Playwright",
                  "Reels", "collection_path_changed", "collection_path_mixed", "collection_path_unknown",
-                 "42", "sql/039_remove_seeded_taxonomy.sql"):
+                 "41", "sql/039_remove_seeded_taxonomy.sql"):
         assert term in text, f"{relative} must explain {term}"
     assert "AutomationControlled" not in text, "Do not publish an evasion recipe"
 

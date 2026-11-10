@@ -12,7 +12,7 @@ at most two modules per command, using this form:
 PYTHONPATH=src /Users/fioenix/Projects/fn-ignis/.venv/bin/python -m pytest -q -o addopts='' tests/unit/test_source_retirement.py
 ```
 
-1. Catalog: expect exactly 42 tools, survivor schemas unchanged, no retired registrations or health
+1. Catalog: expect exactly 41 tools, survivor schemas unchanged, no retired registrations or health
    entries, no saved session read for URL comments.
 2. Admission: required and optional retired resources fail before any probe, quota or write.
 3. Watchlists: mixed requests report retirement and create survivor-only runs; all-retired requests

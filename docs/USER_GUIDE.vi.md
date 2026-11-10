@@ -1,6 +1,6 @@
 # Hướng dẫn sử dụng Ignis — Spec 022
 
-Tài liệu mô tả nhánh Spec 022 hiện tại với 42 tools. Việc ngừng các nguồn không còn dùng được
+Tài liệu mô tả nhánh Spec 022 hiện tại với 41 tools. Việc ngừng các nguồn không còn dùng được
 chưa phát hành; bản v0.9.0 đã công bố vẫn có danh mục và cách thu thập trước thay đổi này.
 Bản v0.7.0 thuộc kiến trúc Dual-Track cũ, không mô tả nhánh theo nhiệm vụ này.
 
@@ -63,8 +63,6 @@ thực đã lưu tự chúng không cấp quyền đó.
   Nếu thiếu package Python Playwright, bộ đọc hiện trả `SUCCESS` với 0 bình luận. Trang bị chặn hoặc không phân tích được cũng có thể
   cho 0 bình luận, hoặc trả về `ERROR`, tùy chỗ bị lỗi. Vì vậy con số 0 không chứng minh video
   không có thảo luận.
-- Lệnh `extract_customer_pain_points` cũ trả `BLOCKED / SURFACE_RETIRED` vì tìm kiếm theo
-  từ khóa bằng headless đã ngừng hoạt động. Chỉ dùng tool bình luận khi đã có URL video.
 - `execute_mission_ingress(mission_id)` là lựa chọn riêng cho nhiệm vụ đã xác nhận: tool này chỉ
   chạy kế hoạch đã ghi của nhiệm vụ đó và ghi kết quả cho từng kênh được yêu cầu.
 
@@ -256,7 +254,7 @@ cấp quyền thực hiện.
 
 ## 4. Ranh giới tool và triển khai
 
-MCP server cục bộ có **42 tools**. Xem mô tả trực tiếp từ server để biết tham số chính xác;
+MCP server cục bộ có **41 tools**. Xem mô tả trực tiếp từ server để biết tham số chính xác;
 các tool khám phá hằng ngày và nghiên cứu không giới hạn đã bị loại.
 Với PostgreSQL hiện có ở `035`, áp dụng lần lượt `036`, `037` và `038` bằng tài khoản sở hữu
 bảng. Nếu thiếu `038`, tìm kiếm TikTok qua trình duyệt host ở chế độ MISSION bị từ chối ngay từ đầu.
@@ -295,7 +293,7 @@ khuyến nghị kinh doanh. Host chỉ đóng tab do nhiệm vụ tạo, giữ n
 ### Thu thập Threads qua host và so sánh đường thu thập
 
 `prepare_host_browser_search` có tham số tùy chọn `source="threads"`. Khi bỏ qua tham số này,
-tool giữ `source="tiktok"`. Submit và cancel vẫn nhận ba tham số ID. Tổng số tool hiện là 42.
+tool giữ `source="tiktok"`. Submit và cancel vẫn nhận ba tham số ID. Tổng số tool hiện là 41.
 Threads chỉ thu thập qua trình duyệt host được cho phép. Phần thu thập bằng Playwright và
 các tool gợi ý, xu hướng chỉ trả kết quả không khả dụng đã bị gỡ. Credential Threads đã lưu
 không chứng minh có thể thu thập; Ignis không probe quyền API hay tự chuyển sang đường API.

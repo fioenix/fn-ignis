@@ -6,7 +6,7 @@ Ignis là bộ công cụ tự lưu trữ để nghiên cứu thị trường t�
 lập: thu thập có thể kết thúc bằng một khung chứng cứ; phân tích có thể kết thúc bằng báo cáo
 thiếu chứng cứ thay vì cố đưa ra kết luận.
 
-**Phạm vi nhánh:** Spec 022 có 42 tools và ngừng các đường thu thập không còn dùng được.
+**Phạm vi nhánh:** Spec 022 có 41 tools và ngừng các đường thu thập không còn dùng được.
 Thay đổi này chưa phát hành. Bản v0.9.0 đã công bố giữ hợp đồng trình duyệt host và migration
 tới `038` của thời điểm phát hành; v0.7.0 thuộc kiến trúc Dual-Track cũ.
 
@@ -81,7 +81,7 @@ trong source checkout là `reports/` không được commit. Mã template báo c
 
 ## Năng lực dành cho agent
 
-MCP server của nhánh hiện có **42 tools**. Mô tả tool do server đang chạy trả về là nguồn
+MCP server của nhánh hiện có **41 tools**. Mô tả tool do server đang chạy trả về là nguồn
 chuẩn cho tham số. Một số thao tác đại diện:
 
 - `create_attention_mission` và `confirm_market_brief` xác lập câu hỏi và phạm vi;
@@ -137,7 +137,7 @@ biểu diễn nhánh này.
 ### Thu thập Threads qua host và so sánh đường thu thập
 
 `prepare_host_browser_search` có tham số tùy chọn `source="threads"`. Khi bỏ qua tham số này,
-tool giữ `source="tiktok"`. Submit và cancel vẫn nhận ba tham số ID. Tổng số tool hiện là 42.
+tool giữ `source="tiktok"`. Submit và cancel vẫn nhận ba tham số ID. Tổng số tool hiện là 41.
 Threads chỉ thu thập qua trình duyệt host được cho phép. Phần thu thập bằng Playwright và
 các tool gợi ý, xu hướng chỉ trả kết quả không khả dụng đã bị gỡ. Credential Threads đã lưu
 không chứng minh có thể thu thập; Ignis không probe quyền API hay tự chuyển sang đường API.

@@ -10,19 +10,19 @@
 
 ## Phase 2: Foundation
 
-- [x] T003 Freeze the 42 surviving parameter schemas in tests/fixtures/source_retirement/survivor-schemas.json and establish serial offline test execution in .handoff/022-verification.md.
+- [x] T003 Freeze the 41 surviving parameter schemas in tests/fixtures/source_retirement/survivor-schemas.json and establish serial offline test execution in .handoff/022-verification.md.
 
 ## Phase 3: US1 — Active catalog and admission (P1, MVP)
 
-Independent proof: exactly 42 tools, no retired connector in composition or health; every retired
+Independent proof: exactly 41 tools, no retired connector in composition or health; every retired
 required/optional resource refused before a connector, quota or writer is touched.
 
 - [x] T004 [US1] Add catalog/composition/diagnostic/comments-session RED cases in tests/unit/test_source_retirement.py and update tests/unit/test_public_mcp_contract.py.
-- [x] T005 [US1] Remove eleven handlers and retired registrations in src/ignis/interfaces/mcp/server.py; remove setup RSS readiness probe in src/ignis/interfaces/cli/setup_bundle.py and registrations in scripts/generate_sample_case_studies.py.
+- [x] T005 [US1] Remove twelve handlers and retired registrations in src/ignis/interfaces/mcp/server.py; remove setup RSS readiness probe in src/ignis/interfaces/cli/setup_bundle.py and registrations in scripts/generate_sample_case_studies.py.
 - [x] T006 [US1] Remove exclusive MCP acquisition bodies and vocabulary registration wiring; enforce retirement at src/ignis/infrastructure/connectors/registry.py; retain unregistered legacy parser modules, shared comments and template-domain exclusions per research R8.
 - [x] T007 [US1] Add mission creation/execution/host-preparation RED cases in tests/unit/test_source_retirement.py.
 - [x] T008 [US1] Enforce typed retired-resource admission in src/ignis/domain/research_workspace.py, src/ignis/application/use_cases/create_attention_mission.py, confirm_market_brief.py, execute_mission.py, host_browser_mission.py, src/ignis/infrastructure/connectors/registry.py and MCP error serialization.
-- [x] T009 [US1] Resolve the surviving pain-point tool dependency recorded in specs/022-retire-unusable-sources/plan.md before changing src/ignis/interfaces/mcp/server.py::handle_extract_customer_pain_points.
+- [x] T009 [US1] Remove extract_customer_pain_points and its exclusive helper/tests under the owner decision of 2026-11-10; preserve URL-based comments and update survivor schemas.
 - [x] T010 [US1] Verify kept comments, YouTube, host-browser and self-content consumers; record exact commands in .handoff/022-verification.md and commit the complete seam.
 
 ## Phase 4: US2 — Watchlist continuation and retained evidence (P2)
@@ -37,7 +37,7 @@ requests create nothing, and old manifests/observations/outcomes/sessions remain
 
 ## Phase 5: US3 — Guidance and distribution (P3)
 
-Independent proof: shipped catalogs match runtime, all governed tool counts are 42, and current
+Independent proof: shipped catalogs match runtime, all governed tool counts are 41, and current
 instructions route only to retained collection. Historical evidence documentation is labelled.
 
 - [x] T015 [US3] Add source-guidance regression checks in tests/unit/test_public_doc_conventions.py; update catalog and smoke expectations in tests/unit/test_tool_manifests_drift.py, test_public_distribution_contract.py and scripts/wheel_mcp_smoke.py.
@@ -51,7 +51,7 @@ instructions route only to retained collection. Historical evidence documentatio
 ## Dependencies and execution
 
 T001 → T002 → T003 → US1 (T004–T010) → US2 (T011–T014) → US3 (T015–T017) → T018.
-Each test task precedes its matching implementation. T009 uses the existing FR-001/FR-003 authority; no
+Each test task precedes its matching implementation. T009 follows the explicit owner removal decision; no
 replacement collection workflow is in scope. No new migrations, sources, features or dependencies.
 MVP is US1; delivery here additionally requires US2 and US3. Commits are local, explicit-path only.
 
@@ -59,3 +59,9 @@ Parallel examples: US1 catalog research and admission research have independent 
 storage and period checks can be prepared separately; US3 English/Vietnamese edits could be split.
 This execution uses no parallel agents or test processes because of the offline/serial boundary
 and shared server ownership. No [P] tasks are authorized in this run.
+
+## Phase 7: Owner follow-up — remove the blocked placeholder
+
+- [x] T019 Observe the catalog removal test fail because extract_customer_pain_points remains listed; remove its wrapper, handler, exclusive helper and inquiry vocabulary projection while preserving URL comments (FR-001, FR-004).
+- [x] T020 Regenerate both Hermes catalogs and align every current tool count and Spec 022 artifact to twelve removals and 41 survivors (FR-006, SC-001, SC-004).
+- [x] T021 Run the changed test modules and four required distribution/documentation gates under the load limit, record results in .handoff/022-verification.md, and commit the follow-up with the coordinator's spec/ADR edits.

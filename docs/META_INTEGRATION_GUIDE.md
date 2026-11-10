@@ -3,7 +3,7 @@
 On the Spec 022 branch, Threads collection runs only through the user's explicitly authorized
 host browser. Reels collection and the platform-specific login tools have been retired.
 Stored observations, channel outcomes and sessions remain readable; this change deletes no data.
-The branch exposes 42 tools and has not been released as a new version.
+The branch exposes 41 tools and has not been released as a new version.
 
 ## Collect Threads
 

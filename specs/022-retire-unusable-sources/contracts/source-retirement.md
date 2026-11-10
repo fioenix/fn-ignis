@@ -4,8 +4,9 @@
 Remove exactly: `get_tiktok_creative_center_trends`, `get_tiktok_search_suggestions`,
 `get_threads_trending_topics`, `get_threads_search_suggestions`, `authenticate_tiktok`,
 `authenticate_threads`, `authenticate_instagram`, `clear_instagram_auth`,
-`get_instagram_auth_status`, `clear_threads_auth`, `get_threads_auth_status`.
-The runtime catalog and both generated Hermes catalogs contain exactly 42 entries. Removed names
+`get_instagram_auth_status`, `clear_threads_auth`, `get_threads_auth_status`,
+`extract_customer_pain_points`.
+The runtime catalog and both generated Hermes catalogs contain exactly 41 entries. Removed names
 are unknown tools, without handler aliases. All remaining parameter schemas are unchanged.
 
 ## Mission creation and collection
@@ -28,7 +29,6 @@ URL-based TikTok comments retain validation/redaction/error shapes; no retired s
 YouTube and host-browser TikTok/Threads contracts stay unchanged. Historical period channels and
 sample flags remain, including Reels; their existence is not current connector availability.
 
-## Surviving dependent tool
-`extract_customer_pain_points` preserves its parameter schema and returns `BLOCKED /
-SURFACE_RETIRED` naming `tiktok_video_grid` before component access or quota. `next_step`
-points to `get_tiktok_video_comments` for a caller that already has a video URL.
+## URL-based comments
+`get_tiktok_video_comments` keeps its existing name, parameters and shared TikTok comment code.
+Keyword-based pain-point extraction and its exclusive helper are absent, including blocked aliases.

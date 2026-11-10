@@ -318,50 +318,6 @@
   {
     "type": "function",
     "function": {
-      "name": "extract_customer_pain_points",
-      "description": "Keyword-based TikTok pain-point extraction is blocked with SURFACE_RETIRED. Use get_tiktok_video_comments with a known video URL; this tool keeps its parameter schema for existing callers.",
-      "parameters": {
-        "additionalProperties": false,
-        "properties": {
-          "keywords": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "geo": {
-            "default": "VN",
-            "type": "string"
-          },
-          "max_videos": {
-            "default": 3,
-            "type": "integer"
-          },
-          "inquiry_patterns": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
-          }
-        },
-        "required": [
-          "keywords"
-        ],
-        "type": "object"
-      }
-    }
-  },
-  {
-    "type": "function",
-    "function": {
       "name": "register_domain_lexicon",
       "description": "Register or expand domain vocabulary, slang, brand names, and industry keywords dynamically into the persistent database so Quality Gate and Ingress engines recognize new niche vernacular.",
       "parameters": {

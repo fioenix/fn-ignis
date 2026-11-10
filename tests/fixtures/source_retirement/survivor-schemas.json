@@ -217,43 +217,6 @@
     ],
     "type": "object"
   },
-  "extract_customer_pain_points": {
-    "additionalProperties": false,
-    "properties": {
-      "keywords": {
-        "items": {
-          "type": "string"
-        },
-        "type": "array"
-      },
-      "geo": {
-        "default": "VN",
-        "type": "string"
-      },
-      "max_videos": {
-        "default": 3,
-        "type": "integer"
-      },
-      "inquiry_patterns": {
-        "anyOf": [
-          {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "default": null
-      }
-    },
-    "required": [
-      "keywords"
-    ],
-    "type": "object"
-  },
   "register_domain_lexicon": {
     "additionalProperties": false,
     "properties": {

@@ -5,7 +5,7 @@
 
 ## Summary
 
-Expose exactly 42 tools and stop offering or collecting through four retired surfaces. Refuse
+Expose exactly 41 tools and stop offering or collecting through four retired surfaces. Refuse
 new missions and old mission reruns before collection; reduce watchlist run requests without
 rewriting their historical evidence. Preserve YouTube, host TikTok/Threads and URL-based TikTok
 comments. No migration, real-store access, network, release, branch change or PR is authorized.
@@ -28,8 +28,8 @@ Implementation remains serial: no external delegate/network access, one test com
 - SQLite and PostgreSQL adapters are unchanged; local proof uses temporary SQLite only.
 - MCP server and host-browser service; macOS development checkout, portable Python runtime.
 - Performance goal: reject retired resources before connector, quota, writer or journal activity.
-- Scope: eleven removed tools, four retired collection surfaces, all traced consumers below.
-- Tool signatures of the other 42 tools stay byte-equivalent; descriptions may explain refusal.
+- Scope: twelve removed tools, four retired collection surfaces, all traced consumers below.
+- Tool signatures of the other 41 tools stay byte-equivalent; descriptions may explain refusal.
 
 ## Constitution Check
 
@@ -43,7 +43,7 @@ Removing MCP tools is explicitly owner-approved. No data transformation or schem
 
 | Seam | Exact areas and disposition |
 |---|---|
-| Catalog/composition | `src/ignis/interfaces/mcp/server.py`: remove eleven decorators, wrappers and exclusive handlers; unregister Google RSS, Creative Center, TikTok grid and Reels. Keep Threads host-required compatibility port and conditional YouTube registration. Instantiate TikTok comments without a stored session. |
+| Catalog/composition | `src/ignis/interfaces/mcp/server.py`: remove twelve decorators, wrappers and exclusive handlers; unregister Google RSS, Creative Center, TikTok grid and Reels. Keep Threads host-required compatibility port and conditional YouTube registration. Instantiate TikTok comments without a stored session. |
 | Other composition | `src/ignis/interfaces/cli/setup_bundle.py::run_synthetic_diagnostics`, `scripts/generate_sample_case_studies.py`: remove RSS probe and retired registrations. Never run these live. |
 | Health/auth | `diagnose_system_health`, `verify_connectors_health`: active registry only, no retired login remediation or expiry alerts from dormant sessions. Generic auth status/clear keep direct repository behavior and signatures; no automatic deletion. |
 | Self-content | `config/vocabulary_loader.py`, `auth/self_identity.py`: retain credential repository and self-identity loading; do not instantiate removed login managers. |
@@ -74,10 +74,11 @@ Commit each complete seam with explicit paths and the requested Co-Authored-By t
 
 ## Implementation decisions
 
-- `extract_customer_pain_points` keeps its name and parameters but returns `BLOCKED /
-  SURFACE_RETIRED` before components, quota or collection. FR-001 freezes signatures, not a
-  retired acquisition behavior; FR-003 requires refusal. This settles the earlier optional
-  question without treating silence as owner approval. No replacement search workflow is added.
+- Owner follow-up (2026-11-10): remove `extract_customer_pain_points`, its handler and exclusive
+  keyword-to-comments helper; the source-connection ADR forbids blocked placeholders. Preserve
+  `get_tiktok_video_comments` and the parameter schemas of all 41 surviving tools. The follow-up
+  is one serial NORMAL/contract seam on the existing task path; the broader spec retains its
+  DEEP review obligations. No replacement search workflow is added.
 
 ## Open
 

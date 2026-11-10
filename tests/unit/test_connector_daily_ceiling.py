@@ -188,30 +188,6 @@ async def test_in_memory_reservations_are_serialised():
         assert await repository.reserve_connector_requests(day.date(), "tiktok", 0, 25, day) == (True, 25)
 
 
-@pytest.mark.asyncio
-async def test_retired_pain_point_extraction_never_reserves_tiktok_searches(store):
-    """Retirement refuses before quota admission, regardless of the requested keyword count."""
-    import json
-    from unittest.mock import AsyncMock, MagicMock, patch
-
-    from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin
-    from ignis.interfaces.mcp import server
-
-    repository = SqliteTrendRepository(str(store))
-    await repository.set_runtime_config("connector.tiktok.daily_request_ceiling", "1")
-    components = {"registry": MagicMock(), "repository": repository, "tiktok_auth_manager": AsyncMock()}
-    components["registry"]._plugins = {}
-
-    with patch("ignis.interfaces.mcp.server.get_components", return_value=components):
-        with patch.object(TikTokPlugin, "fetch_top_comments_for_keywords", new_callable=AsyncMock) as fetch:
-            fetch.return_value = []
-            refused = json.loads(await server.handle_extract_customer_pain_points(keywords=["áo khoác", "áo len"]))
-            admitted = json.loads(await server.handle_extract_customer_pain_points(keywords=["áo khoác"]))
-
-    assert refused["status"] == admitted["status"] == "BLOCKED"
-    assert refused["reason_code"] == admitted["reason_code"] == "SURFACE_RETIRED"
-    fetch.assert_not_awaited()
-    assert _counts(store) == {}
 
 
 class _CappedPlugin(_SearchPlugin):
@@ -234,28 +210,6 @@ async def test_the_count_is_what_a_capped_connector_sends(store):
     assert _counts(store) == {"reels": 10}
 
 
-@pytest.mark.asyncio
-async def test_retirement_precedes_the_daily_search_ceiling(store):
-    """A retired surface must not be misreported as temporarily rate limited."""
-    from unittest.mock import AsyncMock, MagicMock, patch
-
-    import json
-
-    from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin
-    from ignis.interfaces.mcp import server
-
-    repository = SqliteTrendRepository(str(store))
-    await repository.set_runtime_config("connector.tiktok.daily_request_ceiling", "10")
-    components = {"registry": MagicMock(), "repository": repository, "tiktok_auth_manager": AsyncMock()}
-    components["registry"]._plugins = {}
-
-    with patch("ignis.interfaces.mcp.server.get_components", return_value=components):
-        with patch.object(TikTokPlugin, "fetch_top_comments_for_keywords", new_callable=AsyncMock) as fetch:
-            refused = json.loads(await server.handle_extract_customer_pain_points(
-                keywords=[f"từ khoá {index}" for index in range(15)]))
-
-    assert refused["status"] == "BLOCKED" and refused["reason_code"] == "SURFACE_RETIRED"
-    fetch.assert_not_awaited()
 
 
 class _FlakyPlugin(_SearchPlugin):

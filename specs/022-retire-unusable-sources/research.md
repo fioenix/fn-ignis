@@ -34,26 +34,29 @@ Decision: retire setup's RSS readiness probe and sample generator registrations 
 composition. Search tools, health, auth and vocabulary consumers are enumerated in plan.md.
 Rationale: only changing MCP initialization leaves other entry points advertising dead collection.
 
-## R6 — Surviving keyword pain-point tool
-Decision: preserve the name and parameters, but refuse with `BLOCKED / SURFACE_RETIRED`
-before components or quota. FR-001 permits unchanged signatures with a typed refusal required by
-FR-003. No new search or URL-selection feature is inferred from the retirement request.
+## R6 — Remove keyword pain-point extraction
+Decision: remove `extract_customer_pain_points` and `TikTokPlugin.fetch_top_comments_for_keywords`
+under the owner's 2026-11-10 clarification. The source-connection ADR forbids placeholders, and
+this tool depends on retired headless search. URL-based comments and their shared safeguards stay.
+Remove its unused `MarketVocabulary.customer_inquiry` projection. Keep persisted seed rows
+and the machinery-domain exclusion so old terms cannot become market evidence.
+No new search or URL-selection feature is inferred from the retirement request.
 
 ## R7 — Distribution and verification
 Decision: runtime tools are authoritative; freeze surviving schemas before edits, regenerate Hermes
-catalogs using the existing script, and update every governed count and smoke fixture to 42.
+catalogs using the existing script, and update every governed count and smoke fixture to 41.
 Rationale: hand-editing generated schemas can hide drift. Use only fake platforms and temporary
 SQLite. PostgreSQL checks stay in CI; no live probe repeats the owner's already-settled decisions.
 
 ## R8 — Removal boundary and retained modules
-Remove the eleven exclusive MCP wrappers/handlers, their OAuth/status helpers, the keyword
+Remove the twelve exclusive MCP wrappers/handlers, their OAuth/status helpers, the keyword
 pain-point acquisition body, four composition registrations, setup RSS probe, sample registrations,
 and vocabulary wiring. Keep dormant `google_trends/rss_plugin.py`, `tiktok/creative_center_plugin.py`
 and `reels/reels_plugin.py` for offline legacy parser/conformance fixtures; no shipped composition
 constructs them. Their acquisition methods have no production caller. Whole-file deletion is not
 required by FR-002 and would also remove those parser fixtures. `TikTokPlugin` remains shared by
-URL comments and legacy parser tests; its keyword helpers have no production caller after the
-pain-point refusal. Shared browser/navigation, credential storage and identity helpers stay.
+URL comments and legacy parser tests; the exclusive keyword-to-comments helper is removed.
+Shared browser/navigation, credential storage and identity helpers stay.
 
 The source-map HTML/SVG/PNG is a dated 29/09/2026 historical diagram, already excluded from current
 README embeds by `test_public_doc_conventions`. No replacement diagram is added. Report templates

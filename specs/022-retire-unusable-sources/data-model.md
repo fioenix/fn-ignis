@@ -13,4 +13,4 @@ No persisted schema changes or migrations.
   previous manifests remain untouched.
 - **Observation, channel outcome, session**: existing storage/read representation and provenance
   unchanged. Retirement creates no zero metrics, rewrite, deletion or automatic session refresh.
-- **Tool catalog**: eleven entries removed; all survivor names and parameter schemas unchanged.
+- **Tool catalog**: twelve entries removed; all survivor names and parameter schemas unchanged.

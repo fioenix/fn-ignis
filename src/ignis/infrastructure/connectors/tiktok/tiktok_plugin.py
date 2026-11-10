@@ -10,7 +10,6 @@ from ignis.application.ports.connector_port import IConnectorPlugin, SearchAttes
 from ignis.domain.author_identity import assign_author
 from ignis.domain.entities import TrendSignal
 from ignis.domain.exceptions import ConnectorExecutionException
-from ignis.domain.source_identity import identity_free_source_url
 from ignis.domain.value_objects import GeoCode, IngestRuntime, IngressScope, PlatformType, Timeframe
 from ignis.infrastructure.auth.tiktok_auth import TikTokAuthManager
 from ignis.infrastructure.connectors.browser_support import (
@@ -618,46 +617,6 @@ class TikTokPlugin(IConnectorPlugin):
             ) from e
 
         return comments
-
-    async def fetch_top_comments_for_keywords(
-        self,
-        keywords: List[str],
-        geo: GeoCode = GeoCode.VN,
-        max_videos: int = 3,
-        limit_per_video: int = 20,
-        author_key: Optional[bytes] = None,
-    ) -> List[Dict[str, Any]]:
-        """
-        Search top videos for keywords and extract comments for Voice of Customer analysis.
-        """
-        all_results: List[Dict[str, Any]] = []
-
-        signals = await self.search_signals(keywords=keywords, geo=geo, limit=max_videos * 2)
-        valid_vids = [s for s in signals if s.source_url and "/video/" in s.source_url][:max_videos]
-
-        for s in valid_vids:
-            try:
-                cmts = await self.fetch_video_comments(
-                    video_url=s.source_url, limit=limit_per_video, author_key=author_key
-                )
-                all_results.append({
-                    # Identity-free: no creator, and no handle in the link (Spec 015).
-                    "video_url": identity_free_source_url("tiktok", s.source_url, s.metadata),
-                    "video_title": s.raw_title,
-                    "views": s.metric_value,
-                    "total_comments_fetched": len(cmts),
-                    "comments": cmts,
-                })
-            except Exception as e:
-                logger.warning(
-                    "Skipping comments scraping for video %s: %s",
-                    identity_free_source_url("tiktok", s.source_url, s.metadata) or "with no identity-free link",
-                    mask_author_identity_text(str(e)),
-                )
-
-        return all_results
-
-
 
     @staticmethod
     def _matches_search_query(url: str, keyword: str, *, api: bool = False) -> bool:

@@ -163,7 +163,7 @@ Versions use `MAJOR.MINOR.PATCH`. During `0.x`, the bump follows user-visible pr
 
 Before completing a change, `.venv/bin/pytest tests/unit/test_repo_conventions.py` passes. Read `docs/agents/release-gates.md` for Checklists A, B, and C before cutting a release.
 
-- [ ] **Atomic Independence**: Ensure all 42 FastMCP tools are independently callable within their authority and evidence contracts.
+- [ ] **Atomic Independence**: Ensure all 41 FastMCP tools are independently callable within their authority and evidence contracts.
 
 ## 📁 7. Artifact Output vs. Committed Samples
 

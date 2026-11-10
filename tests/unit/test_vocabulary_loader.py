@@ -84,7 +84,6 @@ async def test_a_fresh_database_arms_both_engines(tmp_path):
     assert len(plugin._get_probe_patterns("VN")) > 1, "demand would rest on the bare keyword"
     assert plugin._get_probe_patterns("US") != plugin._get_probe_patterns("VN")
     assert plugin._intent_keywords, "commercial intent would always score zero"
-    assert vocabulary.customer_inquiry, "no comment could be recognised as a question"
 
 
 @pytest.mark.asyncio
@@ -111,7 +110,6 @@ async def test_an_existing_database_picks_up_the_vocabulary(tmp_path):
 
     assert reopened.ambiguous_unigrams
     assert reopened.search_intent
-    assert reopened.customer_inquiry
     assert reopened.probe_templates
 
 
@@ -132,9 +130,8 @@ async def test_machinery_domains_never_become_evidence_of_relevance(tmp_path):
 
     # Terms that exist nowhere but a machinery domain must never reach the positive vocabulary.
     market_terms = {t for terms in vocabulary.by_domain_and_category.values() for t in terms}
-    machinery_only = (
-        set(vocabulary.ambiguous_unigrams) | set(vocabulary.customer_inquiry)
-    ) - market_terms
+    retired_inquiry_terms = {row["term"] for row in await repo.get_domain_lexicons("customer_inquiry")}
+    machinery_only = (set(vocabulary.ambiguous_unigrams) | retired_inquiry_terms) - market_terms
     assert machinery_only, "the fixture proves nothing if every machinery term is also a topic"
     assert not (machinery_only & set(vocabulary.positive_terms))
 

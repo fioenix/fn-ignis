@@ -5,7 +5,7 @@ inspectable evidence from accessible social sources, then challenge a market hyp
 acting on it. Its two capabilities are independent: source collection can end with an evidence
 frame, while Market analysis can end with a Gap Report rather than a forced verdict.
 
-**Branch boundary:** Spec 022 exposes 42 tools and retires unusable source collection. This
+**Branch boundary:** Spec 022 exposes 41 tools and retires unusable source collection. This
 change is not released. Published v0.9.0 includes the earlier host-browser contract and migrations
 through `038`; v0.7.0 is a historical Dual-Track artifact, not the mission-bound surface here.
 
@@ -80,7 +80,7 @@ Committed report templates live only in `src/ignis/infrastructure/templates/html
 
 ## Agent capabilities
 
-The current MCP server exposes **42 tools**. Use the server's live tool descriptions as the
+The current MCP server exposes **41 tools**. Use the server's live tool descriptions as the
 signature authority. Representative operations:
 
 - `create_attention_mission` and `confirm_market_brief` establish a bounded question and
@@ -133,7 +133,7 @@ diagrams of this branch.
 ### Threads host collection and period paths
 
 `prepare_host_browser_search` accepts optional `source="threads"`; omitting it keeps
-`source="tiktok"`. Submit and cancel keep their three ID parameters. There are still 42 tools.
+`source="tiktok"`. Submit and cancel keep their three ID parameters. There are still 41 tools.
 Threads collection uses only the authorized host browser. Internal Playwright collection and
 placeholder suggestion/trending tools have been removed. Stored Threads credentials do not
 establish collection readiness. No API grant probe or API fallback is activated.

@@ -215,7 +215,7 @@ async def test_setting_a_plan_for_an_unknown_watchlist_returns_not_found(tools):
 
 async def test_period_path_reasons_do_not_add_public_snapshot_parameters():
     tools = {tool.name: tool for tool in await mcp_server.mcp.list_tools()}
-    assert len(tools) == 42
+    assert len(tools) == 41
     assert set(tools["get_watchlist_period_snapshot"].parameters["properties"]) == {
         "watchlist_id", "period_kind", "period_start"}
 

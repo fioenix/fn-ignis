@@ -2,7 +2,7 @@
 
 Trên nhánh Spec 022, Threads chỉ được thu thập qua trình duyệt host mà người dùng đã cho phép.
 Ignis đã ngừng thu thập Reels và gỡ các tool đăng nhập riêng theo nền tảng. Quan sát, kết quả từng
-kênh và session cũ vẫn đọc được; thay đổi này không xóa dữ liệu. Nhánh có 42 tools, chưa được
+kênh và session cũ vẫn đọc được; thay đổi này không xóa dữ liệu. Nhánh có 41 tools, chưa được
 phát hành thành phiên bản mới.
 
 ## Thu thập Threads

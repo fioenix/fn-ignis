@@ -26,7 +26,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-EXPECTED_TOOL_COUNT = 42
+EXPECTED_TOOL_COUNT = 41
 EXPECTED_TOOL_NAMES = {
     "cancel_host_browser_search",
     "clear_platform_auth",
@@ -38,7 +38,6 @@ EXPECTED_TOOL_NAMES = {
     "evaluate_mission_quality",
     "execute_mission_follow_up",
     "execute_mission_ingress",
-    "extract_customer_pain_points",
     "generate_mission_artifact",
     "get_current_session_mission",
     "get_mission_analysis",

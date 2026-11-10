@@ -1,6 +1,6 @@
 # Ignis User Guide — Spec 022
 
-This guide describes the current Spec 022 branch with 42 tools. Source retirement is not yet
+This guide describes the current Spec 022 branch with 41 tools. Source retirement is not yet
 released; published v0.9.0 retains its earlier catalog and source behavior.
 The v0.7.0 release is a historical Dual-Track artifact, not this mission-bound branch.
 
@@ -63,8 +63,6 @@ session or authentication status does not by itself grant that permission.
   If the Playwright Python package is absent, the current parser returns `SUCCESS` with zero comments. A blocked or unparsed page can
   also yield zero parsed comments, or fail with `ERROR`, depending on where it breaks. Zero is
   therefore not proof that the video has no discussion.
-- Existing `extract_customer_pain_points` calls return `BLOCKED / SURFACE_RETIRED` because
-  keyword-based headless search is retired. Use the comments tool only when you already have a video URL.
 - `execute_mission_ingress(mission_id)` is the separate option for a confirmed mission: it runs only
   that mission's recorded plan and records a channel outcome for each requested source.
 
@@ -256,7 +254,7 @@ unchanged, and reading a snapshot confers no execution authority.
 
 ## 4. Tool and deployment boundaries
 
-The local MCP server exposes **42 tools**. Discover the running server's descriptions for exact
+The local MCP server exposes **41 tools**. Discover the running server's descriptions for exact
 signatures; removed daily-discovery and unguided-research tools are not part of this branch.
 For an existing PostgreSQL database on `035`, apply `036`, `037` and `038` in order as the
 table owner. Without `038`, a MISSION TikTok host-browser search is refused before it starts.
@@ -298,7 +296,7 @@ representative market sample, or an automatic fallback. Host cleanup preserves o
 ### Threads host collection and period paths
 
 `prepare_host_browser_search` accepts optional `source="threads"`; omitting it keeps
-`source="tiktok"`. Submit and cancel keep their three ID parameters. There are still 42 tools.
+`source="tiktok"`. Submit and cancel keep their three ID parameters. There are still 41 tools.
 Threads collection uses only the authorized host browser. Internal Playwright collection and
 placeholder suggestion/trending tools have been removed. Stored Threads credentials do not
 establish collection readiness. No API grant probe or API fallback is activated.

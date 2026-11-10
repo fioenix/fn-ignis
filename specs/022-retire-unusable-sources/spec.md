@@ -34,6 +34,7 @@ is gone from the catalog, and stored observations from removed sources stay read
 | `authenticate_tiktok` | Stores a session only the removed headless search used | Remove |
 | `authenticate_threads` | Stores credentials that, by its own description, enable no collection | Remove |
 | `authenticate_instagram`, `clear_instagram_auth`, `get_instagram_auth_status` | Serve only the Instagram session that Reels used | Remove |
+| `extract_customer_pain_points` | Depends on the retired headless keyword search | Remove |
 | `clear_threads_auth`, `get_threads_auth_status` | Serve only the Threads session that `authenticate_threads` stored | Remove |
 
 ## Clarifications
@@ -44,9 +45,9 @@ is gone from the catalog, and stored observations from removed sources stay read
 - Q: Which login tools are removed? → A: `authenticate_tiktok` and `authenticate_threads` (owner decided).
 - Q: Is Reels kept? → A: It was probed with the fresh Instagram session first, on the owner's decision that a failure removes it. It returned `REELS_PAGE_UNUSABLE`, so Reels headless collection is removed.
 - Q: What happens to the session tools that lose their consumer? → A: `authenticate_instagram`, `clear_instagram_auth`, `get_instagram_auth_status`, `clear_threads_auth` and `get_threads_auth_status` are removed too (owner decided). Planning confirms that `clear_platform_auth`, `get_platform_auth_status` and the self-content guard do not depend on them.
+- Q: `extract_customer_pain_points` finds TikTok videos by keyword through the retired headless search; keep it as a blocked tool? → A: No. It is removed, as the decision record forbids placeholders; per-video comments stay available through `get_tiktok_video_comments` (owner decided).
 - Q: Which rule decides what stays built in? → A: The decision record `2026-11-10-source-connection-boundary.md`, accepted by the owner: an official MCP means integrate with it, otherwise build in.
 
-- Q: How does the surviving keyword pain-point tool avoid its retired headless search dependency? → A: Preserve its name and parameters; return `BLOCKED / SURFACE_RETIRED` before components or quota, pointing to URL-based comments (agent decided; basis: FR-001 preserves names/parameters and FR-003 requires refusal before retired collection; no replacement workflow).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -61,7 +62,7 @@ that can return evidence today.
 
 **Acceptance Scenarios**:
 
-1. **Given** the updated server, **When** the tool catalog is listed, **Then** the eleven removed tools are absent and 42 tools remain.
+1. **Given** the updated server, **When** the tool catalog is listed, **Then** the twelve removed tools are absent and 41 tools remain.
 2. **Given** a manifest that names `google`, `tiktok_creative_center`, `tiktok_video_grid` or `reels`, **When** a mission is created or run, **Then** it is refused with a typed reason naming the retired surface, before any collection.
 3. **Given** health or channel status reports, **When** they are read, **Then** they list no retired connector.
 
@@ -90,7 +91,7 @@ A contributor or agent reading the guides, skills and tool manifests finds no in
 
 **Acceptance Scenarios**:
 
-1. **Given** the repository, **When** the guides, skills, tool manifests and public documents are read, **Then** they name 42 tools and no removed tool or surface, apart from history.
+1. **Given** the repository, **When** the guides, skills, tool manifests and public documents are read, **Then** they name 41 tools and no removed tool or surface, apart from history.
 
 ### Edge Cases
 
@@ -102,7 +103,7 @@ A contributor or agent reading the guides, skills and tool manifests finds no in
 
 ### Functional Requirements
 
-- **FR-001**: Ignis MUST remove the eleven tools named in Clarifications and keep every other tool's name and parameters.
+- **FR-001**: Ignis MUST remove the twelve tools named in Clarifications and keep every other tool's name and parameters.
 - **FR-002**: Ignis MUST stop registering the Google Trends RSS, TikTok Creative Center, TikTok headless keyword search and Reels headless connectors.
 - **FR-003**: A mission or watchlist run that names a retired surface MUST be refused or reduced with a typed reason before collection, never reported as an empty result.
 - **FR-004**: `get_tiktok_video_comments`, YouTube collection and host-browser search for TikTok and Threads MUST behave as before.
@@ -119,7 +120,7 @@ A contributor or agent reading the guides, skills and tool manifests finds no in
 
 ### Measurable Outcomes
 
-- **SC-001**: The catalog lists 42 tools, none of the eleven removed.
+- **SC-001**: The catalog lists 41 tools, none of the twelve removed.
 - **SC-002**: A mission naming any retired surface is refused before collection in 100% of attempts.
 - **SC-003**: Every stored observation from a retired source is still returned by the reads that returned it before.
 - **SC-004**: No shipped guide, skill, manifest or public document names a removed tool outside history.
