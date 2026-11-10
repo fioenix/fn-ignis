@@ -1,9 +1,9 @@
 # 📋 FN-IGNIS BACKLOG & SYSTEM STATUS
 
-> - **Cập nhật lần cuối:** 10/11/2026 (Spec 022 trên nhánh riêng; chưa merge hay phát hành)
+> - **Cập nhật lần cuối:** 11/11/2026 (Spec 021 và 022 đã merge vào `main`; chưa phát hành)
 > - **Phiên bản:** `v0.9.0`
 > - **Kiến trúc:** Clean Architecture + Dual-Backend (Postgres TimescaleDB & Zero-Docker SQLite)
->   + FastMCP Server (41 tools; nhánh Spec 022 chưa phát hành); watchlist có phiên bản, kế hoạch nghe và hai trục `seen` / `created`.
+>   + FastMCP Server (41 tools trên `main`, chưa phát hành; `v0.9.0` có 53); watchlist có phiên bản, kế hoạch nghe và hai trục `seen` / `created`.
 > - **Schema:** Migration mới nhất là `sql/039_remove_seeded_taxonomy.sql`.
 > - **Thu thập:** YouTube Data API, Threads và TikTok qua trình duyệt host, bình luận TikTok theo URL.
 >   Spec 022 ngừng RSS, Creative Center, tìm kiếm TikTok headless và Reels; giữ nguyên dữ liệu cũ.
@@ -23,9 +23,11 @@ xóa và chưa đọc lại kho đó.
 
 ### Có task cụ thể, chưa nghiệm thu
 
-- [~] **Spec 022 — ngừng nguồn không còn dùng được:** nhánh `022-retire-unusable-sources` có 41 tool;
+- [x] **Spec 022 — ngừng nguồn không còn dùng được** — merge 10/11/2026 (PR #128): còn 41 tool;
   đã gỡ 12 tool và chặn các nguồn đã nghỉ trước thu thập, giữ nguyên đường đọc dữ liệu cũ.
-  Kiểm thử cục bộ dùng SQLite tạm và nguồn giả; PostgreSQL và review độc lập chưa nghiệm thu.
+  Review code và security độc lập: vòng đầu REWORK, vòng hai APPROVE ở `abd3323`. Kiểm thử chạy trên SQLite;
+  kiểm tra riêng cho PostgreSQL chưa chạy và không còn chặn, vì store dev đã chuyển sang SQLite từ 10/11/2026.
+- [ ] **Phát hành bản kế tiếp:** Spec 021 và 022 đã nằm trên `main` từ sau `v0.9.0`; version bump và tag chờ chủ sở hữu.
 
 - [x] **TikTok trên profile Finos bị fail-closed** — đóng 09/11/2026. Đo trực tiếp: trang có `lang=en` trong khi
   `tiktok_attribution_en` chưa có mẫu, nên validator loại toàn bộ. Đã đổi giao diện profile sang Tiếng Việt (`vi-VN`);
