@@ -37,7 +37,7 @@ def test_seed_is_additive_idempotent_and_excluded_from_market_terms():
 async def test_locale_rows_never_enter_positive_vocabulary():
     repo = AsyncMock()
     repo.get_domain_lexicons.return_value = [dict(domain="tiktok_attribution_vi", category="ui_attribution", term="do {author} tạo với")]
-    assert (await load_market_vocabulary(repo)).positive_terms == []
+    assert (await load_market_vocabulary(repo)).tiktok_attribution == []
 
 
 @pytest.mark.parametrize("domain,term", [("tiktok_attribution_vi_VN", "do {author} tạo với"), ("tiktok_attribution_en", "no slot")])

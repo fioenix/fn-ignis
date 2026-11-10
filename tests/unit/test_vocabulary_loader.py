@@ -113,28 +113,6 @@ async def test_an_existing_database_picks_up_the_vocabulary(tmp_path):
     assert reopened.probe_templates
 
 
-@pytest.mark.asyncio
-async def test_machinery_domains_never_become_evidence_of_relevance(tmp_path):
-    """'new' and '?' drive mechanisms. Counting them as topic terms would inflate every score.
-
-    A word may legitimately sit in both kinds of domain -- "review" is a real market term and
-    also a question marker -- so what matters is which domain a term was counted under, not
-    whether the word appears somewhere in the machinery lists.
-    """
-    repo = SqliteTrendRepository(db_path=str(tmp_path / "machinery.db"))
-    vocabulary = await load_market_vocabulary(repo)
-
-    for domain, _category in vocabulary.by_domain_and_category:
-        assert domain not in MACHINERY_DOMAINS, f"{domain} is machinery, not market evidence"
-        assert not any(domain.startswith(prefix) for prefix in TEMPLATE_PREFIXES)
-
-    # Terms that exist nowhere but a machinery domain must never reach the positive vocabulary.
-    market_terms = {t for terms in vocabulary.by_domain_and_category.values() for t in terms}
-    retired_inquiry_terms = {row["term"] for row in await repo.get_domain_lexicons("customer_inquiry")}
-    machinery_only = (set(vocabulary.ambiguous_unigrams) | retired_inquiry_terms) - market_terms
-    assert machinery_only, "the fixture proves nothing if every machinery term is also a topic"
-    assert not (machinery_only & set(vocabulary.positive_terms))
-
 
 def test_an_empty_registration_is_refused_rather_than_armed():
     """Registering nothing must not look like a successful load."""
@@ -194,38 +172,6 @@ async def test_a_fresh_database_arms_language_detection(tmp_path):
     assert detector.is_localized("Building autonomous AI agents with LangChain", geo=GeoCode.US) is True
 
 
-@pytest.mark.asyncio
-async def test_probe_seeds_never_contain_machinery_terms(tmp_path):
-    """A public pass must not go searching platforms for its own stopwords.
-
-    Adding eight machinery domains on 2026-09-09 without updating the exclusion list in
-    ingest_trends left every probe seed a Vietnamese function word -- ambiguous_unigrams sorts
-    first alphabetically and filled the whole budget. Both places now read one list, and this
-    fails if a second copy appears.
-    """
-    from ignis.application.use_cases.ingest_trends import IngestTrendsUseCase
-
-    repo = SqliteTrendRepository(db_path=str(tmp_path / "seeds.db"))
-    seeds = await IngestTrendsUseCase(registry=None, repository=repo).load_seed_keywords()
-
-    assert seeds, "a seeded database must yield probe seeds"
-
-    rows = await repo.get_domain_lexicons()
-    domains_of = {}
-    for row in rows or []:
-        domains_of.setdefault(str(row.get("term") or ""), set()).add(str(row.get("domain") or ""))
-
-    leaked = [
-        seed for seed in seeds
-        if domains_of.get(seed)
-        and all(
-            domain in MACHINERY_DOMAINS or domain.startswith(TEMPLATE_PREFIXES)
-            for domain in domains_of[seed]
-        )
-    ]
-    assert not leaked, f"machinery terms sent to platforms as search queries: {leaked}"
-
-
 def test_the_machinery_list_is_not_duplicated_in_the_use_cases():
     """Two copies of this list is what caused the leak; the second copy must stay gone."""
     src = Path(__file__).resolve().parents[2] / "src" / "ignis"
@@ -283,8 +229,6 @@ async def test_threads_attribution_is_loaded_as_machinery_not_positive_evidence(
     try:
         vocabulary = await load_market_vocabulary(repo)
         assert vocabulary.threads_attribution == ["Photo by {author} on"]
-        assert "Photo by {author} on" not in vocabulary.positive_terms
-        assert ("threads_attribution", "ui_attribution") not in vocabulary.by_domain_and_category
         assert strip_platform_attribution("Synthetic body Photo by Synthetic Sentinel on October 28",
                                           vocabulary.threads_attribution) == "Synthetic body"
     finally:
@@ -460,14 +404,9 @@ def test_review_synchronizer_cannot_receive_the_process_global_host_template_ser
 
 
 @pytest.mark.asyncio
-async def test_synchronizer_never_reads_taxonomy_and_preserves_all_domain_terms(tmp_path, monkeypatch):
+async def test_synchronizer_never_reads_taxonomy_and_preserves_machinery(tmp_path, monkeypatch):
     from ignis.infrastructure.config.vocabulary_loader import VocabularySynchronizer
     repo = SqliteTrendRepository(str(tmp_path / 'retained.sqlite3'))
-    expected = sorted(row for row in re.findall(
-        r"\('([^']+)',\s*'([^']+)',\s*'([^']+)',\s*'system'\)",
-        (SQL / '003_market_lexicons.sql').read_text(),
-    ) if row[0] in ('fashion', 'tech', 'ecommerce', 'common_vi'))
-    assert len(expected) == 69
     async def forbidden():
         pytest.fail('taxonomy read is forbidden')
     monkeypatch.setattr(repo, 'get_industry_taxonomies', forbidden, raising=False)
@@ -476,10 +415,121 @@ async def test_synchronizer_never_reads_taxonomy_and_preserves_all_domain_terms(
     vocabulary = await VocabularySynchronizer(
         repo, clusterer=clusterer, language_detector=detector,
     ).synchronize_vocabulary()
-    actual = {(row['domain'], row['term'], row['category']) for row in await repo.get_domain_lexicons()}
-    assert set(expected) <= actual
-    assert sorted(row for row in actual if row[0] in ('fashion', 'tech', 'ecommerce', 'common_vi')) == expected
     assert clusterer._ambiguous_unigrams and clusterer._custom_stopwords
     assert vocabulary.foreign_phrases and vocabulary.portuguese_words
     assert vocabulary.tiktok_ui_noise
     await repo.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("title,keyword", [
+    ("Lazada sale 11.11 giảm giá", "shopee"),
+    ("How to make bánh mì tại nhà", "n8n"),
+])
+async def test_market_buckets_do_not_expand_topic_keywords(tmp_path, title, keyword):
+    from ignis.infrastructure.config.vocabulary_loader import VocabularySynchronizer
+    from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
+    repo = SqliteTrendRepository(str(tmp_path / "market.db"))
+    try:
+        await repo.register_lexicon_terms("ecommerce", ["shopee", "lazada"], "marketplace")
+        await repo.register_lexicon_terms("tech", ["n8n", "make", "zapier", "chatbot"], "automation")
+        reasoner = StrategicMarketReasoner()
+        await VocabularySynchronizer(repo, strategic_reasoner=reasoner).synchronize_vocabulary()
+        assert not reasoner._matches_topic_strictly(title, keyword)
+        assert reasoner._matches_topic_strictly(f"Hướng dẫn {keyword}", keyword)
+    finally:
+        await repo.close()
+
+
+@pytest.mark.asyncio
+async def test_market_terms_do_not_count_as_vietnamese_core_words(tmp_path):
+    from ignis.infrastructure.config.vocabulary_loader import VocabularySynchronizer
+    from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
+    from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
+    repo = SqliteTrendRepository(str(tmp_path / "localization.db"))
+    try:
+        await repo.register_lexicon_terms("tech", ["make", "chatbot", "n8n", "zapier"], "automation")
+        quality, reasoner = QualityEvaluator(), StrategicMarketReasoner()
+        await VocabularySynchronizer(repo, quality_evaluator=quality, strategic_reasoner=reasoner).synchronize_vocabulary()
+        title = "Make a chatbot with n8n and zapier"
+        assert not quality.is_localized(title)
+        assert not quality.is_vietnamese(title)
+        assert not reasoner._is_vietnamese(title)
+        assert quality.is_localized("Hướng dẫn tự động hóa công việc")
+    finally:
+        await repo.close()
+
+
+@pytest.mark.asyncio
+async def test_synchronization_preserves_machinery_registration(tmp_path):
+    from ignis.infrastructure.config.vocabulary_loader import VocabularySynchronizer
+    from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
+    from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
+    from unittest.mock import Mock
+    repo = SqliteTrendRepository(str(tmp_path / "machinery-parity.db"))
+    try:
+        quality, reasoner = QualityEvaluator(), StrategicMarketReasoner()
+        clusterer, detector = Mock(), Mock()
+        vocabulary = await VocabularySynchronizer(
+            repo, quality_evaluator=quality, strategic_reasoner=reasoner,
+            clusterer=clusterer, language_detector=detector,
+        ).synchronize_vocabulary()
+        assert vocabulary.foreign_stopwords and vocabulary.noise_blacklist
+        assert vocabulary.ambiguous_unigrams and vocabulary.foreign_phrases and vocabulary.portuguese_words
+        for engine in (quality, reasoner):
+            assert set(vocabulary.foreign_stopwords) <= engine._custom_stopwords
+            assert set(vocabulary.noise_blacklist) <= engine._custom_noise
+        clusterer.register_ambiguous_unigrams.assert_called_once_with(vocabulary.ambiguous_unigrams)
+        detector.register_foreign_phrases.assert_called_once_with(vocabulary.foreign_phrases)
+        detector.register_portuguese_words.assert_called_once_with(vocabulary.portuguese_words)
+        assert clusterer.register_stopwords.call_count == 2
+    finally:
+        await repo.close()
+
+
+MARKET_DOMAIN_COUNTS = {
+    "tech": 24, "ecommerce": 21, "fashion": 15, "common_vi": 9,
+    "global_saas_ai": 15, "global_ecommerce": 11, "global_fashion": 9,
+}
+
+
+@pytest.mark.asyncio
+async def test_fresh_store_has_no_system_market_domain_vocabulary(tmp_path):
+    repo = SqliteTrendRepository(str(tmp_path / "fresh-retired.db"))
+    try:
+        rows = await repo.get_domain_lexicons()
+        assert [r for r in rows if r["domain"] in MARKET_DOMAIN_COUNTS and r["created_by"] == "system"] == []
+        assert len([r for r in rows if r["domain"] == "foreign_stopwords"]) == 19
+        assert len([r for r in rows if r["domain"] == "noise_blacklist"]) == 19
+    finally:
+        await repo.close()
+
+
+@pytest.mark.asyncio
+async def test_upgrade_retires_104_system_rows_but_preserves_operator_and_machinery(tmp_path):
+    import sqlite3
+    from uuid import uuid4
+    path = str(tmp_path / "upgrade-retired.db")
+    repo = SqliteTrendRepository(path)
+    await repo._ensure_schema()
+    await repo.close()
+    with sqlite3.connect(path) as conn:
+        conn.execute("DELETE FROM market_lexicons WHERE domain IN (%s)" % ','.join('?' for _ in MARKET_DOMAIN_COUNTS), tuple(MARKET_DOMAIN_COUNTS))
+        conn.executemany(
+            "INSERT INTO market_lexicons (id, domain, term, category, created_by, created_at) VALUES (?, ?, ?, 'fixture', 'system', '2026-11-11')",
+            [(str(uuid4()), domain, f"legacy term {i}") for domain, count in MARKET_DOMAIN_COUNTS.items() for i in range(count)],
+        )
+        conn.execute("INSERT INTO market_lexicons (id, domain, term, created_by, created_at) VALUES (?, 'tech', 'operator term', 'operator', '2026-11-11')", (str(uuid4()),))
+        before = conn.execute("SELECT * FROM market_lexicons WHERE domain NOT IN (%s) ORDER BY id" % ','.join('?' for _ in MARKET_DOMAIN_COUNTS), tuple(MARKET_DOMAIN_COUNTS)).fetchall()
+        assert conn.execute("SELECT count(*) FROM market_lexicons WHERE category='fixture'").fetchone() == (104,)
+    for _ in range(2):
+        repo = SqliteTrendRepository(path)
+        try:
+            rows = await repo.get_domain_lexicons()
+            assert [r for r in rows if r["domain"] in MARKET_DOMAIN_COUNTS and r["created_by"] == "system"] == []
+            assert [(r["term"], r["created_by"]) for r in rows if r["domain"] == "tech"] == [("operator term", "operator")]
+        finally:
+            await repo.close()
+        with sqlite3.connect(path) as conn:
+            after = conn.execute("SELECT * FROM market_lexicons WHERE domain NOT IN (%s) ORDER BY id" % ','.join('?' for _ in MARKET_DOMAIN_COUNTS), tuple(MARKET_DOMAIN_COUNTS)).fetchall()
+            assert after == before

@@ -1083,3 +1083,38 @@ def test_re_applying_039_sql_preserves_the_retired_populated_store(request, role
         assert conn.execute("SELECT current_setting('ignis.taxonomy_changed_count')").fetchone() == ('0',)
         assert retirement.project(conn, 'postgres', 'sql-retry-fixture') == before_retry
         assert conn.execute("SELECT category FROM topic_clusters WHERE canonical_name='new source'").fetchone() == ('beauty',)
+
+
+@pytest.mark.parametrize('roles', [False, True])
+def test_040_retires_only_system_market_rows_and_preserves_evidence(request, roles):
+    """Fresh and upgraded PostgreSQL stores keep operator vocabulary and evidence intact."""
+    dsn = request.getfixturevalue('supabase_like_dsn' if roles else 'empty_postgres_dsn')
+    _apply(dsn, *all_postgres_migrations())
+    domains = ['tech', 'ecommerce', 'fashion', 'common_vi',
+               'global_saas_ai', 'global_ecommerce', 'global_fashion']
+    with psycopg.connect(dsn) as conn:
+        assert conn.execute(
+            "SELECT count(*) FROM market_lexicons WHERE domain = ANY(%s) AND created_by = 'system'",
+            (domains,),
+        ).fetchone() == (0,)
+        machinery = conn.execute(
+            "SELECT * FROM market_lexicons WHERE NOT (domain = ANY(%s)) ORDER BY id", (domains,),
+        ).fetchall()
+        for domain, count in zip(domains, [24, 21, 15, 9, 15, 11, 9], strict=True):
+            conn.cursor().executemany(
+                "INSERT INTO market_lexicons (domain, term, created_by) VALUES (%s, %s, 'system')",
+                [(domain, f'legacy term {i}') for i in range(count)],
+            )
+        conn.execute("INSERT INTO market_lexicons (domain, term, created_by) VALUES ('tech', 'operator term', 'operator')")
+        conn.execute("INSERT INTO trend_signals (platform, raw_title) VALUES ('youtube', 'preserved evidence')")
+        evidence = conn.execute("SELECT * FROM trend_signals ORDER BY id").fetchall()
+    for _ in range(2):
+        _apply(dsn, '040_retire_market_domain_vocabulary.sql')
+        with psycopg.connect(dsn) as conn:
+            assert conn.execute(
+                "SELECT domain, term, created_by FROM market_lexicons WHERE domain = ANY(%s)", (domains,),
+            ).fetchall() == [('tech', 'operator term', 'operator')]
+            assert conn.execute(
+                "SELECT * FROM market_lexicons WHERE NOT (domain = ANY(%s)) ORDER BY id", (domains,),
+            ).fetchall() == machinery
+            assert conn.execute("SELECT * FROM trend_signals ORDER BY id").fetchall() == evidence

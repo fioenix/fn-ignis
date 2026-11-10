@@ -316,8 +316,8 @@ class ConnectorPluginRegistry:
         """Run one ingress pass across every healthy connector, in two stages.
 
         Stage 1 pulls the feeds that discover topics: what a region is searching for, which
-        hashtags are climbing. Stage 2 takes those topics, adds `seed_keywords` from the market
-        lexicon, and probes the remaining connectors by keyword. Staging them this way is what
+        hashtags are climbing. Stage 2 takes those topics, adds caller-supplied `seed_keywords`,
+        and probes the remaining connectors by keyword. Staging them this way is what
         lets a cluster span several platforms: every connector in stage 2 is asked about a
         subject some other surface already showed interest in, instead of reporting its own
         national popularity chart. `max_probe_keywords` caps the fan-out, because a keyword probe

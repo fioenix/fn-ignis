@@ -2146,7 +2146,10 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
         # Vocabulary retirements, run as shipped and after the replay above. The replay puts back
         # every row its seed still lists, so a retirement applied before it -- or only once --
         # would be undone by the next start.
-        for retirement_filename in ("020_retire_ambiguous_tiktok_ui_noise.sql",):
+        for retirement_filename in (
+            "020_retire_ambiguous_tiktok_ui_noise.sql",
+            "040_retire_market_domain_vocabulary.sql",
+        ):
             retirement_path = sql_seed_file(retirement_filename)
             if not retirement_path:
                 continue

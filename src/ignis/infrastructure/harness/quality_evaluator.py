@@ -18,22 +18,13 @@ class QualityEvaluator:
 
     def __init__(
         self,
-        custom_lexicon: Optional[Set[str]] = None,
         custom_stopwords: Optional[Set[str]] = None,
         custom_noise: Optional[Set[str]] = None,
         detector: Optional[ILanguageDetector] = None,
     ):
-        self._custom_lexicon: Set[str] = set(custom_lexicon or [])
         self._custom_stopwords: Set[str] = set(custom_stopwords or [])
         self._custom_noise: Set[str] = set(custom_noise or [])
         self._detector: ILanguageDetector = detector or HeuristicLanguageDetector()
-
-    def register_terms(self, terms: List[str]) -> None:
-        """Dynamically register new domain vocabulary terms in memory."""
-        for t in terms:
-            clean = t.strip().lower()
-            if clean:
-                self._custom_lexicon.add(clean)
 
     def register_foreign_stopwords(self, terms: List[str]) -> None:
         """Dynamically register new foreign stop words into filter."""
@@ -52,18 +43,15 @@ class QualityEvaluator:
     def is_vietnamese(
         self,
         text: str,
-        extra_terms: Optional[Set[str]] = None,
         extra_stopwords: Optional[Set[str]] = None,
         extra_noise: Optional[Set[str]] = None,
     ) -> bool:
         """Evaluate Vietnamese linguistic authenticity."""
-        merged_terms = self._custom_lexicon | (extra_terms or set())
         merged_stopwords = self._custom_stopwords | (extra_stopwords or set())
         merged_noise = self._custom_noise | (extra_noise or set())
         return self._detector.is_localized(
             text=text,
             geo=GeoCode.VN,
-            extra_terms=merged_terms,
             extra_stopwords=merged_stopwords,
             extra_noise=merged_noise,
         )
@@ -73,7 +61,6 @@ class QualityEvaluator:
         return self._detector.is_localized(
             text=title,
             geo=geo,
-            extra_terms=self._custom_lexicon,
             extra_stopwords=self._custom_stopwords,
             extra_noise=self._custom_noise,
         )

@@ -81,15 +81,12 @@ class StrategicMarketReasoner:
 
     def __init__(
         self,
-        custom_lexicon: Optional[Set[str]] = None,
         custom_stopwords: Optional[Set[str]] = None,
         custom_noise: Optional[Set[str]] = None,
         detector: Optional[ILanguageDetector] = None,
     ):
-        self._custom_lexicon: Set[str] = set(custom_lexicon or [])
         self._custom_stopwords: Set[str] = set(custom_stopwords or [])
         self._custom_noise: Set[str] = set(custom_noise or [])
-        self._synonym_index: Dict[str, Set[str]] = {}
         self._detector: ILanguageDetector = detector or HeuristicLanguageDetector()
 
     def register_noise_blacklist(self, terms: List[str]) -> None:
@@ -903,26 +900,6 @@ class StrategicMarketReasoner:
         return verified
 
 
-    def register_terms(self, terms: List[str]) -> None:
-        """Dynamically register new domain vocabulary terms in memory."""
-        for t in terms:
-            clean = t.strip().lower()
-            if clean:
-                self._custom_lexicon.add(clean)
-
-    def register_synonym_groups(self, groups: List[List[str]]) -> None:
-        """Register related-term groups (one group = terms sharing a lexicon domain + category).
-
-        Every term in a group becomes an expansion of the others, so mission keyword matching
-        follows the persisted vocabulary instead of a dictionary baked into the code.
-        """
-        for group in groups:
-            terms = {t.strip().lower() for t in group if t and t.strip()}
-            if len(terms) < 2:
-                continue
-            for term in terms:
-                self._synonym_index.setdefault(term, set()).update(terms - {term})
-
     def register_foreign_stopwords(self, terms: List[str]) -> None:
         """Dynamically register new foreign stop words into filter."""
         for t in terms:
@@ -950,14 +927,6 @@ class StrategicMarketReasoner:
         if k in t:
             return True
 
-        # Expansions registered from the market_lexicons table (no vocabulary is hardcoded here)
-        for syn in self._synonym_index.get(k, set()):
-            if len(syn) <= 4 or " " not in syn:
-                if re.search(rf"\b{re.escape(syn)}\b", t):
-                    return True
-            elif syn in t:
-                return True
-
         # Token set match; keeps 2-letter tokens such as 'ai' that a >2 filter used to drop
         kw_tokens = [w for w in k.split() if len(w) >= 2]
         if kw_tokens:
@@ -976,7 +945,6 @@ class StrategicMarketReasoner:
         return self._detector.is_localized(
             text=title,
             geo=geo,
-            extra_terms=self._custom_lexicon,
             extra_stopwords=self._custom_stopwords,
             extra_noise=self._custom_noise,
         )

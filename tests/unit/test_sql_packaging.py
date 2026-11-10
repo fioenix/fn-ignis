@@ -24,11 +24,12 @@ SEED_FILES = (
     # Run by the SQLite bootstrap after the vocabulary replay; missing from a wheel, the retired
     # UI-noise terms would silently come back on every installed SQLite database.
     "020_retire_ambiguous_tiktok_ui_noise.sql",
+    "040_retire_market_domain_vocabulary.sql",
 )
 # Not a seed: PostgreSQL-only, and read by no bootstrap. The Compose init and an operator applying
 # sql/ by hand need the whole chain, so the newest migration is pinned here and shipped with it.
 NEWEST_POSTGRES_ONLY_MIGRATION = "039_remove_seeded_taxonomy.sql"
-NEWEST_MIGRATION = "039_remove_seeded_taxonomy.sql"
+NEWEST_MIGRATION = "040_retire_market_domain_vocabulary.sql"
 # The closed sdist member list: runtime package, the SQL chain, and the build metadata. Anything
 # else -- tests, docs, examples, reports, handoff notes, agent or local settings -- must not ship.
 SDIST_MEMBERS = {"src/ignis", "sql", "pyproject.toml", "README.md", "LICENSE"}
@@ -219,7 +220,7 @@ async def test_packaged_sql_bootstrap_keeps_lexicons_without_taxonomy(tmp_path, 
     monkeypatch.setattr(resources, 'PACKAGED_SQL_DIR', packaged)
     monkeypatch.setattr(resources, 'REPOSITORY_SQL_DIR', tmp_path / 'absent')
     names = sorted(path.name for path in packaged.glob('*.sql'))
-    assert [int(name[:3]) for name in names] == list(range(1, 40))
+    assert [int(name[:3]) for name in names] == list(range(1, 41))
     assert names[-1] == NEWEST_MIGRATION
     path = tmp_path / 'installed.sqlite3'
     for _ in range(2):
@@ -228,4 +229,4 @@ async def test_packaged_sql_bootstrap_keeps_lexicons_without_taxonomy(tmp_path, 
         await repository.close()
     with sqlite3.connect(path) as conn:
         assert conn.execute("SELECT name FROM sqlite_master WHERE name='industry_taxonomies'").fetchall() == []
-        assert conn.execute("SELECT count(*) FROM market_lexicons WHERE domain IN ('fashion','tech','ecommerce','common_vi')").fetchone() == (69,)
+        assert conn.execute("SELECT count(*) FROM market_lexicons WHERE created_by='system' AND domain IN ('fashion','tech','ecommerce','common_vi','global_saas_ai','global_ecommerce','global_fashion')").fetchone() == (0,)

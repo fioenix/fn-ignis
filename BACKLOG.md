@@ -1,10 +1,10 @@
 # 📋 FN-IGNIS BACKLOG & SYSTEM STATUS
 
-> - **Cập nhật lần cuối:** 10/11/2026 (Spec 022 trên nhánh riêng; chưa merge hay phát hành)
+> - **Cập nhật lần cuối:** 11/11/2026 (Spec 021 và 022 đã merge vào `main`; chưa phát hành)
 > - **Phiên bản:** `v0.9.0`
 > - **Kiến trúc:** Clean Architecture + Dual-Backend (Postgres TimescaleDB & Zero-Docker SQLite)
->   + FastMCP Server (41 tools; nhánh Spec 022 chưa phát hành); watchlist có phiên bản, kế hoạch nghe và hai trục `seen` / `created`.
-> - **Schema:** Migration mới nhất là `sql/039_remove_seeded_taxonomy.sql`.
+>   + FastMCP Server (41 tools trên `main`, chưa phát hành; `v0.9.0` có 53); watchlist có phiên bản, kế hoạch nghe và hai trục `seen` / `created`.
+> - **Schema:** Nhánh Spec 023 có migration mới nhất là `sql/040_retire_market_domain_vocabulary.sql`; chưa merge, `main` vẫn ở 039.
 > - **Thu thập:** YouTube Data API, Threads và TikTok qua trình duyệt host, bình luận TikTok theo URL.
 >   Spec 022 ngừng RSS, Creative Center, tìm kiếm TikTok headless và Reels; giữ nguyên dữ liệu cũ.
 >   Ignis không có worker hay lịch khám phá hằng ngày; routine chạy trên host khi được yêu cầu.
@@ -23,9 +23,11 @@ xóa và chưa đọc lại kho đó.
 
 ### Có task cụ thể, chưa nghiệm thu
 
-- [~] **Spec 022 — ngừng nguồn không còn dùng được:** nhánh `022-retire-unusable-sources` có 41 tool;
+- [x] **Spec 022 — ngừng nguồn không còn dùng được** — merge 10/11/2026 (PR #128): còn 41 tool;
   đã gỡ 12 tool và chặn các nguồn đã nghỉ trước thu thập, giữ nguyên đường đọc dữ liệu cũ.
-  Kiểm thử cục bộ dùng SQLite tạm và nguồn giả; PostgreSQL và review độc lập chưa nghiệm thu.
+  Review code và security độc lập: vòng đầu REWORK, vòng hai APPROVE ở `abd3323`. Kiểm thử chạy trên SQLite;
+  kiểm tra riêng cho PostgreSQL chưa chạy và không còn chặn, vì store dev đã chuyển sang SQLite từ 10/11/2026.
+- [ ] **Phát hành bản kế tiếp:** Spec 021 và 022 đã nằm trên `main` từ sau `v0.9.0`; version bump và tag chờ chủ sở hữu.
 
 - [x] **TikTok trên profile Finos bị fail-closed** — đóng 09/11/2026. Đo trực tiếp: trang có `lang=en` trong khi
   `tiktok_attribution_en` chưa có mẫu, nên validator loại toàn bộ. Đã đổi giao diện profile sang Tiếng Việt (`vi-VN`);
@@ -37,7 +39,14 @@ xóa và chưa đọc lại kho đó.
   của chủ đề đó; lượt dựng đó kiểm luôn việc xóa routine (FR-008) và luồng tạo routine của guide sau 23/10. T006 đã đóng
   ngày 09/11/2026 theo kết quả 23/10.
 - [x] **Spec 021 — T022, T029** — đóng 10/11/2026: đã retire cả hai store dev (SQLite của caller: 30/85 cluster; PostgreSQL `ignis`: 1/1), verify qua, có sao lưu; server chạy bản mới.
-- [ ] **69 từ miền trong `market_lexicons`** (`sql/003`: fashion, tech, ecommerce, common_vi) vẫn là hardcode kiểu taxonomy, có đi vào quality evaluator và strategic reasoner; cần đo riêng trước khi bỏ.
+- [x] **69 từ miền trong `market_lexicons`** — đã triển khai trên nhánh Spec 023 ngày 11/11/2026, chưa merge.
+  Số đo trong spec: thực tế có **104 dòng `system`** thuộc bảy miền — 69 dòng ở `sql/003` và 35 dòng toàn cầu
+  ở `sql/004`. Bỏ chúng không đổi kết quả nhận diện ngôn ngữ của **634 tiêu đề**: vẫn **572** được nhận là tiếng Việt;
+  với **37 từ khóa nhiệm vụ**, không có cặp từ khóa–tiêu đề nào chỉ khớp nhờ mở rộng đồng nghĩa.
+  Đã bỏ hai cơ chế dùng từ miền, gỡ hai thành phần đọc từ vựng không còn được tool gọi, bỏ seed và thêm migration 040 chỉ xóa
+  dòng `system`; dòng người vận hành và từ phục vụ các cơ chế khác được giữ nguyên. Kiểm thử SQLite tạm chứng
+  minh kho mới và kho nâng cấp đều còn 0 dòng `system` trong bảy miền sau hai lần khởi tạo.
+  Chưa áp migration lên store dev; coordinator chạy lại phép đo T010 trước nghiệm thu cuối.
 - [ ] **Spec 019 (Shopee Affiliate)** — `Draft`, chưa có plan/tasks, chờ ba cổng kiểm tài khoản của chủ sở hữu.
 - [ ] **RES-001** benchmark đối thủ (xem mục "Nghiên cứu riêng"); chưa có ngân sách hay quyền dùng quota có phí.
 
@@ -78,6 +87,9 @@ Nợ nhỏ giữ nguyên, sửa khi chạm tới, không lên lịch:
 
 - [x] `son`/`kem` mơ hồ trong taxonomy `beauty` — đóng 10/11/2026: seed không có hai từ đơn này, và Spec 021 đã bỏ taxonomy.
 - [ ] `_contiguous_phrase` chỉ đọc `canonical_name` (nhãn xuất hiện trong báo cáo Attention).
+- [ ] `ConnectorRegistry.fetch_from_all` không còn đường gọi từ tool sau Spec 023. Giữ lại vì sáu file kiểm thử unit
+  vẫn chứng minh các hàng rào loại nội dung của chính người vận hành, giữ ngôn ngữ nguồn và trần request hằng
+  ngày qua hàm này. Cần chuyển các phép thử đó sang đường mission đang dùng trước khi xóa mã thừa.
 
 Đóng sau khi kiểm code 09/11/2026:
 

@@ -57,7 +57,6 @@ async def test_dynamic_noise_blacklist_rejection_end_to_end_sqlite():
     
     db_lexicons = await repo.get_domain_lexicons()
     noise_items = [item["term"] for item in db_lexicons if item.get("domain") == "noise_blacklist"]
-    pos_items = [item["term"] for item in db_lexicons if item.get("domain") not in ("foreign_stopwords", "noise_blacklist")]
     stop_items = [item["term"] for item in db_lexicons if item.get("domain") == "foreign_stopwords"]
     
     assert len(noise_items) >= 19
@@ -67,9 +66,7 @@ async def test_dynamic_noise_blacklist_rejection_end_to_end_sqlite():
     evaluator = QualityEvaluator()
     reasoner = StrategicMarketReasoner()
 
-    # Wire terms exactly as done by orchestrator & MCP server
-    evaluator.register_terms(pos_items)
-    reasoner.register_terms(pos_items)
+    # Preserve the live filtering registrations without market vocabulary.
     evaluator.register_foreign_stopwords(stop_items)
     reasoner.register_foreign_stopwords(stop_items)
     evaluator.register_noise_blacklist(noise_items)

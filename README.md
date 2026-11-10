@@ -32,7 +32,7 @@ See [Spec 015](specs/015-no-author-identity-at-rest/spec.md).
 ## Local source setup
 
 Requirements: Python 3.11 or newer. Run `./scripts/bootstrap.sh` from a source checkout. It
-creates a local virtual environment and SQLite database, seeds the local vocabulary, configures
+creates a local virtual environment and SQLite database, seeds filtering, language-detection and interface vocabulary, configures
 supported MCP clients, and runs synthetic diagnostics. Connector credentials and real social
 sessions are optional and require the operator's own authorization. Never interpret synthetic
 readiness as live source access.
@@ -41,8 +41,14 @@ For a Codex-only installation with separate UAT storage, run
 `./scripts/bootstrap.sh --client codex --env-file /absolute/path/to/uat/.env`.
 Other client configurations remain unchanged; omitting these options retains the all-client setup.
 
-The current source tree contains migrations through
-`sql/039_remove_seeded_taxonomy.sql`. Migration 039 resets stored labels from the retired industry taxonomy to `unclassified` and drops its table; a store that already holds clusters must run `scripts/retire_industry_taxonomy.py` (`project`, then `apply`) instead of applying this file directly. Do not replay the whole migration directory on a retired store: it would recreate the table. Migration 038 seeds locale-qualified TikTok attribution templates. Since `tiktok-public-grid-v3` keeps only the caption element and the hashtags after it, interface language no longer gates records. It rewrites no stored evidence. Migration 037 seeds the Threads action-button labels for each UI language that host-browser search uses to read counters; it rewrites no stored evidence. Migration 036 seeds the Threads author attribution wording that host-browser search removes from excerpts; it rewrites no stored evidence. Migration 035 adds append-only watchlist goals, comparison periods and snapshot cadences; it rewrites no stored evidence. Migration 034 seeds the TikTok author attribution wording that
+The current source tree contains migrations through `sql/040_retire_market_domain_vocabulary.sql`.
+Migration 040 deletes only `system` rows in the seven retired market vocabulary domains; operator
+rows and stored evidence remain unchanged. SQLite applies it at bootstrap; existing PostgreSQL
+stores apply only this pending migration after 039. `register_domain_lexicon` still stores and lists
+market terms, but they no longer affect topic matching or language detection. Filtering,
+language-detection and interface vocabulary keep their existing roles.
+
+Migration 039 resets stored labels from the retired industry taxonomy to `unclassified` and drops its table; a store that already holds clusters must run `scripts/retire_industry_taxonomy.py` (`project`, then `apply`) instead of applying this file directly. Do not replay the whole migration directory on a retired store: it would recreate the table. Migration 038 seeds locale-qualified TikTok attribution templates. Since `tiktok-public-grid-v3` keeps only the caption element and the hashtags after it, interface language no longer gates records. It rewrites no stored evidence. Migration 037 seeds the Threads action-button labels for each UI language that host-browser search uses to read counters; it rewrites no stored evidence. Migration 036 seeds the Threads author attribution wording that host-browser search removes from excerpts; it rewrites no stored evidence. Migration 035 adds append-only watchlist goals, comparison periods and snapshot cadences; it rewrites no stored evidence. Migration 034 seeds the TikTok author attribution wording that
 host-browser search removes from excerpts; it rewrites no stored evidence. Migration 033 adds a per-channel, per-day count of keyword
 searches for the daily request ceilings; it rewrites no stored evidence. Migration 032 adds watchlists, their immutable versions and the runs
 bound to them; it rewrites no stored evidence. Migration 031 adds per-mission author keys, declared

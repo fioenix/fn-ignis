@@ -81,6 +81,8 @@ SCHEMA_MIGRATIONS = (
     "038_tiktok_attribution_locales.sql",
     # Spec 021: the ready schema has no seeded taxonomy.
     "039_remove_seeded_taxonomy.sql",
+    # Spec 023: retire only system-owned market-domain vocabulary.
+    "040_retire_market_domain_vocabulary.sql",
 )
 
 

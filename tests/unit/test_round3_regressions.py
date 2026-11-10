@@ -60,7 +60,8 @@ async def test_sqlite_seeds_from_sql_files_no_hardcoded_python_data():
     lexicons = await repo.get_domain_lexicons()
     assert len(lexicons) >= 50
     domains = {item["domain"] for item in lexicons}
-    assert "common_vi" in domains or "global_saas_ai" in domains
+    assert {"foreign_stopwords", "noise_blacklist", "foreign_phrases"} <= domains
+    assert "common_vi" not in domains and "global_saas_ai" not in domains
     
     # Verify runtime_configs seeded from 007_runtime_configs.sql
     threads_client_id = await repo.get_runtime_config("threads_web_client_id")
@@ -223,9 +224,8 @@ async def test_save_clusters_canonical_name_conflict_resolution():
 
 @pytest.mark.asyncio
 async def test_stored_threads_credentials_are_not_reported_as_collectible():
-    from unittest.mock import AsyncMock, MagicMock
+    from unittest.mock import AsyncMock
     from ignis.interfaces.mcp import server
-    from ignis.infrastructure.harness.refinement_orchestrator import AutonomousRefinementOrchestrator
     repo = AsyncMock()
     repo.list_platform_credentials.return_value = [{"platform": "threads_browser", "is_active": True},
                                                   {"platform": "threads", "is_active": True},
@@ -235,9 +235,7 @@ async def test_stored_threads_credentials_are_not_reported_as_collectible():
     registry = ConnectorPluginRegistry()
     registry.register(ThreadsPlugin())
     status, health = await server._collect_channel_context({"repository": repo, "registry": registry})
-    harness = AutonomousRefinementOrchestrator(repo, registry, MagicMock(), MagicMock(), MagicMock())
-    harness_status, harness_health = await harness._collect_channel_context()
-    assert status["threads"] is True and harness_status["threads"] is True  # Stored credential fact only.
+    assert status["threads"] is True  # Stored credential fact only.
     assert health["threads"]["collection_available"] is False
-    assert harness_health["threads"]["reason_code"] == "HOST_BROWSER_REQUIRED"
-    assert status["reels"] is True and harness_status["reels"] is True
+    assert health["threads"]["reason_code"] == "HOST_BROWSER_REQUIRED"
+    assert status["reels"] is True

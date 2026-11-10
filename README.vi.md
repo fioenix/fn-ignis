@@ -34,11 +34,18 @@ bỏ. Xem [Spec 015](specs/015-no-author-identity-at-rest/spec.md).
 ## Cài đặt từ mã nguồn
 
 Cần Python 3.11 trở lên. Chạy `./scripts/bootstrap.sh` trong checkout mã nguồn. Script tạo
-môi trường Python và SQLite cục bộ, nạp từ vựng, cấu hình các MCP client được hỗ trợ và kiểm
+môi trường Python và SQLite cục bộ, nạp từ phục vụ lọc nhiễu, nhận diện ngôn ngữ và đọc giao diện, cấu hình các MCP client được hỗ trợ và kiểm
 tra tổng hợp. Credentials và phiên đăng nhập social thực tế là tùy chọn, phải do người vận
 hành cho phép. Kết quả kiểm tra tổng hợp không chứng minh nguồn live truy cập được.
 
-Cây mã nguồn hiện có migration tới `sql/039_remove_seeded_taxonomy.sql`. Migration 039 đưa các nhãn của bộ taxonomy ngành đã bỏ về `unclassified` rồi xóa bảng; kho đã có cluster phải chạy `scripts/retire_industry_taxonomy.py` (`project`, rồi `apply`) thay vì áp trực tiếp file này. Không chạy lại cả thư mục migration trên kho đã retire, vì như vậy sẽ tạo lại bảng. Migration 038 nạp mẫu câu ghi công tác giả TikTok theo ngôn ngữ giao diện. Từ `tiktok-public-grid-v3`, Ignis chỉ giữ element caption và các hashtag ngay sau nó nên ngôn ngữ giao diện không còn chặn bản ghi. Migration này không sửa bằng chứng đã lưu. Migration 037 nạp sẵn nhãn các nút hành động của Threads theo từng ngôn ngữ giao diện, dùng để đọc chỉ số khi tìm kiếm qua trình duyệt; nó không sửa bằng chứng đã lưu. Migration 036 nạp sẵn mẫu câu ghi công tác giả của Threads, dùng để bỏ câu ghi công khỏi trích đoạn khi tìm kiếm qua trình duyệt; nó không sửa bằng chứng đã lưu. Migration 035 lưu lịch sử mục tiêu, kỳ so sánh và nhịp lấy mẫu của watchlist; nó không sửa bằng chứng đã lưu. Migration 034 nạp sẵn mẫu câu
+Cây mã nguồn hiện có migration tới `sql/040_retire_market_domain_vocabulary.sql`. Migration 040 chỉ
+xóa các dòng `system` thuộc bảy miền từ vựng thị trường đã bỏ; giữ nguyên dòng do người vận hành
+thêm và bằng chứng đã lưu. SQLite áp dụng khi khởi tạo; kho PostgreSQL hiện hữu chỉ áp dụng
+migration còn thiếu này sau 039. `register_domain_lexicon` vẫn lưu và liệt kê từ miền, nhưng chúng
+không còn tác động đến khớp chủ đề hay nhận diện ngôn ngữ. Từ phục vụ lọc nhiễu, nhận diện ngôn ngữ
+và đọc giao diện vẫn giữ vai trò cũ.
+
+Migration 039 đưa các nhãn của bộ taxonomy ngành đã bỏ về `unclassified` rồi xóa bảng; kho đã có cluster phải chạy `scripts/retire_industry_taxonomy.py` (`project`, rồi `apply`) thay vì áp trực tiếp file này. Không chạy lại cả thư mục migration trên kho đã retire, vì như vậy sẽ tạo lại bảng. Migration 038 nạp mẫu câu ghi công tác giả TikTok theo ngôn ngữ giao diện. Từ `tiktok-public-grid-v3`, Ignis chỉ giữ element caption và các hashtag ngay sau nó nên ngôn ngữ giao diện không còn chặn bản ghi. Migration này không sửa bằng chứng đã lưu. Migration 037 nạp sẵn nhãn các nút hành động của Threads theo từng ngôn ngữ giao diện, dùng để đọc chỉ số khi tìm kiếm qua trình duyệt; nó không sửa bằng chứng đã lưu. Migration 036 nạp sẵn mẫu câu ghi công tác giả của Threads, dùng để bỏ câu ghi công khỏi trích đoạn khi tìm kiếm qua trình duyệt; nó không sửa bằng chứng đã lưu. Migration 035 lưu lịch sử mục tiêu, kỳ so sánh và nhịp lấy mẫu của watchlist; nó không sửa bằng chứng đã lưu. Migration 034 nạp sẵn mẫu câu
 ghi công tác giả của TikTok, dùng để bỏ câu ghi công khỏi trích đoạn khi tìm kiếm qua trình duyệt
 host; nó không sửa bằng chứng đã lưu. Migration 033 thêm bộ đếm số
 lượt tìm theo từ khóa của từng kênh trong từng ngày, dùng cho trần request theo ngày; nó không sửa bằng

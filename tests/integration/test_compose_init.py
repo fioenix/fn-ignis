@@ -86,7 +86,7 @@ READBACK = {
     ),
 }
 # The newest migration a fresh container has to reach; the full list is read from sql/ itself.
-NEWEST_MIGRATION = "039_remove_seeded_taxonomy.sql"
+NEWEST_MIGRATION = "040_retire_market_domain_vocabulary.sql"
 
 # Exact full-chain identities: 027 adds three tables/one UUID default; 028 adds fifteen
 # tables, 029 three, 030 six, 031 two, 032 three, 033 one and 035 one, all with caller-bound identities and
@@ -474,8 +474,8 @@ def test_full_chain_oracle_matches_every_declared_table_and_uuid_default():
 
 
 def test_threads_vocabulary_endpoint_keeps_the_existing_relation_inventory():
-    """036-038 add vocabulary only; 039 separately retires the taxonomy relation."""
-    assert all_postgres_migrations()[-1] == NEWEST_MIGRATION == "039_remove_seeded_taxonomy.sql"
+    """036-038 add vocabulary; 039 retires taxonomy and 040 retires market terms."""
+    assert all_postgres_migrations()[-1] == NEWEST_MIGRATION == "040_retire_market_domain_vocabulary.sql"
     before = _declared_public_tables(through=35)
     assert before == set(EXPECTED_PUBLIC_TABLES) | {'industry_taxonomies'}
     for version in (36, 37, 38):

@@ -49,7 +49,6 @@ from ignis.application.use_cases.submit_evidence_qualifications import (
     SubmitEvidenceQualificationsUseCase,
 )
 from ignis.application.use_cases.get_top_clusters import GetTopClustersUseCase
-from ignis.application.use_cases.ingest_trends import IngestTrendsUseCase
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.application.youtube_quota import YouTubeQuotaManager
 from ignis.domain.author_identity import (
@@ -109,7 +108,7 @@ from ignis.infrastructure.harness.language_detector import HeuristicLanguageDete
 from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
 from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
 from ignis.infrastructure.config.runtime_config_manager import RuntimeConfigManager
-from ignis.infrastructure.config.vocabulary_loader import VocabularySynchronizer, is_market_vocabulary_domain
+from ignis.infrastructure.config.vocabulary_loader import VocabularySynchronizer
 from ignis.infrastructure.caller_storage import CallerStorageMiddleware, current_caller_storage
 from ignis.infrastructure.persistence import create_repository
 from ignis.infrastructure.templates.html_builder import HtmlArtifactBuilder
@@ -884,7 +883,6 @@ def _init_components(*, caller_scope=None):
         repository=repository, store=workspace_store
     )
     top_clusters_use_case = GetTopClustersUseCase(repository=repository)
-    ingest_use_case = IngestTrendsUseCase(registry=registry, repository=repository)
 
     return {
         "repository": repository,
@@ -910,7 +908,6 @@ def _init_components(*, caller_scope=None):
         "submit_mission_claims_use_case": submit_mission_claims_use_case,
         "get_mission_claims_use_case": get_mission_claims_use_case,
         "top_clusters_use_case": top_clusters_use_case,
-        "ingest_use_case": ingest_use_case,
         "runtime_config_manager": runtime_config_manager,
     }
 
@@ -3281,11 +3278,6 @@ async def handle_register_domain_lexicon(
                 comp["strategic_reasoner"].register_foreign_stopwords(terms)
             if "clusterer" in comp and hasattr(comp["clusterer"], "register_stopwords"):
                 comp["clusterer"].register_stopwords(terms)
-        elif is_market_vocabulary_domain(d_lower):
-            if "quality_evaluator" in comp:
-                comp["quality_evaluator"].register_terms(terms)
-            if "strategic_reasoner" in comp:
-                comp["strategic_reasoner"].register_terms(terms)
 
         return json.dumps(
             {
@@ -3303,7 +3295,7 @@ async def handle_register_domain_lexicon(
         return json.dumps({"status": "ERROR", "message": str(e)}, ensure_ascii=False)
 
 
-@mcp.tool(name="register_domain_lexicon", description="Register or expand domain vocabulary, slang, brand names, and industry keywords dynamically into the persistent database so Quality Gate and Ingress engines recognize new niche vernacular.")
+@mcp.tool(name="register_domain_lexicon", description="Store lexicon terms in the persistent database. Market-domain terms are stored and listed without affecting topic matching or language detection; machinery domains retain their filtering roles.")
 async def register_domain_lexicon(domain: str, terms: list[str], category: str = "vernacular") -> str:
     return await handle_register_domain_lexicon(domain=domain, terms=terms, category=category)
 
