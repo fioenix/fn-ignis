@@ -8,9 +8,9 @@
 > - **Thu thập:** YouTube Data API, Threads và TikTok qua trình duyệt host, bình luận TikTok theo URL.
 >   Đã ngừng RSS, Creative Center, tìm kiếm TikTok headless và Reels; bỏ taxonomy ngành và từ vựng
 >   thị trường nạp sẵn. Ignis không có worker hay lịch khám phá hằng ngày.
-> - **Trạng thái:** Đang chuẩn bị phát hành `v0.10.0` (11/11/2026, chủ sở hữu cho phép tag và publish) qua mã
->   nguồn, GitHub Release và GHCR (`ghcr.io/fioenix/fn-ignis:0.10.0`); chỉ ghi đã phát hành sau khi thấy tag,
->   Release và image. PyPI tiếp tục được hoãn. Kiểm tra trạng thái thật bằng `python scripts/check_release_state.py`.
+> - **Trạng thái:** `v0.10.0` chưa tag và chưa publish: đang chuẩn bị phát hành (11/11/2026, chủ sở hữu cho phép
+>   tag và publish) qua mã nguồn, GitHub Release và GHCR (`ghcr.io/fioenix/fn-ignis:0.10.0`); chỉ ghi đã phát
+>   hành sau khi thấy tag, Release và image. PyPI tiếp tục được hoãn. Kiểm tra trạng thái thật bằng `python scripts/check_release_state.py`.
 
 ---
 
