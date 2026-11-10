@@ -4,9 +4,9 @@
 **Prerequisites**: `spec.md`, `plan.md`, `research.md`, `data-model.md`, `contracts/`, `quickstart.md`
 **Route**: DEEP / migration; the Spec Kit depth gate requires this task list.
 **Evidence (2026-11-10)**: CI run 42676858860 at `4c5fe28` passed with PostgreSQL enabled: 6146 passed, 36 skipped, including all 18 cases of `test_postgres_taxonomy_retirement.py` and 24 of `test_postgres_migration_contract.py`, and Fresh Compose init. `uv build` produced a wheel and sdist, and the wheel contains migration 039.
-**Operator rehearsal and cutover (2026-11-10, owner-approved)**: both authorized stores were projected read-only, backed up, stopped from writers, applied and verified, run `20261110-113308`. Caller SQLite store: 85 clusters, 30 reset (projected 30), verify passed all five invariants, retry changed 0. PostgreSQL store `ignis`: 1 cluster, 1 reset (projected 1), verify passed, retry reported `ALREADY_RETIRED` with 0 changes. Receipts are kept locally under each store's `reports/migrations/021/20261110-113308/`, with the backups beside them; none is committed. After cutover the server started on the new wheel, `list_domain_lexicons` returned no `industry_taxonomies` key, and health was `HEALTHY`.
+**Operator rehearsal and cutover (2026-11-10, owner-approved)**: both authorized stores were projected read-only, backed up, stopped from writers, applied and verified, run `20261110-113308`. Caller SQLite store: 85 clusters, 30 reset (projected 30), verify passed all five invariants, retry changed 0. PostgreSQL store `ignis`: 1 cluster, 1 reset (projected 1), verify passed, retry reported `ALREADY_RETIRED` with 0 changes. Receipts are kept locally under each store's `reports/migrations/021/20261110-113308/`. The backups are separate local files: a SQLite online backup next to the caller store and a PostgreSQL custom-format dump under the caller's backup folder; their restorability was not tested. None is committed. After cutover the server started on the new wheel, `list_domain_lexicons` returned no `industry_taxonomies` key, and health was `HEALTHY`.
 **Acceptance (T029)**: FR-001 to FR-011 and SC-001 to SC-005 are met by the merged code (PR 125), its CI evidence above and this cutover; SC-003 holds on both stores (changed equals projected, non-category digest unchanged) and SC-005 by the zero-change retries. No released version contains this change yet.
-**Status**: Local implementation and targeted checks complete (22/29 tasks). Evidence: `.handoff/021-taxonomy-verification.md`. Real PostgreSQL/Compose, built artifacts and independent review remain open.
+**Status (historical, before CI and cutover)**: Local implementation and targeted checks complete (22/29 tasks). Evidence: `.handoff/021-taxonomy-verification.md`. Real PostgreSQL/Compose, built artifacts and independent review remain open.
 
 ## Format and execution rules
 
@@ -164,6 +164,8 @@ classifier, credential path or migration framework is needed.
 **Task inventory**: 29 tasks; setup 2, foundational 5, US1 6, US2 9, US3 5, final acceptance 2.
 
 ## Local acceptance notes
+
+Historical: written before the CI evidence and the cutover recorded at the top of this file.
 
 - SQLite retirement, read-only projection/verification, rollback, retries and startup refusal
   have observed local evidence. Full commands and counts are in
