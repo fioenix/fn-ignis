@@ -236,7 +236,7 @@ Bề mặt agent:
 - [ ] **ENG-0 — Phát hành các bản sửa của Spec 024** (đã merge, chưa phát hành): gỡ `fetch_from_all` và sửa việc
   đăng ký lại từ trong lexicon. Gom vào bản phát hành kế tiếp; bump và tag cần chủ sở hữu duyệt (AGENTS.md §4).
 - [ ] **ENG-10 — `_contiguous_phrase` chỉ đọc `canonical_name`** — nợ nhỏ giữ nguyên từ 09/11, sửa khi chạm tới.
-- [~] **BUG-1 — Phân tích ATTENTION dùng cả bằng chứng đã bị loại** (báo qua `.handoff/` ngày 11/11/2026) — PR #136
+- [~] **BUG-1 — Phân tích ATTENTION dùng cả bằng chứng đã bị loại** (một session khác báo ngày 11/11/2026, khi chạy một mission ATTENTION thật) — PR #136
   mở, chờ review. Kết luận chỉ dựa trên observation không bị loại và không phải CONTEXT_ONLY; thêm
   `analysis_basis` (`PROVISIONAL`/`QUALIFIED`); quyết định của chủ sở hữu ghi ở Spec 011.
 - [~] **BUG-2 — Insight maturity đếm "N topic clusters" trên toàn geo**, không phải cụm của mission
