@@ -239,10 +239,12 @@ Bề mặt agent:
 - [~] **BUG-1 — Phân tích ATTENTION dùng cả bằng chứng đã bị loại** (báo qua `.handoff/` ngày 11/11/2026) — PR #136
   mở, chờ review. Kết luận chỉ dựa trên observation không bị loại và không phải CONTEXT_ONLY; thêm
   `analysis_basis` (`PROVISIONAL`/`QUALIFIED`); quyết định của chủ sở hữu ghi ở Spec 011.
-- [ ] **BUG-2 — Insight maturity đếm "N topic clusters" trên toàn geo**, không phải cụm của mission
-  (`_assess_maturity` dùng `len(clusters)` của `top_clusters_use_case`). Thấy khi kiểm BUG-1; chưa sửa.
+- [~] **BUG-2 — Insight maturity đếm "N topic clusters" trên toàn geo**, không phải cụm của mission
+  (`_assess_maturity` dùng `len(clusters)` của `top_clusters_use_case`) — PR #141 mở ngày 12/11/2026: đếm cụm
+  riêng trong tín hiệu của mission; mission thật giờ ghi 8 cụm thay vì 16.
 - [~] **SPEC-025 — Bộ skill host-browser và Instagram Reels qua host browser** — chủ sở hữu yêu cầu và mở lại Reels
   ngày 11/11/2026. Draft PR #139 có research từ lượt chạy thật, spec và bản nháp skill; chờ bốn câu OQ-1..OQ-4.
+  Lượt chạy lặp (VAL-3 rút gọn, hai lượt mỗi nguồn): Jaccard TikTok 0,71, Threads 0,45; ghi trong `research.md`.
 - [ ] **ENG-2 — Gỡ code connector đã nghỉ** (M): Reels, Google Trends RSS, nhánh Explore và tìm kiếm headless của
   `TikTokPlugin`; xóa test tương ứng và thu hẹp phạm vi coverage SC-004.
   - Giữ giá trị enum `PlatformType` và đường đọc cho dòng cũ.
@@ -258,7 +260,8 @@ Bề mặt agent:
   snapshot cho schema của 41 tool, và re-export tên cũ cho 192 chỗ test đang tham chiếu. Dừng nếu snapshot có diff.
 - [ ] **ENG-6 — Độ bền của host-browser** (S–M):
   - `diagnose_system_health` báo các locale ghi công đã seed so với locale của trang.
-  - Seed mẫu ghi công `en`.
+  - ~~Seed mẫu ghi công `en`.~~ Không cần: từ `tiktok-public-grid-v3` extractor chỉ giữ phần caption và hashtag,
+    nên ngôn ngữ giao diện không còn chặn bản ghi (`docs/USER_GUIDE.md`, migration 038); lượt chạy 11/11 đạt `HEALTHY`.
   - Ticket còn treo khi server khởi động lại trả trạng thái có kiểu `EXPIRED_ON_RESTART`; hết hạn khi truy cập,
     không có janitor chạy nền.
   - Muốn chứng minh trên trang thật cần phiên thật (OWN-3).
