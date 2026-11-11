@@ -169,8 +169,11 @@ class StrategicMarketReasoner:
                     next_step="Read the current-frame Claim Ledger or Gap Report.",
                 ),
             )
-        maturity_stage, maturity_reasons = self._assess_maturity(signals, clusters, geo=mission.geo_code)
-        verified_trends = self._extract_verified_trends(signals, clusters, geo=mission.geo_code)
+        # Every observation stays in the qualified handoff, but no conclusion rests on one judged
+        # excluded or context-only.
+        counted = self.counted_signals(signals, qualification)
+        maturity_stage, maturity_reasons = self._assess_maturity(counted, clusters, geo=mission.geo_code)
+        verified_trends = self._extract_verified_trends(counted, clusters, geo=mission.geo_code)
 
         # One registry per dossier: the same observation keeps one CIT-xx identifier
         # wherever it is cited, so a reader never mistakes one sighting for two.
@@ -182,7 +185,7 @@ class StrategicMarketReasoner:
         surface = resolve_surface(mission.surface)
         opportunities = (
             self._discover_market_opportunities(
-                signals,
+                counted,
                 mission.keywords,
                 geo=mission.geo_code,
                 citation_registry=citation_registry,
@@ -197,7 +200,7 @@ class StrategicMarketReasoner:
 
         insights, actionables = self._synthesize_insights(
             mission,
-            signals,
+            counted,
             opportunities,
             maturity_stage,
             maturity_reasons,
@@ -413,6 +416,28 @@ class StrategicMarketReasoner:
         ChannelHealthStatus.DEGRADED: "Failed during this run; it measured nothing.",
     }
 
+    _NOT_COUNTED = frozenset(
+        {QualificationRelation.EXCLUDED_IRRELEVANT, QualificationRelation.CONTEXT_ONLY}
+    )
+
+    @classmethod
+    def _counts(cls, signal: TrendSignal, qualification: QualificationContext) -> bool:
+        judged = qualification.judgment_of(signal.observation_id)
+        return judged is None or judged.relation not in cls._NOT_COUNTED
+
+    @classmethod
+    def counted_signals(
+        cls, signals: List[TrendSignal], qualification: Optional[QualificationContext]
+    ) -> List[TrendSignal]:
+        """The observations an Attention conclusion may rest on.
+
+        One judged excluded or context-only never counts. An unassessed one still counts until
+        qualification completes, and the caller then labels the analysis provisional.
+        """
+        if qualification is None:
+            return list(signals)
+        return [signal for signal in signals if cls._counts(signal, qualification)]
+
     def _channel_summaries(
         self,
         mission: ResearchMission,
@@ -443,6 +468,8 @@ class StrategicMarketReasoner:
             # A Market audit cites only qualified evidence, so no citation anywhere in a Market
             # report can be one its conclusions were not allowed to rest on.
             if market and not qualification.support_of(signal.observation_id):
+                continue
+            if not market and not self._counts(signal, qualification):
                 continue
             by_surface[self._connector_surface_of(signal)].append(signal)
         summaries: List[ChannelDataSummary] = []

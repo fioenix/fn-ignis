@@ -1043,3 +1043,58 @@ def test_select_handoff_candidates_never_returns_a_least_bad_cluster():
     assert select_handoff_candidates({}) == []
     one = _qualified("SUPPLY")
     assert select_handoff_candidates({"c1": [one], "c2": [_qualified("SUPPLY")]}) == []
+
+
+def _cited_ids(report):
+    statements = list(report.strategic_insights) + list(report.actionable_takeaways)
+    return {
+        str(c.observation_id)
+        for item in statements
+        for c in (getattr(item, "citations", None) or [])
+    }
+
+
+def test_attention_conclusions_never_rest_on_excluded_or_context_only_evidence():
+    cluster = uuid4()
+    drama = _attention_signal("Phim ngắn tổng tài tập 3 AI cho cửa hàng bán lẻ", cluster)
+    adjacent = _attention_signal("AI tạo landing page bán hàng", cluster)
+    drama.metric_value, adjacent.metric_value = 407100.0, 165100.0
+    supported = [
+        _attention_signal("Chủ tiệm tạp hóa dùng AI quản lý kho", cluster),
+        _attention_signal("Review AI cho cửa hàng bán lẻ sau 3 tháng", cluster),
+    ]
+    signals = [drama, adjacent, *supported]
+    judgments = [
+        _judged(drama, "EXCLUDED_IRRELEVANT", "FICTION_NEWS_OR_ENTERTAINMENT"),
+        _judged(adjacent, "CONTEXT_ONLY", "ADJACENT_ONLY"),
+        *[_judged(s, "QUALIFIED_SUPPORT", "DIRECT_TO_FRAME") for s in supported],
+    ]
+
+    report = _attention_report(signals, judgments)
+
+    cited = _cited_ids(report)
+    assert cited, "the fixture must produce cited statements"
+    assert str(drama.observation_id) not in cited, "an excluded observation is never cited"
+    assert str(adjacent.observation_id) not in cited, "context-only evidence is never cited"
+    assert cited <= {str(s.observation_id) for s in supported}
+
+
+def test_attention_keeps_unassessed_evidence_until_qualification_completes():
+    cluster = uuid4()
+    judged, pending = _attention_signal("AI cho cửa hàng bán lẻ", cluster), _attention_signal(
+        "Phần mềm AI bán hàng cho shop nhỏ", cluster
+    )
+    report = _attention_report(
+        [judged, pending], [_judged(judged, "QUALIFIED_SUPPORT", "DIRECT_TO_FRAME")]
+    )
+
+    counted = StrategicMarketReasoner.counted_signals(
+        [judged, pending],
+        QualificationContext.build(
+            [judged.observation_id, pending.observation_id],
+            [_judged(judged, "QUALIFIED_SUPPORT", "DIRECT_TO_FRAME")],
+            probe_outcomes=(),
+        ),
+    )
+    assert {s.observation_id for s in counted} == {judged.observation_id, pending.observation_id}
+    assert report.handoff_status == HandoffStatus.QUALIFICATION_REQUIRED.value
