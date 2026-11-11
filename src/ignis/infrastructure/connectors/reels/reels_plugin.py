@@ -172,16 +172,6 @@ class ReelsPlugin(IConnectorPlugin):
         tier, _ = await self.resolve_auth_tier()
         return IngestRuntime.HTTP_API if tier == "oauth2" else IngestRuntime.BROWSER
 
-    @property
-    def default_feed_scope(self) -> IngressScope:
-        """The Graph feed is `/{ig-user-id}/media`, the authenticated account's own media.
-
-        The browser path reads the Reels explore surface, which is public but personalised; both
-        are therefore treated as account-scoped and kept out of market passes, where the hashtag
-        probe in `search_signals` is used instead.
-        """
-        return IngressScope.OWN_PROFILE
-
     async def fetch_signals(
         self,
         geo: GeoCode = GeoCode.VN,

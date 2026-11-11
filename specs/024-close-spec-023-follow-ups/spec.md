@@ -27,6 +27,8 @@ untargeted pass is gone while every gate that protects live collection is still 
 - Q: Does removing `fetch_from_all` need a release? → A: No. It has no caller and no tool reaches it; no version bump in this feature (agent decided; basis: AGENTS.md section 4).
 - Q: Does the connector port lose its untargeted feed method? → A: Only members left with no reader after the removal go, and only if no live path or connector contract needs them; planning maps each one (agent decided; basis: Proportion).
 
+- Q: Which port members remain after removing untargeted ingress? → A: Remove `feed_yields_candidate_topics` and `default_feed_scope` with their overrides because only the retired pass and its diagram-routing tests read them. Keep `fetch_signals` and all implementations because the abstract port and default `search_signals` still require them; keep the live scope/search helpers unchanged (agent decided; basis: source and test reader trace).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Guidance and backends agree with the code (Priority: P1)
