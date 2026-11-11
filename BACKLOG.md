@@ -31,10 +31,10 @@ thứ tự**, chưa phải cam kết; các quyết định 21/10 và 09/11 giữ
      như Spec 016 đã chốt tạm (agent quyết, chờ chủ sở hữu xác nhận). Quyết định 21/10 đưa "giá trị ở độ tuổi
      cố định" làm ví dụ, và quy tắc hiện tại vẫn để các item có thời gian phơi khác nhau.
    - `_indicator` cộng thẳng tổng view; `_change` trả phần trăm không kèm cỡ mẫu (`watchlist_period.py:324-399`).
-   - **Code lệch spec:** Spec 016 ghi item không có quan sát hợp lệ thì "listed but not counted"
-     (`spec.md:74-75`). `_placed` (`watchlist_period.py:315-321`) lại lấy lần thu đầu tiên làm mốc đếm cho item
-     không có ngày đăng. Store dev có 32/32 nguồn TikTok và 5/5 nguồn Reels không có `published_at`, nên view
-     trọn đời của video cũ bị tính như volume mới của kỳ.
+   - Item không có ngày đăng lấy lần thu đầu tiên làm mốc đếm (`watchlist_period.py:315-321`). Spec 016 đã
+     chốt đúng như vậy (Clarifications, `spec.md:111-113`, agent quyết); bản đầu của mục này ghi nhầm là
+     code lệch spec, đã sửa ngày 11/11/2026. Store dev có 32/32 nguồn TikTok và 5/5 nguồn Reels không có
+     `published_at`, nên view trọn đời của video cũ vẫn bị tính như volume mới của kỳ.
    - `_terms` không chuẩn hóa NFC; thuật ngữ "mới" chỉ cần vắng ở kỳ trước.
    - Chỉ số golden set chỉ đo tỉ lệ liên quan (precision). T019 của Spec 016 nâng tỉ lệ trong khi số item
      liên quan giảm (G4: 30 → 22).
@@ -130,11 +130,12 @@ Kiểm chứng giá trị:
 
 Sửa phép đo:
 
-- [ ] **MEA-1 — Sửa code cho khớp Spec 016: item không có ngày đăng thì liệt kê nhưng không đếm** (S, sửa lỗi
-  theo spec đã có). `_placed` không còn lấy lần thu đầu làm mốc đếm counter. Trục `created` của TikTok ghi "không có
-  ngày đăng" cho tới khi connector lấy được ngày. Chưa kiểm: video id của TikTok có mã hóa thời điểm đăng không.
-  Đạt: không ô nào trên trục `created` cộng counter của item không có ngày đăng. Làm trước VAL-2.
-- [ ] **MEA-2 — Chuẩn hóa NFC trước khi tách token** trong `_terms` và dedupe (S, agent tự quyết).
+- [ ] **MEA-1 — Lấy ngày đăng TikTok từ video id** (S, chuyển thành câu hỏi OQ-4 của Spec 025). Video id TikTok
+  mã hóa giây đăng ở 32 bit cao; bốn id mẫu giải ra 06/2024–09/2026, chưa đối chiếu với ngày hiển thị trên trang.
+  Có ngày đăng thì item TikTok không còn lấy lần thu đầu làm mốc, và view trọn đời của video cũ thôi bị tính là
+  volume mới. Đổi quy tắc đếm item không có ngày đăng là sửa Spec 016, nên chờ OWN-6. Làm trước VAL-2.
+- [~] **MEA-2 — Chuẩn hóa NFC trước khi tách token** trong `_terms` và dedupe (S, agent tự quyết) — PR #137 mở
+  ngày 11/11/2026, chờ review: văn bản, từ khóa và tên khai báo cùng đi qua một bước NFC rồi casefold.
 - [ ] **MEA-3 — Cỡ mẫu và độ bất định trên từng ô** (M). Mỗi ô có n, trung vị và tổng đã cắt đuôi; dưới một
   sàn đặt trong `runtime_configs` thì gắn lý do `low_n`. Guide không bao giờ hiện phần trăm thay đổi mà không
   kèm n. Hủy phần khoảng tin cậy nếu khoảng đó phủ 0 ở hơn 90% ô golden set; khi đó chỉ hiện số đếm.
@@ -198,7 +199,8 @@ Bề mặt agent:
   và resource (M). Guide nói trước rằng kỳ chưa kết thúc thì bị từ chối, và giới thiệu `get_mission_relay_snapshot`
   làm view cho ngày đầu. Đóng gói `ignis-collect` và `ignis-analyze` thành MCP prompt, thay đường dẫn `specs/`
   bằng trích đoạn đóng gói kèm theo. Kiểm Claude Code có tìm thấy `.agents/skills` không.
-- [ ] **AGX-5 — `USER_GUIDE.md` mở đầu bằng "10 phút đầu tiên"** (S). Chuyển lịch sử migration sang tài liệu
+- [~] **AGX-5 — `USER_GUIDE.md` mở đầu bằng "10 phút đầu tiên"** (S) — PR #138 mở ngày 11/11/2026, chờ review;
+  lịch sử migration giữ nguyên dưới đề mục riêng thay vì chuyển sang tài liệu khác. Chuyển lịch sử migration sang tài liệu
   riêng. Bootstrap in ra connector nào cần biến môi trường nào, chỉ in tên biến.
 - [ ] **AGX-6 — Một envelope kết quả có kiểu** (M, viết thành spec): `status`, `reason_code`, `next_actions` và
   `data`; đặt `isError` cho các lỗi; công bố danh sách enum của các trạng thái. Đây là đổi hình dạng kết quả trả
@@ -211,7 +213,8 @@ Bề mặt agent:
 
 ### Tuân thủ — song song, không chờ pilot
 
-- [ ] **CMP-1 — Ghi căn cứ pháp lý theo Luật 91/2025/QH15 và Nghị định 356/2025/NĐ-CP** (S, cộng rà soát pháp lý
+- [~] **CMP-1 — Ghi căn cứ pháp lý theo Luật 91/2025/QH15 và Nghị định 356/2025/NĐ-CP** — draft ADR `Proposed`
+  ở PR #140 (11/11/2026), chờ chủ sở hữu và luật sư đọc; (S, cộng rà soát pháp lý
   bên ngoài). Ánh xạ từng loại xử lý (văn bản bình luận, marker theo mission, tài khoản khai báo) tới mục đích,
   căn cứ và điều kiện xóa theo Điều 14. Trả lời hai câu chưa kiểm:
   - Nội dung đã công khai có cần đồng ý không?
@@ -233,6 +236,13 @@ Bề mặt agent:
 - [ ] **ENG-0 — Phát hành các bản sửa của Spec 024** (đã merge, chưa phát hành): gỡ `fetch_from_all` và sửa việc
   đăng ký lại từ trong lexicon. Gom vào bản phát hành kế tiếp; bump và tag cần chủ sở hữu duyệt (AGENTS.md §4).
 - [ ] **ENG-10 — `_contiguous_phrase` chỉ đọc `canonical_name`** — nợ nhỏ giữ nguyên từ 09/11, sửa khi chạm tới.
+- [~] **BUG-1 — Phân tích ATTENTION dùng cả bằng chứng đã bị loại** (báo qua `.handoff/` ngày 11/11/2026) — PR #136
+  mở, chờ review. Kết luận chỉ dựa trên observation không bị loại và không phải CONTEXT_ONLY; thêm
+  `analysis_basis` (`PROVISIONAL`/`QUALIFIED`); quyết định của chủ sở hữu ghi ở Spec 011.
+- [ ] **BUG-2 — Insight maturity đếm "N topic clusters" trên toàn geo**, không phải cụm của mission
+  (`_assess_maturity` dùng `len(clusters)` của `top_clusters_use_case`). Thấy khi kiểm BUG-1; chưa sửa.
+- [~] **SPEC-025 — Bộ skill host-browser và Instagram Reels qua host browser** — chủ sở hữu yêu cầu và mở lại Reels
+  ngày 11/11/2026. Draft PR #139 có research từ lượt chạy thật, spec và bản nháp skill; chờ bốn câu OQ-1..OQ-4.
 - [ ] **ENG-2 — Gỡ code connector đã nghỉ** (M): Reels, Google Trends RSS, nhánh Explore và tìm kiếm headless của
   `TikTokPlugin`; xóa test tương ứng và thu hẹp phạm vi coverage SC-004.
   - Giữ giá trị enum `PlatformType` và đường đọc cho dòng cũ.
@@ -252,9 +262,9 @@ Bề mặt agent:
   - Ticket còn treo khi server khởi động lại trả trạng thái có kiểu `EXPIRED_ON_RESTART`; hết hạn khi truy cập,
     không có janitor chạy nền.
   - Muốn chứng minh trên trang thật cần phiên thật (OWN-3).
-- [ ] **ENG-7 — Test chống lệch manifest** (S): `hermes_manifest.json`, `.hermes/tools.json` và `server.json` phải
-  khớp tên tool và phiên bản của `list_tools()`. Ghi trong `server.json` rằng host-browser và store bền cần
-  volume hoặc cài cục bộ.
+- [x] **ENG-7 — Test chống lệch manifest** — đã có sẵn, đóng 11/11/2026: `tests/unit/test_tool_manifests_drift.py`
+  kiểm `hermes_manifest.json`, `.hermes/tools.json` và `openclaw.json` khớp 41 tool của `list_tools()`;
+  `test_public_distribution_contract.py` kiểm `server.json` ghi SQLite mặc định là tạm. Chuyên gia đánh giá thiếu.
 - [ ] **ENG-8 — Quyết định về subsystem follow-up** (khoảng 5.700 dòng, bị từ chối mặc định): giữ đóng băng và chỉ
   bảo trì nhánh SQLite, hoặc gỡ mà vẫn giữ signature `execute_mission_follow_up`. Gỡ năng lực cần chủ sở hữu.
 - [ ] **ENG-9 — Bộ test hợp đồng chung cho hai repository** (M–L), chỉ làm nếu ENG-3 chọn (a) hoặc (b). Không
