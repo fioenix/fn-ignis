@@ -19,4 +19,4 @@ Local parity evidence: SQLite passes; PostgreSQL RED and GREEN are unobserved lo
 ## Phase 3: Acceptance
 
 - [x] T007 Run every touched module, `tests/unit/test_public_mcp_contract.py`, `tests/unit/test_repo_conventions.py`, `tests/unit/test_tool_manifests_drift.py`, and `ruff check src/ tests/`; record results in `.handoff/024-verification.md`.
-- [ ] T008 Close the `fetch_from_all` debt in `BACKLOG.md`, keeping full Vietnamese diacritics and the released banner wording unchanged.
+- [x] T008 Close the `fetch_from_all` debt in `BACKLOG.md`, keeping full Vietnamese diacritics and the released banner wording unchanged.

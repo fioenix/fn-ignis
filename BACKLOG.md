@@ -86,9 +86,14 @@ Nợ nhỏ giữ nguyên, sửa khi chạm tới, không lên lịch:
 
 - [x] `son`/`kem` mơ hồ trong taxonomy `beauty` — đóng 10/11/2026: seed không có hai từ đơn này, và Spec 021 đã bỏ taxonomy.
 - [ ] `_contiguous_phrase` chỉ đọc `canonical_name` (nhãn xuất hiện trong báo cáo Attention).
-- [ ] `ConnectorRegistry.fetch_from_all` không còn đường gọi từ tool sau Spec 023. Giữ lại vì sáu file kiểm thử unit
-  vẫn chứng minh các hàng rào loại nội dung của chính người vận hành, giữ ngôn ngữ nguồn và trần request hằng
-  ngày qua hàm này. Cần chuyển các phép thử đó sang đường mission đang dùng trước khi xóa mã thừa.
+- [x] `ConnectorRegistry.fetch_from_all` — đã dọn trên nhánh Spec 024 ngày 11/11/2026, chưa merge.
+  Đã chuyển các phép thử loại nội dung của chính người vận hành, giữ ngôn ngữ nguồn, trần request hằng ngày,
+  cô lập lỗi và từ chối nguồn đã ngừng sang `search_with_outcomes` trước khi xóa mã cũ. Các phép thử chỉ dành
+  cho đường khám phá hai tầng đã được bỏ và ghi rõ lý do trong commit; các hàng rào trên đường đang dùng vẫn được giữ.
+- [x] Đăng ký lại từ trong `market_lexicons` — đã sửa trên nhánh Spec 024 ngày 11/11/2026, chưa merge.
+  PostgreSQL cập nhật `category` và `created_by` khi trùng miền và từ, giống SQLite; dòng do người vận hành
+  đăng ký lại không còn thuộc `system`. Kiểm thử SQLite đã qua; PostgreSQL chờ CI, chưa chạy cục bộ.
+  Đã sửa mô tả `list_domain_lexicons` và tạo lại hai catalog Hermes; vẫn giữ nguyên 41 tool cùng tên và tham số.
 
 Đóng sau khi kiểm code 09/11/2026:
 
