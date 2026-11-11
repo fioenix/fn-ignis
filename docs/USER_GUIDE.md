@@ -12,6 +12,24 @@ diagnostic result for each connector; a configured client or synthetic check is 
 live social access. Supply credentials or browser sessions only for the exact source and
 research task you authorize. Never place a secret in a prompt, command transcript, or report.
 
+### First ten minutes
+
+1. Run `./scripts/bootstrap.sh` and restart your MCP client so it loads `ignis-mcp`.
+2. Ask your agent to call `diagnose_system_health` and `verify_connectors_health`. A connector
+   reported unavailable stays unavailable until you supply its credential or browser session.
+3. Run one tactical probe. With `YOUTUBE_API_KEY` set, ask for a YouTube search on one keyword.
+   Without it, ask for a TikTok or Threads search through your own signed-in Chrome: the agent calls
+   `prepare_host_browser_search`, opens the local relay page, opens the approved search tab from it,
+   runs the returned tab script once in that tab, and calls `submit_host_browser_search`. A tactical
+   probe creates no mission and returns observations, never a market conclusion.
+4. To follow a topic over time, save a watchlist (`save_watchlist`) and start one run
+   (`start_watchlist_run`). A period view needs a complete period: a day view is ready the next day,
+   a week view after the week ends on Sunday (see §2, "Follow a watchlist").
+5. For a market decision question, read §2 first: it needs a confirmed Market Brief before any
+   collection, and an unsupported verdict ends in a Gap Report.
+
+### Upgrading an existing store
+
 The source migration chain ends at `sql/040_retire_market_domain_vocabulary.sql`. Migration 040
 deletes only `system` rows in the seven retired market vocabulary domains; operator rows and stored
 evidence remain unchanged. SQLite applies it at bootstrap; existing PostgreSQL stores apply only

@@ -12,6 +12,24 @@ việc client đã được cấu hình hoặc kiểm tra tổng hợp đạt kh
 truy cập được. Chỉ cấp credentials hoặc phiên browser cho đúng nguồn và nhiệm vụ đã cho phép.
 Không đặt bí mật trong prompt, transcript lệnh hay báo cáo.
 
+### Mười phút đầu tiên
+
+1. Chạy `./scripts/bootstrap.sh`, rồi khởi động lại MCP client để nó nạp `ignis-mcp`.
+2. Nhờ agent gọi `diagnose_system_health` và `verify_connectors_health`. Connector nào báo không khả
+   dụng thì vẫn không khả dụng cho tới khi bạn cấp credential hoặc phiên browser cho nó.
+3. Chạy thử một probe tactical. Nếu đã đặt `YOUTUBE_API_KEY`, hãy nhờ agent tìm một từ khóa trên YouTube.
+   Nếu chưa có, hãy nhờ agent tìm trên TikTok hoặc Threads qua chính Chrome đang đăng nhập của bạn: agent gọi
+   `prepare_host_browser_search`, mở trang relay cục bộ, từ đó mở tab tìm kiếm đã duyệt, chạy một lần tab
+   script mà bước prepare trả về trong tab đó, rồi gọi `submit_host_browser_search`. Probe tactical không tạo nhiệm
+   vụ và chỉ trả về observation, không bao giờ trả về kết luận thị trường.
+4. Muốn theo dõi một chủ đề theo thời gian thì lưu watchlist (`save_watchlist`) và chạy một lượt
+   (`start_watchlist_run`). Period view chỉ có khi kỳ đã trọn: view theo ngày có từ hôm sau, view theo
+   tuần có sau khi tuần kết thúc vào Chủ nhật (xem mục 2, "Theo dõi một watchlist").
+5. Với câu hỏi quyết định thị trường, đọc mục 2 trước: cần một Market Brief đã xác nhận trước khi thu
+   thập, và verdict nào thiếu căn cứ thì kết thúc bằng Gap Report.
+
+### Nâng cấp kho dữ liệu hiện có
+
 Chuỗi migration trong mã nguồn kết thúc ở `sql/040_retire_market_domain_vocabulary.sql`. Migration
 040 chỉ xóa các dòng `system` thuộc bảy miền từ vựng thị trường đã bỏ; giữ nguyên dòng do người vận
 hành thêm và bằng chứng đã lưu. SQLite áp dụng khi khởi tạo; kho PostgreSQL hiện hữu chỉ áp dụng
