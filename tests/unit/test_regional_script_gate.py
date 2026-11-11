@@ -55,7 +55,8 @@ async def test_an_agent_probe_fetches_foreign_language_content_freely():
     registry = ConnectorPluginRegistry(repository=repo)
     registry.register(MultilingualPlugin())
 
-    signals = await registry.search_across_all(keywords=["skincare"], geo=GeoCode.VN)
+    result = await registry.search_with_outcomes(keywords=["skincare"], geo=GeoCode.VN)
+    signals = result.signals
 
     assert len(signals) == 3, (
         "An agent probe must return what it found, whatever language it is in: "
@@ -97,6 +98,9 @@ async def test_a_requested_pass_preserves_the_languages_it_found():
                 for i, title in enumerate(["giá vàng hôm nay", "K-beauty 스킨케어 루틴"])
             ]
 
+        async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20):
+            return await self.fetch_signals(geo=geo, timeframe=timeframe, limit=limit)
+
     def _registry():
         repo = AsyncMock()
         repo.log_event = AsyncMock()
@@ -106,9 +110,10 @@ async def test_a_requested_pass_preserves_the_languages_it_found():
         registry.register(MixedLanguageFeed())
         return registry
 
-    requested = await _registry().fetch_from_all(
-        geo=GeoCode.VN, scope=IngressScope.PUBLIC_MARKET
+    result = await _registry().search_with_outcomes(
+        keywords=["skincare"], geo=GeoCode.VN, scope=IngressScope.PUBLIC_MARKET
     )
+    requested = result.signals
     assert len(requested) == 2, (
         f"An explicitly requested pass keeps what it found: {[s.raw_title for s in requested]}"
     )

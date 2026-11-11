@@ -2208,7 +2208,9 @@ class PostgresTimescaleRepository(ITrendRepository):
                                 """
                                 INSERT INTO market_lexicons (domain, term, category, created_by)
                                 VALUES (%s, %s, %s, %s)
-                                ON CONFLICT (domain, term) DO NOTHING;
+                                ON CONFLICT (domain, term) DO UPDATE SET
+                                    category = EXCLUDED.category,
+                                    created_by = EXCLUDED.created_by;
                                 """,
                                 (clean_domain, clean_term, category, created_by)
                             )

@@ -117,32 +117,6 @@ class IConnectorPlugin(ABC):
         """Version label for provenance when the upstream surface exposes no schema version."""
         return "unversioned"
 
-    @property
-    def feed_yields_candidate_topics(self) -> bool:
-        """Whether an untargeted `fetch_signals` returns a surface that can discover topics.
-
-        Two different kinds of feed sit behind this method. A discovery surface reports what
-        people are asking about right now (trending searches, trending hashtags), so pulling it
-        untargeted is how a pass finds candidate topics at all. A popularity chart ranks whatever
-        happens to be popular on the platform regardless of subject; pulled untargeted it returns
-        national entertainment in volume, drowns every other connector, and produces clusters no
-        other platform can corroborate. A connector whose only untargeted feed is such a chart
-        MUST return False, and the registry then reaches for its keyword probe instead.
-        """
-        return True
-
-    @property
-    def default_feed_scope(self) -> IngressScope:
-        """Whose content `fetch_signals` returns when no scope is requested.
-
-        Most connectors read a public surface. A connector whose cheapest or only feed is the
-        authenticated account's own timeline (Threads `/me/threads`, Instagram `/{ig-user}/media`,
-        a personalised home feed) MUST declare `IngressScope.OWN_PROFILE` here. The registry then
-        keeps that feed out of market-listening passes and reaches for the connector's keyword
-        probe instead, so the operator's own posts never land in demand analysis by accident.
-        """
-        return IngressScope.PUBLIC_MARKET
-
     @abstractmethod
     async def fetch_signals(
         self,

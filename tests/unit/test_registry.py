@@ -86,7 +86,8 @@ class GooglePlugin(_BasePlugin):
 
 
 class FailingGridPlugin(VideoGridPlugin):
-    async def fetch_signals(self, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=50) -> List[TrendSignal]:
+    async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20) -> List[TrendSignal]:
+        self.search_calls.append(list(keywords))
         raise ConnectorExecutionException("boom")
 
 
@@ -94,10 +95,6 @@ class TriggerAwareVideoGrid(VideoGridPlugin):
     def __init__(self):
         super().__init__()
         self.triggers = []
-
-    @property
-    def feed_yields_candidate_topics(self):
-        return False
 
     async def search_signals(
         self,
@@ -174,19 +171,6 @@ def test_duplicate_plugin_id_warns_before_replacing(caplog):
 
 
 @pytest.mark.asyncio
-async def test_fetch_from_all_invokes_every_registered_plugin():
-    grid, creative, google = VideoGridPlugin(), CreativeCenterPlugin(), GooglePlugin()
-    registry = _registry(grid, creative, google)
-
-    signals = await registry.fetch_from_all(geo=GeoCode.VN, timeframe=Timeframe.LAST_24H)
-
-    assert grid.fetch_calls == 1
-    assert creative.fetch_calls == 1
-    assert google.fetch_calls == 1
-    assert len(signals) == 3
-
-
-@pytest.mark.asyncio
 async def test_search_across_all_reaches_the_tiktok_video_grid():
     """The exact regression: keyword search on TikTok must hit the video grid probe."""
     grid, creative, google = VideoGridPlugin(), CreativeCenterPlugin(), GooglePlugin()
@@ -202,13 +186,13 @@ async def test_search_across_all_reaches_the_tiktok_video_grid():
 
 
 @pytest.mark.asyncio
-async def test_fetch_from_all_rejects_scheduled_identity_before_probing():
+async def test_search_with_outcomes_rejects_scheduled_identity_before_probing():
     plugin = TriggerAwareVideoGrid()
     registry = _registry(plugin)
 
     with pytest.raises(ValueError, match="explicit requested"):
-        await registry.fetch_from_all(
-            seed_keywords=["ai agent"],
+        await registry.search_with_outcomes(
+            keywords=["ai agent"],
             trigger="scheduled",
         )
 
@@ -287,25 +271,29 @@ def test_health_status_reports_every_plugin_independently():
 
 @pytest.mark.asyncio
 async def test_circuit_breaker_isolation_between_plugins_on_one_platform():
+    class HealthySibling(VideoGridPlugin):
+        _plugin_id = "tiktok_healthy_sibling"
+
     repo = AsyncMock()
-    failing, creative = FailingGridPlugin(), CreativeCenterPlugin()
-    registry = _registry(failing, creative, repository=repo)
+    repo.reserve_connector_requests.side_effect = NotImplementedError
+    failing, sibling = FailingGridPlugin(), HealthySibling()
+    registry = _registry(failing, sibling, repository=repo)
 
     for _ in range(3):
-        await registry.fetch_from_all()
+        await registry.search_with_outcomes(keywords=["ai agent"])
 
     status = registry.get_health_status()
     assert status["tiktok_video_grid"]["circuit_state"] == "OPEN"
     assert status["tiktok_video_grid"]["consecutive_failures"] == 3
+    assert status["tiktok_healthy_sibling"]["circuit_state"] == "CLOSED"
+    assert sibling.search_calls == [["ai agent"]] * 3
+    calls_before_open_pass = len(failing.search_calls)
+    assert calls_before_open_pass >= 3
 
-    # The healthy sibling on the same platform must stay CLOSED and keep ingesting.
-    assert status["tiktok_creative_center"]["circuit_state"] == "CLOSED"
-    assert creative.fetch_calls == 3
-
-    # A tripped breaker only silences its own plugin.
-    signals = await registry.fetch_from_all()
-    assert len(signals) == 1
-    assert creative.fetch_calls == 4
+    result = await registry.search_with_outcomes(keywords=["ai agent"])
+    assert len(result.signals) == 1
+    assert sibling.search_calls == [["ai agent"]] * 4
+    assert len(failing.search_calls) == calls_before_open_pass, "an open circuit must skip the connector"
 
 
 @pytest.mark.asyncio
@@ -676,7 +664,6 @@ async def test_a_browser_surface_that_captured_nothing_is_not_a_measured_empty(p
     assert outcome.status in (ChannelHealthStatus.DEGRADED, ChannelHealthStatus.AUTH_REQUIRED)
 
 
-
 @pytest.mark.asyncio
 async def test_an_empty_answer_without_an_attestation_is_degraded_not_measured():
     result = await _registry(SilentYouTubePlugin()).search_with_outcomes(keywords=["ai agent"])
@@ -836,8 +823,7 @@ async def test_retired_threads_requirement_resolution_cannot_admit_browser_autho
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("operation", ["fetch", "search"])
-async def test_private_registry_collection_seams_refuse_retired_threads_without_breaker_or_ceiling(operation):
+async def test_private_registry_search_refuses_retired_threads_without_breaker_or_ceiling():
     from ignis.domain.exceptions import ConnectorCapabilityUnavailableException
     plugin = ThreadsPlugin()
     plugin.fetch_signals = AsyncMock(side_effect=AssertionError("Retired fetch dispatch"))
@@ -846,10 +832,7 @@ async def test_private_registry_collection_seams_refuse_retired_threads_without_
     registry._daily_ceiling_note = AsyncMock(side_effect=AssertionError("Retired request accounting"))
     breaker = registry._breakers["threads"]
     with pytest.raises(ConnectorCapabilityUnavailableException, match="HOST_BROWSER_REQUIRED"):
-        if operation == "fetch":
-            await registry._safe_fetch(plugin, breaker, GeoCode.VN, Timeframe.LAST_7D)
-        else:
-            await registry._safe_search(plugin, breaker, ["synthetic"], GeoCode.VN, Timeframe.LAST_7D)
+        await registry._safe_search(plugin, breaker, ["synthetic"], GeoCode.VN, Timeframe.LAST_7D)
     assert breaker.failure_count == 0
     registry._daily_ceiling_note.assert_not_awaited()
     plugin.fetch_signals.assert_not_awaited()

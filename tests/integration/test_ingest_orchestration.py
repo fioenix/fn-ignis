@@ -31,6 +31,9 @@ class MockSuccessPlugin(IConnectorPlugin):
             )
         ]
 
+    async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20):
+        return await self.fetch_signals(geo=geo, timeframe=timeframe, limit=limit)
+
 
 class MockFailingPlugin(IConnectorPlugin):
     @property
@@ -47,6 +50,9 @@ class MockFailingPlugin(IConnectorPlugin):
     async def fetch_signals(self, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=50) -> List[TrendSignal]:
         raise ConnectorExecutionException("Network timeout or quota error")
 
+    async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20):
+        return await self.fetch_signals(geo=geo, timeframe=timeframe, limit=limit)
+
 
 @pytest.mark.asyncio
 async def test_ingest_orchestration_with_error_isolation():
@@ -54,7 +60,8 @@ async def test_ingest_orchestration_with_error_isolation():
     registry.register(MockSuccessPlugin())
     registry.register(MockFailingPlugin())
 
-    signals = await registry.fetch_from_all(geo=GeoCode.VN)
+    result = await registry.search_with_outcomes(keywords=["synthetic"], geo=GeoCode.VN)
+    signals = result.signals
 
     assert len(signals) == 1
     assert signals[0].platform == PlatformType.GOOGLE_TRENDS
@@ -68,7 +75,8 @@ async def test_circuit_breaker_tripping_on_repeated_failures():
 
     # 3 failures -> Circuit Breaker trips to OPEN
     for _ in range(3):
-        signals = await registry.fetch_from_all()
+        result = await registry.search_with_outcomes(keywords=["synthetic"])
+        signals = result.signals
         assert len(signals) == 0
 
     breaker = registry._breakers[PlatformType.YOUTUBE]
@@ -84,9 +92,14 @@ async def test_retired_threads_does_not_dispatch_or_break_other_ingress():
     registry = ConnectorPluginRegistry()
     registry.register(MockSuccessPlugin())
     registry.register(threads)
-    signals = await registry.fetch_from_all()
+    result = await registry.search_with_outcomes(keywords=["synthetic"])
+    signals = result.signals
     assert len(signals) == 1
-    assert registry.last_pass_report["unavailable_surfaces"] == {"threads": "HOST_BROWSER_REQUIRED"}
+    assert len(result.outcomes) == 2
+    outcome = next(row for row in result.outcomes if row.connector_surface == "threads")
+    assert outcome.status.value == "DEGRADED"
+    assert outcome.note == threads.UNAVAILABLE_REASON
+    assert outcome.signals_collected == 0 and outcome.queried_keywords == ()
     assert signals[0].platform is PlatformType.GOOGLE_TRENDS
     threads.search_signals.assert_not_awaited()
     threads._auth_manager.get_access_token.assert_not_awaited()

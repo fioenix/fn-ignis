@@ -1,18 +1,4 @@
-"""A market-listening pass must ingest signals about topics, not a national popularity chart.
-
-The headline metric is a cross-platform momentum score, and 40 of its 100 points come from how
-many platforms carry the same topic. That term can only ever fire when the platforms were asked
-about the same subject. These tests pin the ingress contract that makes it possible:
-
-  1. A connector declares whether its untargeted feed discovers topics or merely ranks whatever
-     is popular. A popularity chart is never pulled untargeted during a public pass.
-  2. Topics discovered in the pass are fanned out as keyword probes to the other connectors, so
-     signals about one subject arrive from several platforms.
-  3. The keyword fan-out stays inside a stated API unit budget.
-
-They are written against the observable outcome rather than the call sequence: what matters is
-that one pass yields clusters spanning more than one platform.
-"""
+"""Requested keyword collection preserves content and cross-platform clustering."""
 
 from typing import Dict, List, Optional
 from unittest.mock import AsyncMock
@@ -38,8 +24,8 @@ def _signal(platform: PlatformType, title: str, url: str, keyword: Optional[str]
     )
 
 
-class DiscoveryFeedPlugin(IConnectorPlugin):
-    """Stands in for Google Trends: its feed is a list of what people are searching for."""
+class TopicSearchPlugin(IConnectorPlugin):
+    """A keyword-capable surface returns the requested topics with provenance."""
 
     def __init__(self, topics: List[str]):
         self._topics = topics
@@ -51,7 +37,7 @@ class DiscoveryFeedPlugin(IConnectorPlugin):
 
     @property
     def name(self) -> str:
-        return "Discovery Feed"
+        return "Topic Search"
 
     async def is_healthy(self) -> bool:
         return True
@@ -59,6 +45,10 @@ class DiscoveryFeedPlugin(IConnectorPlugin):
     async def fetch_signals(self, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=50, scope=IngressScope.PUBLIC_MARKET):
         self.fetch_calls += 1
         return [_signal(self.platform, t, f"https://trends.example/{i}") for i, t in enumerate(self._topics)]
+
+    async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20):
+        return [_signal(self.platform, topic, f"https://trends.example/{i}", keyword=topic)
+                for i, topic in enumerate(self._topics) if topic in keywords]
 
 
 class PopularityChartPlugin(IConnectorPlugin):
@@ -81,10 +71,6 @@ class PopularityChartPlugin(IConnectorPlugin):
     @property
     def name(self) -> str:
         return "Popularity Chart"
-
-    @property
-    def feed_yields_candidate_topics(self) -> bool:
-        return False
 
     async def is_healthy(self) -> bool:
         return True
@@ -121,32 +107,16 @@ async def test_public_pass_never_pulls_an_untargeted_popularity_chart():
     repo = _repository(["khoa hoc ai"])
     chart = PopularityChartPlugin(chart=["Bolero remix 2026"], by_keyword={})
     registry = ConnectorPluginRegistry(repository=repo)
-    registry.register(DiscoveryFeedPlugin(["khoa hoc ai"]))
+    registry.register(TopicSearchPlugin(["khoa hoc ai"]))
     registry.register(chart)
 
-    signals = await registry.fetch_from_all(
-        geo=GeoCode.VN, scope=IngressScope.PUBLIC_MARKET, seed_keywords=["khoa hoc ai"]
+    result = await registry.search_with_outcomes(
+        keywords=["khoa hoc ai"], geo=GeoCode.VN, scope=IngressScope.PUBLIC_MARKET
     )
+    signals = result.signals
 
     assert chart.fetch_calls == 0, "A popularity chart must be probed by keyword, never pulled untargeted."
     assert "Bolero remix 2026" not in [s.raw_title for s in signals]
-
-
-@pytest.mark.asyncio
-async def test_topics_discovered_in_the_pass_are_fanned_out_to_the_other_platforms():
-    """Stage 2 asks the remaining connectors about what stage 1 just found."""
-    repo = _repository()
-    chart = PopularityChartPlugin(chart=["Bolero remix 2026"], by_keyword={})
-    registry = ConnectorPluginRegistry(repository=repo)
-    registry.register(DiscoveryFeedPlugin(["dien thoai gap"]))
-    registry.register(chart)
-
-    await registry.fetch_from_all(geo=GeoCode.VN, scope=IngressScope.PUBLIC_MARKET, seed_keywords=[])
-
-    assert "dien thoai gap" in chart.searched_keywords, (
-        "A topic found by the discovery feed must be handed to the keyword-capable connectors, "
-        "otherwise each platform reports on a different subject and no cluster can span two."
-    )
 
 
 @pytest.mark.asyncio
@@ -155,7 +125,7 @@ async def test_one_pass_produces_clusters_that_span_more_than_one_platform():
     topic = "khoa hoc ai"
     repo = _repository([topic])
     registry = ConnectorPluginRegistry(repository=repo)
-    registry.register(DiscoveryFeedPlugin([topic]))
+    registry.register(TopicSearchPlugin([topic]))
     registry.register(
         PopularityChartPlugin(
             chart=["Bolero remix 2026"],
@@ -163,9 +133,10 @@ async def test_one_pass_produces_clusters_that_span_more_than_one_platform():
         )
     )
 
-    signals = await registry.fetch_from_all(
-        geo=GeoCode.VN, scope=IngressScope.PUBLIC_MARKET, seed_keywords=[topic],
+    result = await registry.search_with_outcomes(
+        keywords=[topic], geo=GeoCode.VN, scope=IngressScope.PUBLIC_MARKET,
     )
+    signals = result.signals
     clusters = await SemanticClusterer().cluster_signals(signals)
     spanning = [c for c in clusters if len({s.platform for s in signals if s.cluster_id == c.id}) > 1]
 
@@ -176,66 +147,14 @@ async def test_one_pass_produces_clusters_that_span_more_than_one_platform():
     )
 
 
-@pytest.mark.asyncio
-async def test_keyword_fan_out_stays_within_the_stated_api_unit_budget():
-    """One requested pass must fit inside its explicit keyword budget."""
-    max_probe_keywords = 10
-
-    repo = _repository([f"seed {i}" for i in range(40)])
-    chart = PopularityChartPlugin(chart=[], by_keyword={})
-    registry = ConnectorPluginRegistry(repository=repo)
-    registry.register(DiscoveryFeedPlugin([f"discovered {i}" for i in range(40)]))
-    registry.register(chart)
-
-    await registry.fetch_from_all(
-        geo=GeoCode.VN, seed_keywords=[f"seed {i}" for i in range(40)],
-        max_probe_keywords=max_probe_keywords,
-    )
-
-    assert len(chart.searched_keywords) <= max_probe_keywords, (
-        f"{len(chart.searched_keywords)} keywords probed in one pass; the budget allows "
-        f"{max_probe_keywords}."
-    )
-
-
 def test_retired_ingress_readers_are_absent():
     from pathlib import Path
 
     src = Path(__file__).resolve().parents[2] / "src/ignis"
+    assert not hasattr(ConnectorPluginRegistry, "fetch_from_all")
     assert not (src / "application/use_cases/ingest_trends.py").exists()
     assert not (src / "infrastructure/harness/refinement_orchestrator.py").exists()
     assert '"ingest_use_case"' not in (src / "interfaces/mcp/server.py").read_text()
-
-
-@pytest.mark.asyncio
-async def test_lexicon_seeds_do_not_crowd_out_the_topics_the_pass_discovered():
-    """With as many seeds as the budget allows, stage 1's findings must still get probed.
-
-    This is what a live pass actually did: ten lexicon seeds filled a ten-keyword budget, so the
-    ten topics Google Trends had just reported were collected and then never probed, and stage 2
-    was topic-coupled to the lexicon alone.
-    """
-    max_probe_keywords = 10
-
-    seeds = [f"seed {i}" for i in range(max_probe_keywords)]
-    repo = _repository(seeds)
-    chart = PopularityChartPlugin(chart=[], by_keyword={})
-    registry = ConnectorPluginRegistry(repository=repo)
-    registry.register(DiscoveryFeedPlugin([f"discovered {i}" for i in range(max_probe_keywords)]))
-    registry.register(chart)
-
-    await registry.fetch_from_all(
-        geo=GeoCode.VN, seed_keywords=seeds, max_probe_keywords=max_probe_keywords,
-    )
-
-    probed = chart.searched_keywords
-    assert len(probed) <= max_probe_keywords
-    assert any(kw.startswith("discovered") for kw in probed), (
-        f"Only lexicon seeds were probed: {probed}"
-    )
-    assert any(kw.startswith("seed") for kw in probed), (
-        f"Only discovered topics were probed: {probed}"
-    )
 
 
 class ForeignLanguagePlugin(IConnectorPlugin):
@@ -251,10 +170,6 @@ class ForeignLanguagePlugin(IConnectorPlugin):
     @property
     def name(self) -> str:
         return "Foreign Language Feed"
-
-    @property
-    def feed_yields_candidate_topics(self) -> bool:
-        return False
 
     async def is_healthy(self) -> bool:
         return True
@@ -274,7 +189,7 @@ async def test_a_requested_vn_pass_preserves_foreign_language_results():
     """A geographic probe may find relevant titles in other languages."""
     repo = _repository(["mau toc"])
     registry = ConnectorPluginRegistry(repository=repo)
-    registry.register(DiscoveryFeedPlugin(["mau toc"]))
+    registry.register(TopicSearchPlugin(["mau toc"]))
     registry.register(
         ForeignLanguagePlugin(
             [
@@ -285,9 +200,10 @@ async def test_a_requested_vn_pass_preserves_foreign_language_results():
         )
     )
 
-    signals = await registry.fetch_from_all(
-        geo=GeoCode.VN, scope=IngressScope.PUBLIC_MARKET, seed_keywords=["mau toc"]
+    result = await registry.search_with_outcomes(
+        keywords=["mau toc"], geo=GeoCode.VN, scope=IngressScope.PUBLIC_MARKET
     )
+    signals = result.signals
 
     titles = [s.raw_title for s in signals]
     assert "Nhuom mau toc tai nha khong can den salon" in titles
@@ -296,54 +212,11 @@ async def test_a_requested_vn_pass_preserves_foreign_language_results():
 
 
 @pytest.mark.asyncio
-async def test_a_discovered_topic_joins_the_cluster_its_own_keyword_produced():
-    """The demand-side signal must sit in the topic it seeded, not beside it.
-
-    Google Trends reports what a region is searching for, which is the demand half of the
-    Opportunity Index. Its own signal carries no probe keyword, so without stamping it the
-    discovery signal and every signal it retrieved end up in different clusters and the topic
-    looks single-platform.
-    """
-    from ignis.domain.probe_provenance import probe_keyword_of
-
-    repo = _repository()
-    registry = ConnectorPluginRegistry(repository=repo)
-    registry.register(DiscoveryFeedPlugin(["mau toc"]))
-    registry.register(
-        PopularityChartPlugin(chart=[], by_keyword={"mau toc": ["Nhuom mau toc tai nha"]})
-    )
-
-    signals = await registry.fetch_from_all(geo=GeoCode.VN, scope=IngressScope.PUBLIC_MARKET)
-
-    discovery = [s for s in signals if s.platform == PlatformType.GOOGLE_TRENDS]
-    assert discovery, "The discovery feed's own signal must survive the pass"
-    assert probe_keyword_of(discovery[0]) == "mau toc"
-
-    clusters = await SemanticClusterer().cluster_signals(signals)
-    assert len(clusters) == 1
-    assert len({s.platform for s in clusters[0].signals}) == 2
-
-
-@pytest.mark.asyncio
 async def test_ingress_stores_an_off_topic_local_title_and_leaves_relevance_downstream():
-    """A radar that only stores what somebody already seeded cannot discover anything.
-
-    Ingress used to ask `is_localized` with the persisted vocabulary, which weighs language,
-    domain terms and the noise blacklist together. On the live corpus that rejected 67.8% of
-    rows, including "Khoa hoc AI cho nguoi moi bat dau" -- a Vietnamese title squarely on
-    target -- because relevance was judged against `market_lexicons`. Anything not yet seeded
-    was dropped before it could be seen, which is the opposite of a trend radar's job.
-
-    Relevance now belongs to `QualityEvaluator`, which already holds that vocabulary and runs
-    on the analysis path. Ingress keeps only the judgement about the data being wrong rather
-    than uninteresting: the script the title is written in.
-
-    The cost this accepts: the stored corpus carries off-topic local content, and the quality
-    gate has to earn its keep downstream.
-    """
+    """Collection preserves local, English and foreign-script content for qualification."""
     repo = _repository()
     registry = ConnectorPluginRegistry(repository=repo)
-    registry.register(DiscoveryFeedPlugin(["mau toc"]))
+    registry.register(TopicSearchPlugin(["mau toc"]))
     registry.register(
         ForeignLanguagePlugin(
             [
@@ -355,9 +228,10 @@ async def test_ingress_stores_an_off_topic_local_title_and_leaves_relevance_down
         )
     )
 
-    signals = await registry.fetch_from_all(
-        geo=GeoCode.VN, scope=IngressScope.PUBLIC_MARKET, seed_keywords=["mau toc"]
+    result = await registry.search_with_outcomes(
+        keywords=["mau toc"], geo=GeoCode.VN, scope=IngressScope.PUBLIC_MARKET
     )
+    signals = result.signals
     titles = [s.raw_title for s in signals]
 
     assert "Nhuom mau toc tai nha khong can den salon" in titles

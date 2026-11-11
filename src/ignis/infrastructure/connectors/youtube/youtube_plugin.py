@@ -31,8 +31,6 @@ _YOUTUBE_QUERY_CACHE: cachetools.TTLCache = cachetools.TTLCache(
 )
 
 
-
-
 class YouTubeDataPlugin(IConnectorPlugin):
     """
     Ingress Plugin for YouTube Data: Most Popular Videos & Targeted Keyword Search.
@@ -244,17 +242,6 @@ class YouTubeDataPlugin(IConnectorPlugin):
             metadata={**(signal.metadata or {}), "keyword": keyword},
             captured_at=signal.captured_at,
         )
-
-    @property
-    def feed_yields_candidate_topics(self) -> bool:
-        """`chart=mostPopular` ranks the region's most-watched videos, whatever they are about.
-
-        It is one quota unit and returns fifty rows, so an untargeted pass fills the corpus with
-        national entertainment that no other platform corroborates. The keyword probe consumes
-        one call from the separate search allocation and returns videos about a subject the pass
-        actually asked for.
-        """
-        return False
 
     async def is_healthy(self) -> bool:
         if not self._api_key:
@@ -627,7 +614,6 @@ class YouTubeDataPlugin(IConnectorPlugin):
                     attestation.failed(raw_kw, type(e).__name__)
                     if raw_kw in attestation.queried:
                         attestation.queried.remove(raw_kw)
-
 
 
         return signals

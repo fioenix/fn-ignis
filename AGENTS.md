@@ -108,12 +108,12 @@ is speaking in the current conversation. Agents reason internally in English.
 Domain knowledge belongs in the database, not in Python. The tables exist precisely so that vocabulary
 can be extended at runtime without a release:
 
-- `market_lexicons` — domain terms, slang, synonyms (grouped by `domain` + `category`), foreign stopwords, noise blacklist.
+- `market_lexicons` — vocabulary that drives a mechanism: foreign stopwords, noise blacklist, language detection, platform-interface labels. Market-domain terms can be stored and listed, but no engine reads them.
 - `runtime_configs` — thresholds and connector parameters.
 
 **Do NOT** introduce a Python `list`/`dict`/`set` of domain terms, synonyms, brand names, intent
-keywords, noise phrases, or category keywords inside `src/`. Seed them in `sql/` and read them through
-the existing `register_*` / `get_domain_lexicons` paths. If a new engine
+keywords, noise phrases, or category keywords inside `src/`. Vocabulary a mechanism needs is seeded in
+`sql/` and read through the existing `register_*` / `get_domain_lexicons` paths. If a new engine
 needs vocabulary, it grows a `register_*` method and a sync call — it does not grow a constant.
 
 Two narrow exceptions, both of which must carry an inline comment stating why:
@@ -132,8 +132,7 @@ and language-detection vocabulary remain seeded data in `market_lexicons`.
 `vàng` (gold) and `vang` (resonant) fold to one string, as do `tóc`/`tốc` and `chính phủ`/`chinh phục`.
 That folding produced a run of wrong categories — a bolero playlist under finance, an esports bracket
 under beauty — and four separate rules were added to compensate before the premise itself was accepted.
-Lexicon terms are also handed to connectors as search queries, so a tone-stripped term asks the platform
-a question no Vietnamese user would type. Matching folds only when the *input* carries no tones, which is
+Matching folds only when the *input* carries no tones, which is
 common and legitimate; the ambiguity then belongs to the input rather than to the system. Never fold both
 sides by default, and never match a multi-word term as a raw substring — anchor on word boundaries, or
 `ô tô` fires inside `cho tôi`.

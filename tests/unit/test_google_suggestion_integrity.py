@@ -105,17 +105,19 @@ async def test_registry_reports_unavailable_keyword_trends_as_degraded_not_zero(
 @pytest.mark.asyncio
 async def test_unavailable_keyword_measurement_does_not_trip_the_working_rss_feed():
     registry = ConnectorPluginRegistry()
-    registry.register(GoogleTrendsRssPlugin())
+    plugin = GoogleTrendsRssPlugin()
+    registry.register(plugin)
     for _ in range(3):
         search = await registry.search_with_outcomes(["túi"], target_platforms=[PlatformType.GOOGLE_TRENDS])
         assert search.outcomes[0].status.value == "DEGRADED"
+    assert registry.get_health_status()["google"]["circuit_state"] == "CLOSED"
     rss = b'''<rss xmlns:ht="https://trends.google.com/trending/rss"><channel><item>
     <title>Macro topic</title><ht:approx_traffic>1K+</ht:approx_traffic>
     <pubDate>Fri, 02 Oct 2026 04:00:00 +0000</pubDate>
     </item></channel></rss>'''
     reply = httpx.Response(200, content=rss, request=httpx.Request("GET", "https://trends.google.com/trending/rss?geo=VN"))
     with patch("httpx.AsyncClient.get", return_value=reply):
-        signals = await registry.fetch_from_all()
+        signals = await plugin.fetch_signals()
     assert len(signals) == 1
     assert signals[0].raw_title == "Macro topic"
     assert signals[0].metric_value == 1000.0

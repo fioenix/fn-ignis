@@ -1,9 +1,7 @@
-"""Market listening must never ingest the operator's own connected accounts.
+"""Public keyword collection excludes the operator's own connected accounts.
 
-An authenticated connector can read two surfaces: the public one that demand analysis is about,
-and the account's own timeline. These tests pin the three defences: the connector declares which
-surface its feed belongs to, the registry refuses to read an account feed during a public pass,
-and whatever still arrives is matched against the operator's identities and dropped.
+The registry never falls back to an account feed, and its live scope guard drops
+self-authored results even when they arrive through a public keyword probe.
 """
 
 import json
@@ -123,9 +121,6 @@ class _AccountFeedPlugin(IConnectorPlugin):
     def name(self) -> str:
         return "Account Feed Plugin"
 
-    @property
-    def default_feed_scope(self) -> IngressScope:
-        return IngressScope.OWN_PROFILE
 
     async def is_healthy(self) -> bool:
         return True
@@ -152,7 +147,8 @@ async def test_public_pass_uses_the_keyword_probe_instead_of_the_account_feed():
     registry.register(plugin)
     registry.register_self_identities([SelfIdentity(platform="threads", username="own.account")])
 
-    signals = await registry.fetch_from_all(scope=IngressScope.PUBLIC_MARKET, seed_keywords=["ai agent"])
+    result = await registry.search_with_outcomes(scope=IngressScope.PUBLIC_MARKET, keywords=["ai agent"])
+    signals = result.signals
 
     assert plugin.fetch_scopes == [], "The account feed must not be read during a public pass"
     assert plugin.search_calls == [["ai agent"]]
@@ -161,29 +157,17 @@ async def test_public_pass_uses_the_keyword_probe_instead_of_the_account_feed():
 
 
 @pytest.mark.asyncio
-async def test_public_pass_skips_the_connector_when_there_is_nothing_to_probe_with():
-    plugin = _AccountFeedPlugin()
-    registry = ConnectorPluginRegistry()
-    registry.register(plugin)
-
-    signals = await registry.fetch_from_all(scope=IngressScope.PUBLIC_MARKET, seed_keywords=[])
-
-    assert signals == []
-    assert plugin.fetch_scopes == []
-    assert registry.last_pass_report["account_scoped_skipped"] == ["Account Feed Plugin"]
-
-
-@pytest.mark.asyncio
-async def test_own_profile_pass_reads_the_account_feed_and_keeps_only_own_content():
+async def test_own_profile_keyword_pass_keeps_only_own_content():
     plugin = _AccountFeedPlugin()
     registry = ConnectorPluginRegistry()
     registry.register(plugin)
     registry.register_self_identities([SelfIdentity(platform="threads", username="own.account")])
 
-    signals = await registry.fetch_from_all(scope=IngressScope.OWN_PROFILE)
+    result = await registry.search_with_outcomes(scope=IngressScope.OWN_PROFILE, keywords=["ai agent"])
+    signals = result.signals
 
-    assert plugin.fetch_scopes == [IngressScope.OWN_PROFILE]
-    assert [s.raw_title for s in signals] == ["my own post"]
+    assert plugin.fetch_scopes == []
+    assert [s.raw_title for s in signals] == ["my own post about the keyword"]
 
 
 @pytest.mark.asyncio
@@ -206,7 +190,8 @@ async def test_guard_is_inert_when_no_identity_is_known():
     registry = ConnectorPluginRegistry()
     registry.register(plugin)
 
-    signals = await registry.fetch_from_all(scope=IngressScope.PUBLIC_MARKET, seed_keywords=["ai"])
+    result = await registry.search_with_outcomes(scope=IngressScope.PUBLIC_MARKET, keywords=["ai"])
+    signals = result.signals
 
     assert len(signals) == 2
     assert registry.last_pass_report["self_identities_known"] == 0

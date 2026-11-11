@@ -154,21 +154,16 @@ async def test_a_store_without_a_ledger_sets_no_ceiling():
     assert tiktok.search_calls == [["áo khoác"]]
 
 
-class _ProbeOnlyPlugin(_SearchPlugin):
-    """A popularity-chart feed: an ingress pass routes it to the keyword probe (stage 2)."""
-
-    feed_yields_candidate_topics = False
-
-
 @pytest.mark.asyncio
-async def test_the_ingress_keyword_probe_respects_the_ceiling(store):
+async def test_the_requested_keyword_probe_respects_the_ceiling(store):
     repository = SqliteTrendRepository(str(store))
     registry = ConnectorPluginRegistry(repository=repository)
-    youtube = _ProbeOnlyPlugin(PlatformType.YOUTUBE)
+    youtube = _SearchPlugin(PlatformType.YOUTUBE)
     registry.register(youtube)
     await repository.set_runtime_config("connector.youtube.daily_request_ceiling", "0")
 
-    signals = await registry.fetch_from_all(seed_keywords=["áo khoác"])
+    result = await registry.search_with_outcomes(keywords=["áo khoác"])
+    signals = result.signals
 
     assert youtube.search_calls == [] and signals == []
     assert _counts(store).get("youtube", 0) == 0
@@ -186,8 +181,6 @@ async def test_in_memory_reservations_are_serialised():
         )
         assert sum(admitted for admitted, _ in results) == 25
         assert await repository.reserve_connector_requests(day.date(), "tiktok", 0, 25, day) == (True, 25)
-
-
 
 
 class _CappedPlugin(_SearchPlugin):
@@ -208,8 +201,6 @@ async def test_the_count_is_what_a_capped_connector_sends(store):
 
     assert _outcome(result, "reels").status != ChannelHealthStatus.RATE_LIMITED
     assert _counts(store) == {"reels": 10}
-
-
 
 
 class _FlakyPlugin(_SearchPlugin):

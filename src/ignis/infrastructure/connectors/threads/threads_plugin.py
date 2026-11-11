@@ -68,11 +68,6 @@ class ThreadsPlugin(IConnectorPlugin):
         """Host evidence requires browser authority; this plugin never opens a browser."""
         return IngestRuntime.BROWSER
 
-    @property
-    def default_feed_scope(self) -> IngressScope:
-        """Retain the legacy account-scoped declaration; fetching it is unavailable."""
-        return IngressScope.OWN_PROFILE
-
     async def fetch_signals(
         self,
         geo: GeoCode = GeoCode.VN,
