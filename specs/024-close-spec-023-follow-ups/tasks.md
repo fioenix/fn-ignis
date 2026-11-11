@@ -5,9 +5,11 @@
 ## Phase 1: User Story 1 — guidance and backends agree (P1)
 
 - [x] T001 [US1] Correct `AGENTS.md` section 3 so `market_lexicons` is not described as synonyms or as search queries.
-- [ ] T002 [US1] Add a two-backend parity test: re-registering a `system` row's domain and term leaves the same `created_by` and `category` on SQLite and PostgreSQL. Observe it fail for PostgreSQL if a local DSN exists; otherwise state that the RED is unobserved and CI proves the GREEN.
-- [ ] T003 [US1] Change the PostgreSQL upsert to `DO UPDATE` as the plan says.
-- [ ] T004 [US1] Correct the `list_domain_lexicons` description and regenerate both Hermes catalogs; `tests/unit/test_tool_manifests_drift.py` and `tests/unit/test_public_mcp_contract.py` green.
+- [x] T002 [US1] Add a two-backend parity test: re-registering a `system` row's domain and term leaves the same `created_by` and `category` on SQLite and PostgreSQL. Observe it fail for PostgreSQL if a local DSN exists; otherwise state that the RED is unobserved and CI proves the GREEN.
+- [x] T003 [US1] Change the PostgreSQL upsert to `DO UPDATE` as the plan says.
+- [x] T004 [US1] Correct the `list_domain_lexicons` description and regenerate both Hermes catalogs; `tests/unit/test_tool_manifests_drift.py` and `tests/unit/test_public_mcp_contract.py` green.
+
+Local parity evidence: SQLite passes; PostgreSQL RED and GREEN are unobserved locally and reserved for CI (no local PostgreSQL run).
 
 ## Phase 2: User Story 2 — no untargeted ingress pass (P2)
 

@@ -3325,7 +3325,7 @@ async def handle_list_domain_lexicons(domain: Optional[str] = None) -> str:
         return json.dumps({"status": "ERROR", "message": str(e)}, ensure_ascii=False)
 
 
-@mcp.tool(name="list_domain_lexicons", description="List active domain vocabularies and slang terms currently loaded in the system.")
+@mcp.tool(name="list_domain_lexicons", description="List stored lexicon terms, optionally filtered by domain. Market-domain terms are operator records, not engine vocabulary or search queries.")
 async def list_domain_lexicons(domain: Optional[str] = None) -> str:
     return await handle_list_domain_lexicons(domain=domain)
 
