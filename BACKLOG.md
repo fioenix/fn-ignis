@@ -38,14 +38,14 @@ xóa và chưa đọc lại kho đó.
   của chủ đề đó; lượt dựng đó kiểm luôn việc xóa routine (FR-008) và luồng tạo routine của guide sau 23/10. T006 đã đóng
   ngày 09/11/2026 theo kết quả 23/10.
 - [x] **Spec 021 — T022, T029** — đóng 10/11/2026: đã retire cả hai store dev (SQLite của caller: 30/85 cluster; PostgreSQL `ignis`: 1/1), verify qua, có sao lưu; server chạy bản mới.
-- [x] **69 từ miền trong `market_lexicons`** — đã triển khai trên nhánh Spec 023 ngày 11/11/2026, chưa merge.
+- [x] **69 từ miền trong `market_lexicons`** — đã merge (Spec 023, PR #130) và phát hành trong `v0.10.0` ngày 11/11/2026.
   Số đo trong spec: thực tế có **104 dòng `system`** thuộc bảy miền — 69 dòng ở `sql/003` và 35 dòng toàn cầu
   ở `sql/004`. Bỏ chúng không đổi kết quả nhận diện ngôn ngữ của **634 tiêu đề**: vẫn **572** được nhận là tiếng Việt;
   với **37 từ khóa nhiệm vụ**, không có cặp từ khóa–tiêu đề nào chỉ khớp nhờ mở rộng đồng nghĩa.
   Đã bỏ hai cơ chế dùng từ miền, gỡ hai thành phần đọc từ vựng không còn được tool gọi, bỏ seed và thêm migration 040 chỉ xóa
   dòng `system`; dòng người vận hành và từ phục vụ các cơ chế khác được giữ nguyên. Kiểm thử SQLite tạm chứng
   minh kho mới và kho nâng cấp đều còn 0 dòng `system` trong bảy miền sau hai lần khởi tạo.
-  Chưa áp migration lên store dev; coordinator chạy lại phép đo T010 trước nghiệm thu cuối.
+  Phép đo T010 đã chạy lại: vẫn 572/634. Store dev sẽ áp migration khi server khởi động bằng code mới.
 - [ ] **Spec 019 (Shopee Affiliate)** — `Draft`, chưa có plan/tasks, chờ ba cổng kiểm tài khoản của chủ sở hữu.
 - [ ] **RES-001** benchmark đối thủ (xem mục "Nghiên cứu riêng"); chưa có ngân sách hay quyền dùng quota có phí.
 
@@ -86,13 +86,13 @@ Nợ nhỏ giữ nguyên, sửa khi chạm tới, không lên lịch:
 
 - [x] `son`/`kem` mơ hồ trong taxonomy `beauty` — đóng 10/11/2026: seed không có hai từ đơn này, và Spec 021 đã bỏ taxonomy.
 - [ ] `_contiguous_phrase` chỉ đọc `canonical_name` (nhãn xuất hiện trong báo cáo Attention).
-- [x] `ConnectorRegistry.fetch_from_all` — đã dọn trên nhánh Spec 024 ngày 11/11/2026, chưa merge.
+- [x] `ConnectorRegistry.fetch_from_all` — đã gỡ và merge ngày 11/11/2026 (Spec 024, PR #133); chưa phát hành.
   Đã chuyển các phép thử loại nội dung của chính người vận hành, giữ ngôn ngữ nguồn, trần request hằng ngày,
   cô lập lỗi và từ chối nguồn đã ngừng sang `search_with_outcomes` trước khi xóa mã cũ. Các phép thử chỉ dành
   cho đường khám phá hai tầng đã được bỏ và ghi rõ lý do trong commit; các hàng rào trên đường đang dùng vẫn được giữ.
-- [x] Đăng ký lại từ trong `market_lexicons` — đã sửa trên nhánh Spec 024 ngày 11/11/2026, chưa merge.
+- [x] Đăng ký lại từ trong `market_lexicons` — đã sửa và merge ngày 11/11/2026 (Spec 024, PR #133); chưa phát hành.
   PostgreSQL cập nhật `category` và `created_by` khi trùng miền và từ, giống SQLite; dòng do người vận hành
-  đăng ký lại không còn thuộc `system`. Kiểm thử SQLite đã qua; PostgreSQL chờ CI, chưa chạy cục bộ.
+  đăng ký lại không còn thuộc `system`. Kiểm thử đã qua trên SQLite và trên PostgreSQL trong CI.
   Đã sửa mô tả `list_domain_lexicons` và tạo lại hai catalog Hermes; vẫn giữ nguyên 41 tool cùng tên và tham số.
 
 Đóng sau khi kiểm code 09/11/2026:
@@ -164,7 +164,7 @@ hoặc cách dùng đủ rõ với người dùng; PATCH dành cho các thay đ�
 kể trải nghiệm sản phẩm. Chốt mục tiêu không đồng nghĩa đã bump metadata, merge hay phát hành;
 các cổng pilot và release vẫn giữ nguyên.
 
-Nhánh Spec 022 hiện có **41 tools**, chưa merge hay phát hành. Mốc lịch sử ngày 26/10/2026
+`v0.10.0` có **41 tools**. Mốc lịch sử ngày 26/10/2026
 đã thêm tool thứ 53 khi PR #88 (Spec 018 phần A) được merge tại
 `25d10c3`. PR này thêm `set_watchlist_listening_plan` để lưu mục tiêu, kỳ so sánh và nhịp lấy mẫu
 do người dùng chọn; khi không truyền `period_kind`, `get_watchlist_period_snapshot` dùng kỳ so sánh
