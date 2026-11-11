@@ -112,8 +112,8 @@ can be extended at runtime without a release:
 - `runtime_configs` — thresholds and connector parameters.
 
 **Do NOT** introduce a Python `list`/`dict`/`set` of domain terms, synonyms, brand names, intent
-keywords, noise phrases, or category keywords inside `src/`. Seed them in `sql/` and read them through
-the existing `register_*` / `get_domain_lexicons` paths. If a new engine
+keywords, noise phrases, or category keywords inside `src/`. Vocabulary a mechanism needs is seeded in
+`sql/` and read through the existing `register_*` / `get_domain_lexicons` paths. If a new engine
 needs vocabulary, it grows a `register_*` method and a sync call — it does not grow a constant.
 
 Two narrow exceptions, both of which must carry an inline comment stating why:

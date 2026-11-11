@@ -87,6 +87,7 @@ class GooglePlugin(_BasePlugin):
 
 class FailingGridPlugin(VideoGridPlugin):
     async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20) -> List[TrendSignal]:
+        self.search_calls.append(list(keywords))
         raise ConnectorExecutionException("boom")
 
 
@@ -286,10 +287,13 @@ async def test_circuit_breaker_isolation_between_plugins_on_one_platform():
     assert status["tiktok_video_grid"]["consecutive_failures"] == 3
     assert status["tiktok_healthy_sibling"]["circuit_state"] == "CLOSED"
     assert sibling.search_calls == [["ai agent"]] * 3
+    calls_before_open_pass = len(failing.search_calls)
+    assert calls_before_open_pass >= 3
 
     result = await registry.search_with_outcomes(keywords=["ai agent"])
     assert len(result.signals) == 1
     assert sibling.search_calls == [["ai agent"]] * 4
+    assert len(failing.search_calls) == calls_before_open_pass, "an open circuit must skip the connector"
 
 
 @pytest.mark.asyncio
