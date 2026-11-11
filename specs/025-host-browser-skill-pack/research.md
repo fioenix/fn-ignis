@@ -51,3 +51,19 @@ comparisons of brands, a second-hand listing.
 5. **TikTok hashtags can carry creator handles** (for example a hashtag equal to the poster's name). The TikTok extractor keeps hashtags after the caption, so this is a Principle VII gap for free-text handles. Not fixed here.
 6. **TikTok `published_at` is derivable.** The upper 32 bits of a TikTok video id are the Unix publish second; four sampled ids decode to 2024-06 to 2026-09. Unverified against the rendered date.
 7. **Instagram keyword search returns captions only.** No date, no counters, and mostly seller posts: it is supply-side context (what sellers pitch), not customer voice.
+
+## Repeat run for collection variance (backlog VAL-3, reduced)
+
+Same keyword, same profile, same `result_limit` 12, second run about 44 minutes after the first
+(23:56 Asia/Ho_Chi_Minh). Overlap is over canonical source ids.
+
+| Source | Run 1 | Run 2 | Shared | Jaccard |
+|---|---|---|---|---|
+| TikTok | 12 | 12 | 10 | 10/14 = 0.71 |
+| Threads (Top) | 9 | 7 | 5 | 5/11 = 0.45 |
+
+- TikTok's visible grid is stable within an hour; the two new items replaced two at the tail.
+- Threads Top churns: one of the two new posts was published about 13 hours before the run, and the
+  record count itself moved from 9 to 7 because the extractor keeps only fully rendered cards.
+- Two runs per source are a floor, not the backlog's three-run study; read this as a first estimate of
+  sampling noise, not a tolerance. The 30 percent Jaccard kill line proposed in VAL-3 is not crossed.
