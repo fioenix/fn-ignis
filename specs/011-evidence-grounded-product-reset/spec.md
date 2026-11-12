@@ -167,6 +167,16 @@
   T085–T090 are parked with the frozen Market verdict and run only for a real market question with a named person
   who needs the answer. No pilot outcome is claimed (owner decided; basis: ledger review on 2026-11-09).
 
+### Session 2026-11-11
+
+- Q: Which observations may an ATTENTION analysis (insights, maturity, averages, citations) rest on once
+  qualification rows exist? → A: Never one judged `EXCLUDED_IRRELEVANT` or `CONTEXT_ONLY`; `CONTEXT_ONLY` stays
+  visible as labelled context in `top_signals` only (owner decided; basis: a real ATTENTION mission cited two
+  excluded short-drama videos in its maturity insight).
+- Q: What does an ATTENTION analysis do while observations are still unassessed? → A: It keeps analysing them and
+  says so: `analysis_basis.status` is `PROVISIONAL` until every observation is assessed, then `QUALIFIED`
+  (owner decided, 2026-11-11).
+
 ## User Scenarios & Testing
 
 ### User Story 1 - Start Only From an Explicit Research Task (Priority: P1)

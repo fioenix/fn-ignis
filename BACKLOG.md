@@ -13,6 +13,291 @@
 
 ---
 
+## Backlog mới — hội đồng chuyên gia 11/11/2026
+
+Năm góc nhìn độc lập rà dự án ngày 11/11/2026: chiến lược sản phẩm, phương pháp phân tích, nguồn dữ liệu và
+pháp lý, kiến trúc, trải nghiệm agent và bề mặt MCP. Mỗi góc nhìn đọc code và tài liệu trên `main` (`dad6526`);
+các phát hiện quan trọng đã được kiểm lại bằng code trước khi ghi vào đây. Đây là **đề xuất chờ chủ sở hữu duyệt
+thứ tự**, chưa phải cam kết; các quyết định 21/10 và 09/11 giữ nguyên cho tới khi chủ sở hữu đổi.
+
+### Chẩn đoán chung
+
+1. **Kỹ thuật đã đi trước cổng kiểm chứng.** Quyết định 21/10 xếp lượt mốc golden set ở bước 3; sau đó Spec
+   017, 018, 021–024 và `v0.10.0` đã ra nhưng baseline đầy đủ chưa chạy (ngày 22/10 chỉ chạy một phần trên
+   YouTube và Google). Số đo chất lượng duy nhất vẫn là của 25/09: 2/50 tín hiệu liên quan, 0/21 kết luận đủ
+   trích dẫn. Có 41 tool, 24 spec và chưa có người dùng thật.
+2. **Period view chưa đo đúng.** Đã kiểm code:
+   - `counted_value` lấy giá trị **mới nhất** trong 7 ngày sau khi đăng (`listening_period.py:118-136`), đúng
+     như Spec 016 đã chốt tạm (agent quyết, chờ chủ sở hữu xác nhận). Quyết định 21/10 đưa "giá trị ở độ tuổi
+     cố định" làm ví dụ, và quy tắc hiện tại vẫn để các item có thời gian phơi khác nhau.
+   - `_indicator` cộng thẳng tổng view; `_change` trả phần trăm không kèm cỡ mẫu (`watchlist_period.py:324-399`).
+   - Item không có ngày đăng lấy lần thu đầu tiên làm mốc đếm (`watchlist_period.py:315-321`). Spec 016 đã
+     chốt đúng như vậy (Clarifications, `spec.md:111-113`, agent quyết); bản đầu của mục này ghi nhầm là
+     code lệch spec, đã sửa ngày 11/11/2026. Store dev có 32/32 nguồn TikTok và 5/5 nguồn Reels không có
+     `published_at`, nên view trọn đời của video cũ vẫn bị tính như volume mới của kỳ.
+   - `_terms` không chuẩn hóa NFC; thuật ngữ "mới" chỉ cần vắng ở kỳ trước.
+   - Chỉ số golden set chỉ đo tỉ lệ liên quan (precision). T019 của Spec 016 nâng tỉ lệ trong khi số item
+     liên quan giảm (G4: 30 → 22).
+3. **Ignis không thắng được bằng độ phủ hay số liệu bán hàng.** Metric.vn đã bán số liệu doanh số đa sàn cho
+   đúng nhóm này; các công cụ listening doanh nghiệp (YouNet/Buzzmetrics, Kompa, Reputa) quá đắt với họ.
+   Khoảng trống Ignis lấp được: tiếng nói khách hàng tiếng Việt có trích dẫn (nỗi đau, phản đối, bàn về giá,
+   ý định mua) từ bình luận TikTok và Threads, chạy trong agent của chính founder, không cần tài khoản
+   doanh nghiệp và không lưu danh tính tác giả. Period view cần khoảng hai tuần mới có cặp tuần đầu tiên so
+   được (Spec 018), nên không thể cho giá trị trong 10 phút.
+4. **Agent dễ gọi sai tool.**
+   - Catalog 41 tool tốn khoảng 34,6 nghìn ký tự mỗi lượt; 136/136 tham số không có `description`;
+     0/41 tool có annotation `readOnlyHint` hay `destructiveHint`.
+   - Một số mô tả còn hứa điều sản phẩm đã bỏ. Ví dụ `discover_market_opportunities` vẫn ghi "Identify
+     high-demand, low-supply market white spaces" (`server.py:2814`).
+   - Năm skill Ignis nằm trong `.agents/skills/`, repo không có `.claude/skills`. Ba skill track, listen và
+     routine có bản MCP prompt; `ignis-collect` và `ignis-analyze` thì không, nên Claude Desktop không đọc được hai skill này.
+5. **Tuân thủ mới ở mức mô tả** (chủ sở hữu bỏ phần hồ sơ pháp lý ngày 12/11/2026; giữ các quy tắc sản phẩm).
+   - Lệnh xóa dữ liệu quá 13 tháng đã có (`scripts/prune_expired_observations.py`, Spec 016 T014: chạy thử
+     mặc định, `--apply`, giữ observation còn được claim hoặc research work tham chiếu). Bản đầu của mục này ghi
+     nhầm là chưa có; code review ngày 12/11/2026 chỉ ra.
+   - Luật Bảo vệ dữ liệu cá nhân 91/2025/QH15 có hiệu lực từ 01/01/2026, cùng Nghị định 356/2025/NĐ-CP
+     thay Nghị định 13/2023. Repo chưa ghi căn cứ pháp lý nào cho việc xử lý.
+   - Quy tắc "đồng ý trước khi publish" của quyết định 21/10 chưa có cổng nào kiểm.
+6. **Chi phí thay đổi nằm ở persistence và `server.py`.**
+   - Hai repository cùng một nghiệp vụ: `sqlite_repository.py` 6.582 dòng và `postgres_repository.py` 4.700
+     dòng, khoảng 84–96 phương thức public trùng tên tùy cách đếm. Store dev là SQLite từ 10/11/2026.
+   - `server.py` dài 3.923 dòng và gộp cả wrapper, handler lẫn composition.
+   - Code connector đã nghỉ (Reels 742 dòng, Google Trends RSS 277 dòng) không còn được đăng ký nhưng vẫn
+     nằm trong cổng coverage SC-004.
+
+Không nguồn nào có MCP chính hãng cho nội dung tự nhiên tính đến 11/11/2026. TikTok và Meta chỉ có MCP cho
+quảng cáo; Google Maps có MCP chính hãng nhưng không trả đánh giá. ADR 10/11 vì vậy không chuyển connector nào.
+
+**Nguyên tắc xếp thứ tự:** đo đúng và kiểm với người dùng thật trước, rồi mới xây thêm; giai đoạn 2 rẽ
+nhánh theo kết quả giai đoạn 1.
+
+### Giai đoạn 0 — cổng của chủ sở hữu (không cần code, trong tuần)
+
+- [ ] **OWN-1 — Spec 019, cổng G1–G3 (Shopee Affiliate).** Quyết định đi hay dừng với tín hiệu mua chính thức
+  duy nhất. Dừng nếu G2 cho thấy điều khoản chỉ cho dùng để quảng bá link. Dừng thì ghi vào bản đồ nguồn và
+  ngừng mọi việc thương mại trừ spike tài liệu SRC-2.
+  Khảo sát 11/11/2026 trên catalog plugin, MCP registry và web: Shopee chưa có MCP chính hãng. Chỉ có MCP cộng
+  đồng cho Brazil, Singapore và Indonesia, gói Affiliate Open API (`productOfferV2`, GraphQL, ký HMAC-SHA256).
+  Theo ADR 10/11, các bản này không tính là chính hãng; chỉ dùng làm tham khảo khi viết connector. Chưa thấy
+  endpoint Affiliate Open API cho Việt Nam trong tài liệu công khai.
+- [x] **OWN-2 — Nộp đơn Google Trends API alpha** dưới danh tính chủ sở hữu — chủ sở hữu đã gửi ngày 11/11/2026
+  (GCP project `finolabs`, loại Independent developer, mục đích Commercial). Đây là chuỗi nhu cầu theo từ khóa
+  chính thức duy nhất. Đang chờ Google phản hồi; hủy nếu không có phản hồi trước 11/02/2027, khi đó giữ YouTube
+  làm proxy tìm kiếm. Việc còn lại: Gmail khai trong đơn phải có quyền trên project `finolabs`.
+- [x] **OWN-3 — Duyệt dùng phiên TikTok/Threads thật cho VAL-1, VAL-2 và VAL-3** (AGENTS.md §8) — chủ sở hữu
+  xác nhận trong chat ngày 11/11/2026 là đã cho phép. Lượt chạy dùng Chrome profile Finos, không dùng trình
+  duyệt làm việc của chủ sở hữu. Khuyến nghị:
+  dùng một tài khoản riêng ít giá trị, không dùng tài khoản chính; trần request theo kênh mỗi ngày; dừng ngay
+  khi gặp challenge hay bị chặn.
+- [ ] **OWN-3b — Kiểm nốt TikTok trên profile Finos** (còn mở từ 09/11): giao diện `vi-VN` có giữ sau khi khởi động
+  lại Chrome không, và chạy thử nhánh MISSION. Làm chung lượt với OWN-3.
+- [ ] **OWN-4 — Phán định phạm vi của "đổi signature tool".** Hai câu cần trả lời:
+  - Thêm `description` cho tham số và thêm annotation có tính là đổi signature không?
+  - Ẩn 11 tool vận hành sau một profile (vẫn gọi được) có còn thỏa "41 tool độc lập callable" không?
+
+  AGX-3 và AGX-7 chờ câu trả lời này.
+- [x] **OWN-5 — Ngân sách Jev và model** cho VAL-2 (chấm golden set, ghim `jev-1.14.0`) và AGX-1 (eval chọn tool) —
+  chủ sở hữu duyệt ngày 11/11/2026 ("xài thoải mái"). Vẫn giữ spend guard, và chỉ gửi những trường mà phép chấm cần.
+- [ ] **OWN-6 — Xác nhận hoặc sửa ba câu trả lời agent tự quyết trong `## Clarifications` của Spec 016:**
+  - Quy tắc bộ đếm "mới nhất trong 7 ngày" (MEA-4 đề xuất thay).
+  - "Không giả định phương sai" (VAL-3 đề xuất thay bằng ngưỡng đo được).
+  - Thêm trường kết quả hoặc lý do từ chối mới trong snapshot (MEA-3, MEA-5) có tính là đổi signature không.
+- [ ] **OWN-7 — Có thay quy tắc mở lại verdict ngày 09/11 không.** Quy tắc hiện tại là "(a) **hoặc** (b)". VAL-4
+  đề xuất bổ sung bốn điều kiện chất lượng. Cho tới khi chủ sở hữu trả lời, quy tắc 09/11 giữ nguyên.
+
+### Giai đoạn 1 — đo đúng và kiểm với người dùng (song song, 2–3 tuần)
+
+Kiểm chứng giá trị:
+
+- [ ] **VAL-1 — Pilot concierge với 5–8 founder thật**, không viết code mới. Chạy Ignis trên câu hỏi "có nên bán
+  X" thật của từng người, trả lại một trang trả lời, rồi ghi ai hành động theo kết quả.
+  - Đạt: ít nhất 3/8 người đổi hoặc xác nhận quyết định, hoặc xin chạy lại.
+  - Hủy: tối đa 1 người, thì xem lại đối tượng hoặc công việc cần làm.
+  - Kết quả này quyết định nhánh của giai đoạn 2.
+  - VAL-1 không thay pilot Việt Nam của Spec 011 (T085–T090). Nếu trong pilot có người cần một verdict mà
+    listening không trả lời được, đó là điều kiện (a) của quy tắc 09/11, và chủ sở hữu quyết có mở T085–T090
+    không. Bốn yêu cầu UNMET của Spec 014 vẫn đóng băng.
+  - Phụ thuộc OWN-3.
+- [ ] **VAL-2 — Baseline golden set đầy đủ**: bốn watchlist trên mọi kênh, hai câu hỏi hồi quy verdict, chấm lại
+  fixture 25/09 bằng `jev-1.14.0`.
+  - Thêm proxy recall: số item liên quan theo từ khóa và kênh, cùng mẫu số gộp "item liên quan mà ít nhất
+    một revision tìm thấy".
+  - Ghi mục tiêu số vào Spec 016. Ngưỡng hủy listening (đề xuất: dưới 10/50 liên quan mỗi watchlist) do chủ
+    sở hữu chốt.
+  - Phụ thuộc OWN-3, OWN-5 và VAL-3.
+- [ ] **VAL-3 — Đo phương sai thu thập.** Chạy cùng một watchlist 3 lần trong một giờ trên cùng profile; đo
+  Jaccard của source id, hệ số biến thiên (CV) của tỉ lệ liên quan và CV của số đếm theo kênh. Spec 016 hiện
+  chốt "không giả định phương sai" (`spec.md:79-81`). Đề xuất thay bằng ngưỡng đo được; đây là sửa Spec 016,
+  nên chờ OWN-6. Nếu độ trùng dưới 30%, kênh lấy mẫu chỉ còn làm bối cảnh trục `seen`. Chạy qua heavy-job lock.
+
+Sửa phép đo:
+
+- [ ] **MEA-1 — Lấy ngày đăng TikTok từ video id** (S, chuyển thành câu hỏi OQ-4 của Spec 025). Video id TikTok
+  mã hóa giây đăng ở 32 bit cao; bốn id mẫu giải ra 06/2024–09/2026, chưa đối chiếu với ngày hiển thị trên trang.
+  Có ngày đăng thì item TikTok không còn lấy lần thu đầu làm mốc, và view trọn đời của video cũ thôi bị tính là
+  volume mới. Đổi quy tắc đếm item không có ngày đăng là sửa Spec 016, nên chờ OWN-6. Làm trước VAL-2.
+- [x] **MEA-2 — Chuẩn hóa NFC trước khi tách token** trong `_terms` và dedupe (S, agent tự quyết) — merge
+  12/11/2026 (PR #137): văn bản, từ khóa và tên khai báo cùng đi qua một bước NFC rồi casefold.
+- [ ] **MEA-3 — Cỡ mẫu và độ bất định trên từng ô** (M). Mỗi ô có n, trung vị và tổng đã cắt đuôi; dưới một
+  sàn đặt trong `runtime_configs` thì gắn lý do `low_n`. Guide không bao giờ hiện phần trăm thay đổi mà không
+  kèm n. Hủy phần khoảng tin cậy nếu khoảng đó phủ 0 ở hơn 90% ô golden set; khi đó chỉ hiện số đếm.
+  Phụ thuộc MEA-1 và OWN-6.
+- [ ] **MEA-4 — Bộ đếm ở độ tuổi cố định, có cờ `provisional`** (M). Đây là sửa Spec 016, nên chờ OWN-6. Lấy giá
+  trị tại tuổi A, ví dụ 3 ngày; item không có quan sát quanh A thì gắn `not_at_age`. Kỳ còn `provisional` cho tới
+  ngày cuối cộng A. Đạt: đọc lại một kỳ đã đóng sau A ngày cho cùng con số.
+- [ ] **MEA-5 — Ghi chứng thực lấy mẫu của host-browser** (S): thứ hạng kết quả, độ sâu cuộn, kiểu sắp xếp và
+  ngôn ngữ trang của từng probe. Từ chối so hai kỳ thu ở độ sâu khác nhau; lý do từ chối mới này chờ OWN-6.
+
+Bề mặt agent:
+
+- [ ] **AGX-1 — Eval chọn tool** (M). 30–40 ý định người dùng trên ba hành trình, cộng các bẫy ("tìm cơ hội
+  thị trường", "xem Threads của tôi"). Chấm độ chính xác của lượt gọi đầu, số lượt gọi sai, số lượt tới trạng
+  thái cuối. Dùng `list_tools()` thật với handler giả lập. Hủy nếu kết quả dao động quá 10 điểm giữa các lần
+  chạy lặp. Phụ thuộc OWN-5.
+- [ ] **AGX-2 — Viết lại các mô tả lỗi thời** (S): `discover_market_opportunities`, `get_mission_analysis`,
+  `execute_mission_ingress`, `get_current_session_mission`. Mỗi mô tả nêu điều kiện tiên quyết, các trường hợp
+  từ chối và tool nên gọi tiếp. Làm sau baseline AGX-1. Đạt: số lượt gọi đầu sai trên các ý định bẫy giảm ít
+  nhất 50%.
+
+### Giai đoạn 2 — rẽ nhánh theo kết quả giai đoạn 1
+
+**Nhánh A — nếu VAL-1 cho thấy người dùng cần "vì sao người ta mua":**
+
+- [ ] **PRD-1 — "Tiếng nói khách hàng trong 10 phút"** (S–M). Một skill hoặc guide, **không thêm tool**: một từ
+  khóa, probe TACTICAL trên YouTube, TikTok và Threads, lấy bình luận của N video TikTok đầu, rồi trả về một bản
+  tổng hợp có trích dẫn.
+  - Bản tổng hợp là bối cảnh attention, không phải bằng chứng nhu cầu hay verdict (AGENTS.md §1–2). Nếu người
+    dùng cần câu "bán hay không", chuyển sang mission có Brief.
+  - Đạt: trung vị thời gian tới artifact tối đa 10 phút, có ít nhất 15 item liên quan, và người dùng nói sẽ dùng lại.
+  - Hủy: trung vị trên 20 phút, hoặc tỉ lệ liên quan ngang mức 2/50.
+  - Phụ thuộc OWN-3 vì dùng phiên TikTok/Threads thật.
+- [ ] **PRD-2 — Gắn nhãn tiếng nói khách hàng cho bình luận** (M). Agent host gắn nhãn nỗi đau, phản đối, nhắc
+  giá, ý định mua, mỗi nhãn kèm trích dẫn và hiện rõ chỗ thiếu dữ liệu. Không có từ vựng ý định cứng trong `src/`.
+  Đạt: Jev cho ít nhất 0,70 nhãn có căn cứ trên một mẫu. Đây là mở lại phần "tóm tắt nỗi đau" mà quyết định
+  21/10 hoãn, nên cần chủ sở hữu duyệt.
+- [ ] **PRD-3 — Period view thành bước theo dõi**, chỉ đề xuất sau một snapshot khi người dùng nói "theo dõi
+  cái này" (S, chỉ guide và docs). Tool vẫn gọi được như cũ. Việc này đổi mặc định "listening-first" của quyết
+  định 21/10, nên chủ sở hữu quyết dựa trên VAL-1.
+
+**Nhánh B — nếu OWN-1 qua:** lập plan và tasks cho Spec 019, rồi VAL-4.
+
+- [ ] **VAL-4 — Đề xuất checklist chất lượng khi mở lại chế độ verdict** (S, chỉ tài liệu; chủ sở hữu quyết qua
+  OWN-7, còn quy tắc 09/11 giữ nguyên tới lúc đó). Bốn điều kiện:
+  - VAL-2 đạt ngưỡng tỉ lệ liên quan và recall đã chốt.
+  - Đối chứng âm (phần mềm tồn kho cho xưởng may) vẫn ra Gap Report.
+  - Ít nhất một đối chứng dương đạt 0,70 citation support.
+  - Có bằng chứng cung không dựa trên view.
+
+  Chủ sở hữu quyết việc mở lại.
+
+**Làm ở cả hai nhánh:**
+
+- [ ] **MEA-6 — Vệ sinh thuật ngữ không dùng từ vựng** (S–M). Đếm theo văn bản đã gộp bản gần trùng. Thuật
+  ngữ "mới" phải xuất hiện ít nhất 3 lần và vắng trong K kỳ trước. Xếp hạng thuật ngữ đang lên bằng log-odds đã
+  làm trơn thay cho quy tắc +2 / +50%. Giữ dấu thanh và ranh giới từ; chưa thêm thư viện tách từ.
+- [ ] **AGX-3 — Mô tả cho 136 tham số và annotation cho 41 tool** (M), sau OWN-4. Hủy nếu catalog phình hơn 25%
+  mà độ chính xác trong AGX-1 không tăng.
+- [ ] **AGX-4 — Guide cho hành trình "watchlist đầu tiên → period view đầu tiên"**, phát dưới dạng MCP prompt
+  và resource (M). Guide nói trước rằng kỳ chưa kết thúc thì bị từ chối, và giới thiệu `get_mission_relay_snapshot`
+  làm view cho ngày đầu. Đóng gói `ignis-collect` và `ignis-analyze` thành MCP prompt, thay đường dẫn `specs/`
+  bằng trích đoạn đóng gói kèm theo. Kiểm Claude Code có tìm thấy `.agents/skills` không.
+- [~] **AGX-5 — `USER_GUIDE.md` mở đầu bằng "10 phút đầu tiên"** (S) — phần hướng dẫn đã merge 12/11/2026 (PR #138);
+  lịch sử migration giữ nguyên dưới đề mục riêng thay vì chuyển sang tài liệu khác. Còn lại: bootstrap in ra connector
+  nào cần biến môi trường nào, chỉ in tên biến.
+- [ ] **AGX-6 — Một envelope kết quả có kiểu** (M, viết thành spec): `status`, `reason_code`, `next_actions` và
+  `data`; đặt `isError` cho các lỗi; công bố danh sách enum của các trạng thái. Đây là đổi hình dạng kết quả trả
+  về, nên chủ sở hữu duyệt.
+- [ ] **AGX-7 — Profile tool `user` / `operator`** (đề xuất), sau OWN-4. Hủy nếu AGX-1 cho thấy độ chính xác
+  tăng dưới 3 điểm.
+- [ ] **SRC-2 — Spike Lazada Affiliate API** (chỉ đọc tài liệu): xác nhận trên tài liệu chính thức có tìm sản
+  phẩm theo từ khóa, có trường lượt bán, cá nhân ở Việt Nam đăng ký được, và đọc điều khoản dữ liệu. Hủy nếu
+  không có trường lượt bán hoặc điều khoản chỉ cho quảng bá link. Tích hợp sau spike là spec riêng, theo ADR 10/11.
+
+### Tuân thủ — song song, không chờ pilot
+
+- [-] **CMP-1 — Ghi căn cứ pháp lý theo Luật 91/2025/QH15 và Nghị định 356/2025/NĐ-CP** — bỏ ngày 12/11/2026 theo
+  quyết định của chủ sở hữu: Ignis là mã nguồn mở, không làm hồ sơ pháp lý; công sức dành cho hiệu quả sản phẩm.
+  Draft ADR ở PR #140 đã đóng, branch giữ lại.
+- [x] **CMP-2 — Lệnh xóa dữ liệu quá 13 tháng do người dùng gọi** — đã có từ Spec 016 T014:
+  `scripts/prune_expired_observations.py` chạy thử mặc định, xóa thật với `--apply`, giữ observation còn được claim
+  hoặc research work tham chiếu, chạy được trên cả SQLite và PostgreSQL, không lên lịch. Chạy `--apply` trên store
+  thật vẫn cần chủ sở hữu duyệt (AGENTS.md §8).
+- [ ] **CMP-3 — Cổng che dữ liệu cá nhân và xác nhận trước khi publish artifact** (M). Quét tên, số điện thoại và
+  @mention còn sót trong trích dẫn. Spec 015 đã gỡ @mention và handle trong văn bản (FR-011) và che email, số
+  điện thoại theo mẫu; còn hở tên người viết tự do (FR-012) và việc xác nhận trước khi publish. Đây là việc sản phẩm
+  theo Principle VII, không phải hồ sơ pháp lý. Đạt: không lọt trên fixture có tên người Việt.
+
+### Nền kỹ thuật — giảm chi phí thay đổi
+
+- [x] **ENG-1 — Sửa dòng nợ đã lỗi thời** — làm cùng lần ghi backlog này, ngày 11/11/2026: `ingest_use_case` đã gỡ
+  trong Spec 024; dòng tương ứng trong mục "Đóng sau khi kiểm code 09/11/2026" đã cập nhật.
+- [ ] **ENG-0 — Phát hành các bản sửa của Spec 024** (đã merge, chưa phát hành): gỡ `fetch_from_all` và sửa việc
+  đăng ký lại từ trong lexicon. Gom vào bản phát hành kế tiếp; bump và tag cần chủ sở hữu duyệt (AGENTS.md §4).
+- [ ] **ENG-10 — `_contiguous_phrase` chỉ đọc `canonical_name`** — nợ nhỏ giữ nguyên từ 09/11, sửa khi chạm tới.
+- [x] **BUG-1 — Phân tích ATTENTION dùng cả bằng chứng đã bị loại** (một session khác báo ngày 11/11/2026, khi chạy
+  một mission ATTENTION thật) — merge 12/11/2026 (PR #136), sau hai vòng review bắt thêm lỗi ở cụm chủ đề và
+  citation fallback. Kết luận chỉ dựa trên observation không bị loại và không phải CONTEXT_ONLY; thêm
+  `analysis_basis` (`PROVISIONAL`/`QUALIFIED`); quyết định của chủ sở hữu ghi ở Spec 011.
+- [x] **BUG-2 — Insight maturity đếm "N topic clusters" trên toàn geo**, không phải cụm của mission
+  (`_assess_maturity` dùng `len(clusters)` của `top_clusters_use_case`) — merge 12/11/2026 (PR #141): đếm cụm
+  riêng trong tín hiệu của mission; mission thật giờ ghi 8 cụm thay vì 16.
+- [~] **SPEC-025 — Bộ skill host-browser và Instagram Reels qua host browser** — chủ sở hữu yêu cầu và mở lại Reels
+  ngày 11/11/2026. Draft PR #139: research từ lượt chạy thật, spec đã chốt bốn câu ngày 12/11/2026 (mỗi nền tảng
+  một skill với reference dùng chung; giữ hashtag TikTok như tên tự do; Instagram đánh giá như nguồn khác; lấy
+  ngày đăng TikTok từ video id sau khi đối chiếu). Bước tiếp: `/speckit-plan`.
+  Lượt chạy lặp (VAL-3 rút gọn, hai lượt mỗi nguồn): Jaccard TikTok 0,71, Threads 0,45; ghi trong `research.md`.
+- [ ] **ENG-2 — Gỡ code connector đã nghỉ** (M): Reels, Google Trends RSS, nhánh Explore và tìm kiếm headless của
+  `TikTokPlugin`; xóa test tương ứng và thu hẹp phạm vi coverage SC-004.
+  - Giữ giá trị enum `PlatformType` và đường đọc cho dòng cũ.
+  - Trước khi gỡ, grep lại `follow_up_provider_bridge.py:375`.
+  - Gỡ Reels OAuth (`meta_oauth.py`) chạm tầng connector, nên hỏi chủ sở hữu.
+  - Vẫn đủ 41 tool.
+- [ ] **ENG-3 — ADR `Proposed`: PostgreSQL có còn là backend của sản phẩm không** (S). Ba lựa chọn: (a) giữ cả
+  hai và làm ENG-9; (b) đóng băng PostgreSQL, chỉ còn đọc và nâng cấp kiểm trong CI; (c) bỏ sau khi có đường
+  export. Hiện mỗi story trả tiền persistence hai lần, cộng 4 service trong CI. Chủ sở hữu đặt trạng thái. Phụ thuộc ENG-4.
+- [ ] **ENG-4 — Kiểm nâng cấp PostgreSQL tới `040` trên bản sao của một store cũ** (S–M), hoặc ghi rõ "không hỗ
+  trợ nâng cấp". `v0.10.0` đã phát hành mà chưa kiểm việc này. Chạy qua heavy-job lock; không đụng store thật.
+- [ ] **ENG-5 — Tách `server.py`** thành composition, handler theo nhóm và wrapper (M). Trước khi tách, thêm test
+  snapshot cho schema của 41 tool, và re-export tên cũ cho 192 chỗ test đang tham chiếu. Dừng nếu snapshot có diff.
+- [ ] **ENG-6 — Độ bền của host-browser** (S–M):
+  - `diagnose_system_health` báo các locale ghi công đã seed so với locale của trang.
+  - ~~Seed mẫu ghi công `en`.~~ Không cần: từ `tiktok-public-grid-v3` extractor chỉ giữ phần caption và hashtag,
+    nên ngôn ngữ giao diện không còn chặn bản ghi (`docs/USER_GUIDE.md`, migration 038); lượt chạy 11/11 đạt `HEALTHY`.
+  - Ticket còn treo khi server khởi động lại trả trạng thái có kiểu `EXPIRED_ON_RESTART`; hết hạn khi truy cập,
+    không có janitor chạy nền.
+  - Muốn chứng minh trên trang thật cần phiên thật (OWN-3).
+- [x] **ENG-7 — Test chống lệch manifest** — đã có sẵn, đóng 11/11/2026: `tests/unit/test_tool_manifests_drift.py`
+  kiểm `hermes_manifest.json`, `.hermes/tools.json` và `openclaw.json` khớp 41 tool của `list_tools()`;
+  `test_public_distribution_contract.py` kiểm `server.json` ghi SQLite mặc định là tạm. Chuyên gia đánh giá thiếu.
+- [ ] **ENG-8 — Quyết định về subsystem follow-up** (khoảng 5.700 dòng, bị từ chối mặc định): giữ đóng băng và chỉ
+  bảo trì nhánh SQLite, hoặc gỡ mà vẫn giữ signature `execute_mission_follow_up`. Gỡ năng lực cần chủ sở hữu.
+- [ ] **ENG-9 — Bộ test hợp đồng chung cho hai repository** (M–L), chỉ làm nếu ENG-3 chọn (a) hoặc (b). Không
+  thêm ORM hay query builder.
+
+### Không làm
+
+- Không thêm connector browser mới (Facebook…), trừ Instagram Reels qua host browser mà chủ sở hữu đã mở lại ngày
+  11/11/2026 trong Spec 025; không đọc trang Shopee hay Lazada dưới bất kỳ hình thức nào.
+- Không tính MCP cộng đồng (vidIQ, trendsmcp, HasData, meta-mcp…) là chính hãng; không dùng MCP hay API của Ads để nghiên cứu thị trường.
+- Không nhập CSV Keyword Planner làm bối cảnh nhu cầu: chính sách của Google không cho dùng keyword research
+  cho nghiên cứu thị trường (khảo sát 27/10, xem bản đồ nguồn).
+- Không làm nguồn kiểu bảng xếp hạng không theo watchlist, như YouTube `chart=mostPopular`: quyết định 21/10 ghi
+  khám phá mở, không theo danh mục, không phải mục tiêu. Chỉ xét lại nếu chủ sở hữu đổi quyết định đó.
+- Không mở lại verdict, và không trau chuốt thêm Claim Ledger hay Gap Report, cho tới khi VAL-1 hoặc OWN-1 thỏa điều kiện.
+- Không dựng lại routine Spec 017 chỉ để đo; Epic 3–5 trong parking lot vẫn đóng.
+- Không thêm tool mới hay tool "làm trọn mission"; không gộp tool thành tool đa chế độ.
+- Không đưa từ vựng miền vào mô tả tool hay enum; không thêm từ điển tách từ hay đồng nghĩa vào `src/`.
+- Không cộng hay chuẩn hóa các kênh thành một chỉ số; không nội suy ngày thiếu; không dùng Jev làm bộ lọc runtime.
+- Không nâng tỉ lệ liên quan bằng thêm bộ lọc từ vựng mà không có chốt chặn recall.
+- Không viết lại persistence hay `server.py` một lần; không đụng code Market đóng băng chỉ để dọn.
+- Không làm PyPI hay benchmark đối thủ có phí (RES-001) trước VAL-1; không tuyên bố hơn đối thủ khi chưa có benchmark.
+
+Còn chưa kiểm: giá của Metric, YouNet, Kompa và Reputa; Việt Nam có trong `mostPopular` không; quyền Keyword Planner
+ở Việt Nam; điều khoản lưu trữ của Shopee Affiliate; nội dung công khai có được miễn đồng ý theo luật mới không; Docker
+image có chạy được host-browser không.
+
+---
+
 ## Việc đang mở — đọc lại 09/11/2026
 
 Mục này là các việc đang được chọn làm tính đến 09/11/2026; các phần bên dưới là lịch sử và bối cảnh. Chủ sở hữu duyệt dọn
@@ -101,7 +386,8 @@ Nợ nhỏ giữ nguyên, sửa khi chạm tới, không lên lịch:
   không ảnh hưởng kết quả nào. Không cần đo.
 - [x] Discovery source Google Trends là tin tức — superseded: `fetch_from_all` chỉ được gọi từ
   `IngestTrendsUseCase`, và `ingest_use_case` được dựng ở `server.py:918` nhưng không tool nào gọi. Đường discovery
-  đã chết; mã thừa còn đó, chưa dọn.
+  đã chết. Mã thừa đã gỡ trong Spec 024 (PR #133, commit `6716f11`); `tests/unit/test_corpus_correctness.py`
+  khẳng định `ingest_trends.py` và `ingest_use_case` không còn.
 
 Đã chuyển sang parking lot ("Market verdict — đóng băng"): supply score không phân biệt "không có dữ liệu"
 với "không ai xem"; taxonomy chưa phủ vertical ngoài thị trường (mục này đã đóng ngày 10/11/2026 cùng Spec 021).

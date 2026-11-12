@@ -13,6 +13,7 @@ One immutable record per `source` value (`tiktok`, `threads`, `instagram`).
 | `search_url(query)` | `origin + search_path + "?q=" + quote(query)` | same | same |
 | `transport` | `opener_post_message` | `fragment_receive` | decided by spike: `fragment_receive` if the page has no usable `window.opener`, else `opener_post_message` |
 | `record_path` | `^/@[A-Za-z0-9_.]+/video/[0-9]+$` | `^/(?:@[A-Za-z0-9_.]+/post/|t/)[A-Za-z0-9_-]+(?:/media)?/?$` | `^/(?:p|reel)/[A-Za-z0-9_-]+/?$` |
+| `accepted_record_path` (validator) | `^/(?:@[A-Za-z0-9_.]+/video/|share/video/)[0-9]+$` | same as `record_path` | same as `record_path` |
 | `canonical_url(path)` | `/share/video/<id>` | `/t/<id>` | `/p/<id>/` |
 | `extractor_version` | `tiktok-public-grid-v3` | `threads-search-top-v2` | `instagram-keyword-grid-v1` |
 | `platform` | `tiktok` | `threads` | `reels` |
