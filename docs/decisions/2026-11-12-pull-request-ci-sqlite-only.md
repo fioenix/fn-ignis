@@ -16,6 +16,10 @@ branches remain covered. The coordinator updates branch protection separately.
 
 ## Trade-off
 
-Pull requests spend less time and runner capacity on an unused backend. A PostgreSQL regression
-can be caught after merge on main or by the weekly run rather than before merge. Both-backend
+Pull requests spend less time and runner capacity on an unused backend. These are now caught after
+merge, on main or by the weekly run, rather than before merge: a PostgreSQL regression (including a
+`sql/` change that breaks the migration chain, which the old scope step forced before merge), a drop
+below the SC-004 coverage floor, a broken fresh Compose init, and an SC-001 latency regression. A
+`workflow_dispatch` run on a pull request's branch still runs all of them before merge when a change
+touches PostgreSQL code or `sql/`. Both-backend
 storage contracts remain exercised; their timing changes, not their assertions.

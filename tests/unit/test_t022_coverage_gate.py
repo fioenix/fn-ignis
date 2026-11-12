@@ -215,9 +215,11 @@ def test_ci_still_reaches_postgres_only_through_the_test_dsn():
     # runtime connection variable, and the wheel smoke step legitimately writes a SQLite one into
     # its own throwaway env file -- so what is refused here is a DATABASE_URL carrying a PostgreSQL
     # connection, or one exported to the job where the suite would pick it up.
+    # Scan the whole workflow, not only this job: the pull-request `test` job must not reach a
+    # configured PostgreSQL database either.
     offenders = [
         line.strip()
-        for line in text.splitlines()
+        for line in _ci_text().splitlines()
         if "DATABASE_URL" in line and "postgres" in line.lower()
     ]
     assert not offenders, (
@@ -229,6 +231,17 @@ def test_ci_still_reaches_postgres_only_through_the_test_dsn():
         "DATABASE_URL is exported to the whole test job, where the repository would read it in"
         " preference to the throwaway service"
     )
+
+
+def test_the_pull_request_test_job_exports_no_database_url_or_secret():
+    """The SQLite-only job runs on every pull request; it must not receive a database or a secret."""
+    workflow = yaml.safe_load(_ci_text())
+    test_job = workflow["jobs"]["test"]
+    assert "DATABASE_URL" not in (test_job.get("env") or {}), (
+        "DATABASE_URL is exported to the pull-request test job"
+    )
+    assert "DATABASE_URL" not in (workflow.get("env") or {}), "DATABASE_URL is exported workflow-wide"
+    assert "secrets." not in yaml.safe_dump(test_job), "the pull-request test job reads a repository secret"
 
 
 def test_the_performance_workflow_is_untouched_by_the_coverage_gate():
