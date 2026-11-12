@@ -83,6 +83,8 @@ SCHEMA_MIGRATIONS = (
     "039_remove_seeded_taxonomy.sql",
     # Spec 023: retire only system-owned market-domain vocabulary.
     "040_retire_market_domain_vocabulary.sql",
+    # Spec 025: seed-only Instagram host attribution; never an evidence transformation.
+    "041_instagram_attribution.sql",
 )
 
 

@@ -47,7 +47,7 @@ for collection and confirm the host tooling is connected to it; with several bro
 If tooling asks for or refuses origin access (source site or loopback relay), stop and ask the
 requester to grant access in the host; ungranted means that source is unavailable for this run.
 
-Call `prepare_host_browser_search` with source="tiktok" or source="threads", explicit task/session
+Call `prepare_host_browser_search` with source="tiktok", "threads" or "instagram" (TACTICAL only), explicit task/session
 references, authorization, result and lifetime bounds. For MISSION, use the confirmed mission ID,
 queries=[] and result_limit=20; the mission supplies the full query union, including falsifiers.
 When both sources are in scope, prepare sibling tickets for the same mission/task/session/frame,
@@ -56,13 +56,13 @@ stage both before submitting either, and compose one mission run. Preparation ho
 Open the returned loopback relay in the confirmed browser. For each query, check
 cancellation/expiry and owner interruption, click "Open search" in the relay (a few seconds apart), wait for results to load,
 evaluate `tab_script` once in the relay-opened source tab, then read its status and counts.
-Threads encrypts the answer and navigates the same tab to a relay receiver page (a task-created tab).
+Threads and Instagram encrypt the answer and navigate the same tab to a relay receiver page (a task-created tab).
 Close task-created tabs only after the relay shows `STAGED` or after submit.
 Never close a tab immediately after `posted: true`; navigation is delayed and the answer may be lost.
 TikTok posts to its relay opener. The host sees status and counts only. Source-tab conduct is read-only:
 no typing, clicking, scrolling, signing in, consenting or challenge solving.
-If automatic handoff fails, stop and report; manual Stage-answer requires the full envelope: `source` (Threads only,
-`"threads"`), `request_id`, `host_task_ref`, `session_ref`, `extractor_version` from prepare, and
+If automatic handoff fails, stop and report; manual Stage-answer requires the full envelope: `source` (Threads and
+Instagram only, `"threads"` or `"instagram"`), `request_id`, `host_task_ref`, `session_ref`, `extractor_version` from prepare, and
 `answers`: one answer per approved query in prepare order, each the packaged extractor's retained object.
 Transfer that envelope directly into Search answer JSON and click Stage answer; never reconstruct, transcribe or repair
 model-built records. A rejected payload closes the relay: prepare a new ticket before staging again.

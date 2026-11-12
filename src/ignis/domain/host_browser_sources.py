@@ -27,6 +27,8 @@ class HostBrowserSource:
     measured_counters: bool
     # The content id encodes the publication second (Spec 025 FR-007); checked live before use.
     dates_from_content_id: bool = False
+    display_name: str = ""
+    sample_note: str = "Bounded visible public video grid; window and counters unmeasured"
 
     def search_url(self, query: str) -> str:
         return self.origin + self.search_path + "?q=" + quote(query, safe="")
@@ -42,7 +44,7 @@ _SOURCES = MappingProxyType({
         origin="https://www.tiktok.com", search_path="/search/video", transport="opener_post_message",
         record_path=r"^/@[A-Za-z0-9_.]+/video/[0-9]+$",
         accepted_record_path=r"/(?:@[A-Za-z0-9_.]+/video/|share/video/)[0-9]+",
-        canonical_path="/share/video/", extractor_version="tiktok-public-grid-v4", platform="tiktok",
+        canonical_path="/share/video/", extractor_version="tiktok-public-grid-v4", platform="tiktok", display_name="TikTok",
         sampling_ordering="visible_grid", legacy_envelope=True, localized_attribution=True,
         validates_locale=False, measured_counters=False, dates_from_content_id=True,
     ),
@@ -50,9 +52,19 @@ _SOURCES = MappingProxyType({
         origin="https://www.threads.com", search_path="/search", transport="fragment_receive",
         record_path=r"^/(?:@[A-Za-z0-9_.]+/post/|t/)[A-Za-z0-9_-]+(?:/media)?/?$",
         accepted_record_path=r"/(?:@[A-Za-z0-9_.]+/post/|t/)([A-Za-z0-9_-]+)(?:/media)?/?",
-        canonical_path="/t/", extractor_version="threads-search-top-v2", platform="threads",
+        canonical_path="/t/", extractor_version="threads-search-top-v2", platform="threads", display_name="Threads",
         sampling_ordering="top_visible_sample", legacy_envelope=False, localized_attribution=False,
         validates_locale=True, measured_counters=True,
+    ),
+    # T020 spike: Instagram drops window.opener on load, so the answer returns by fragment.
+    "instagram": HostBrowserSource(
+        origin="https://www.instagram.com", search_path="/explore/search/keyword/", transport="fragment_receive",
+        record_path=r"^/(?:p|reel)/[A-Za-z0-9_-]+/?$",
+        accepted_record_path=r"/(?:p|reel)/([A-Za-z0-9_-]+)/?",
+        canonical_path="/p/", extractor_version="instagram-keyword-grid-v1", platform="reels",
+        sampling_ordering="visible_grid", legacy_envelope=False, localized_attribution=False,
+        validates_locale=True, measured_counters=False, display_name="Instagram",
+        sample_note="Bounded visible keyword grid captions; window, dates and counters unmeasured",
     ),
 })
 

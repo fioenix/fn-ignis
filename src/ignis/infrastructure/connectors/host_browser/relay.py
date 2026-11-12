@@ -153,7 +153,7 @@ class LoopbackRelay:
             relay_data=json.dumps(dict(
                 request_id=request.get("request_id"), host_task_ref=request.get("host_task_ref"),
                 session_ref=request.get("session_ref"), extractor_version=request.get("extractor_version"),
-                source=self._source, origin=self._descriptor.origin,
+                source=self._source, origin=self._descriptor.origin, legacy_envelope=self._descriptor.legacy_envelope,
                 queries=queries,
                 **({"fragment_key": self._fragment_key} if self._descriptor.transport == "fragment_receive" else {}),
             ), ensure_ascii=False).replace("<", "\\u003c"),

@@ -41,8 +41,8 @@ For a Codex-only installation with separate UAT storage, run
 `./scripts/bootstrap.sh --client codex --env-file /absolute/path/to/uat/.env`.
 Other client configurations remain unchanged; omitting these options retains the all-client setup.
 
-The current source tree contains migrations through `sql/040_retire_market_domain_vocabulary.sql`.
-Migration 040 deletes only `system` rows in the seven retired market vocabulary domains; operator
+The current source tree contains migrations through `sql/041_instagram_attribution.sql`, a seed-only row of
+Instagram attribution wording for host-browser search. Migration 040 deletes only `system` rows in the seven retired market vocabulary domains; operator
 rows and stored evidence remain unchanged. SQLite applies it at bootstrap; existing PostgreSQL
 stores apply only this pending migration after 039. `register_domain_lexicon` still stores and lists
 market terms, but they no longer affect topic matching or language detection. Filtering,
@@ -138,8 +138,9 @@ diagrams of this branch.
 
 ### Threads host collection and period paths
 
-`prepare_host_browser_search` accepts optional `source="threads"`; omitting it keeps
-`source="tiktok"`. Submit and cancel keep their three ID parameters. There are still 41 tools.
+`prepare_host_browser_search` accepts optional `source="threads"` or `source="instagram"`; omitting it
+keeps `source="tiktok"`. Instagram reads captions from the signed-in keyword grid (TACTICAL only for now);
+the retired `reels` surface stays refused. Submit and cancel keep their three ID parameters. There are still 41 tools.
 Threads collection uses only the authorized host browser. Internal Playwright collection and
 placeholder suggestion/trending tools have been removed. Stored Threads credentials do not
 establish collection readiness. No API grant probe or API fallback is activated.

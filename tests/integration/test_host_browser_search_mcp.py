@@ -128,7 +128,7 @@ async def test_bound_mission_scope_is_not_rebound_for_a_different_caller(monkeyp
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("source", ["instagram", "threads-mcp-keyword-v1", "THREADS", ""])
+@pytest.mark.parametrize("source", ["reels", "threads-mcp-keyword-v1", "THREADS", "INSTAGRAM", ""])
 async def test_unsupported_host_source_is_refused_before_transport_or_storage(monkeypatch, source):
     monkeypatch.setattr(server, "get_components", lambda: pytest.fail("Invalid source reached storage"))
     result = await server.handle_prepare_host_browser_search(

@@ -4,7 +4,7 @@
 > - **Phiên bản:** `v0.10.0`
 > - **Kiến trúc:** Clean Architecture + Dual-Backend (Postgres TimescaleDB & Zero-Docker SQLite)
 >   + FastMCP Server (41 tools); watchlist có phiên bản, kế hoạch nghe và hai trục `seen` / `created`.
-> - **Schema:** Migration mới nhất là `sql/040_retire_market_domain_vocabulary.sql`.
+> - **Schema:** Migration mới nhất là `sql/041_instagram_attribution.sql` (chỉ seed).
 > - **Thu thập:** YouTube Data API, Threads và TikTok qua trình duyệt host, bình luận TikTok theo URL.
 >   Đã ngừng RSS, Creative Center, tìm kiếm TikTok headless và Reels; bỏ taxonomy ngành và từ vựng
 >   thị trường nạp sẵn. Ignis không có worker hay lịch khám phá hằng ngày.

@@ -88,9 +88,9 @@ def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
             raise ValueError("Search page does not match the approved query")
         if descriptor.validates_locale:
             if not re.fullmatch(r"[a-z]{2,8}|unsupported", item.locale or "") or item.status == "EMPTY_NO_DATA":
-                raise ValueError("Unsupported Threads locale or unproved empty state")
+                raise ValueError("Unsupported page locale or unproved empty state")
             if item.locale == "unsupported" and (item.status != "DEGRADED" or item.records or item.search_verified):
-                raise ValueError("Unsupported Threads locale cannot provide verified observations")
+                raise ValueError("Unsupported page locale cannot provide verified observations")
         if not request.issued_at <= item.captured_at <= min(now, request.expires_at):
             raise ValueError("Capture is outside the task lifetime")
         if len(item.records) > query.result_limit:
@@ -132,6 +132,10 @@ def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
             if descriptor.measured_counters:
                 observation.update(source=request.source, source_verifiable=cleaned_url is not None,
                                    counters=_counters(record.counters, action_labels.get(item.locale, {})), **path)
+            elif not descriptor.legacy_envelope:
+                if record.counters:
+                    raise ValueError("This source measures no counters")
+                observation.update(source=request.source, source_verifiable=cleaned_url is not None, **path)
             observations.append(observation)
             if author_records is not None:
                 # This private in-memory input reaches canonical author policy, never a receipt/store.
@@ -139,9 +143,12 @@ def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
         status = "DEGRADED" if item.status == "HEALTHY" and not count else item.status
         outcome = dict(query_id=query.query_id, query=query.query, status=status, signals_collected=count,
                        queried_window=None, search_verified=item.search_verified,
-                       note="Bounded visible public video grid; window and counters unmeasured")
+                       note=descriptor.sample_note)
+        unsupported = descriptor.display_name + " page locale is unsupported; no observations collected"
+        if not descriptor.legacy_envelope and not descriptor.measured_counters:
+            outcome.update(**path, note=unsupported if item.locale == "unsupported" else descriptor.sample_note)
         if descriptor.measured_counters:
-            outcome.update(**path, note=("Threads page locale is unsupported; no observations collected"
+            outcome.update(**path, note=(unsupported
                                          if item.locale == "unsupported" else
                                          ("Bounded visible Top sample; counters unmeasured for locale " + item.locale
                                           if not action_labels.get(item.locale) else

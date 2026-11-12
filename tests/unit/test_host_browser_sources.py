@@ -44,7 +44,7 @@ def test_existing_source_values(name, origin, path, transport, record_path, cont
         source.origin = "https://invalid.example"
 
 
-@pytest.mark.parametrize("name", ["instagram", "reels", "", "THREADS"])
+@pytest.mark.parametrize("name", ["reels", "", "THREADS", "INSTAGRAM"])
 def test_unknown_source_is_refused(name):
     with pytest.raises(ValueError, match="Unsupported host search source"):
         get_source(name)
@@ -59,3 +59,21 @@ def test_existing_canonical_inputs_remain_accepted(name, path):
     source = get_source(name)
     assert re.fullmatch(source.accepted_record_path, path)
     assert source.canonical_url(path) == _content_url(name, source.origin + path)
+
+
+def test_instagram_descriptor_routes_the_keyword_grid_without_the_retired_reels_surface():
+    source = get_source("instagram")
+    assert source.origin == "https://www.instagram.com"
+    assert source.search_url("áo khoác") == "https://www.instagram.com/explore/search/keyword/?q=%C3%A1o%20kho%C3%A1c"
+    assert source.transport == "fragment_receive"
+    assert source.platform == "reels"
+    assert source.extractor_version == _version_for_source("instagram") == "instagram-keyword-grid-v1"
+    assert source.sampling_ordering == "visible_grid"
+    for path in ("/p/DQx_1-a/", "/reel/DQx_1-a/", "/p/DQx_1-a"):
+        assert re.fullmatch(source.record_path, path) and re.fullmatch(source.accepted_record_path, path)
+        assert _content_url("instagram", source.origin + path) == "https://www.instagram.com/p/DQx_1-a"
+    for raw in ("https://www.instagram.com/fixture.account/p/DQx_1-a/", "https://www.instagram.com/fixture.account/",
+                "https://www.instagram.com/p/DQx_1-a/?igsh=1", "https://www.threads.com/t/DQx_1-a",
+                "https://www.tiktok.com/share/video/123"):
+        with pytest.raises(ValueError):
+            _content_url("instagram", raw)

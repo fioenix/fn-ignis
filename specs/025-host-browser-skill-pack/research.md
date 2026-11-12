@@ -125,3 +125,23 @@ Findings outside the relay guide: finding 1 (the packaged path works) needs no r
 can carry creator names) is an extractor matter the owner settled as free text outside Principle VII
 (Spec 025 OQ-2, TikTok guide); finding 6 (TikTok dates) is Phase 5, T016–T019; finding 7 (Instagram
 captions only) belongs to Phase 6.
+
+## T020 Instagram transport spike (2026-11-12)
+
+Owner authorized a real Instagram session on the Finos profile (spec Clarifications, 2026-11-12). A local page on
+`127.0.0.1` with one button opened `https://www.instagram.com/explore/search/keyword/?q=áo%20khoác%20chống%20nắng`
+in a new tab on click, as the relay does. After load, one read-only evaluation in that tab returned:
+
+| Check | Result |
+|---|---|
+| `window.opener` | `null`: the opener does not survive Instagram's load |
+| `<html lang>` | `en` |
+| Sign-in wall | none |
+| Tiles linking `/p/<id>/` | 24 (no `/reel/<id>/` link on this grid) |
+| Tile icon labels | `Reel`, `Carousel`, none |
+| Tiles with a caption in `img[alt]` | 12, mean 367 characters |
+| Captions with an `@mention` | 1 |
+| Captions starting with an author attribution | 0 |
+
+Transport chosen: `fragment_receive` (Threads' path). No click, typing or scrolling on the Instagram page; both tabs
+closed after the check. 12 captioned tiles is close to SC-002's floor of 10.

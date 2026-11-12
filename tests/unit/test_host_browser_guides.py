@@ -13,6 +13,7 @@ GUIDES = {
     "ignis_browser_relay": "fn-ignis://guide/ignis-browser-relay",
     "ignis_tiktok_browser": "fn-ignis://guide/ignis-tiktok-browser",
     "ignis_threads_browser": "fn-ignis://guide/ignis-threads-browser",
+    "ignis_instagram_browser": "fn-ignis://guide/ignis-instagram-browser",
 }
 REPO = Path(__file__).resolve().parents[2]
 
@@ -48,7 +49,7 @@ def test_each_guide_is_a_prompt_and_a_resource_returning_the_packaged_text():
 
 
 def test_source_guides_point_at_the_shared_relay_guide():
-    for name in ("ignis_tiktok_browser", "ignis_threads_browser"):
+    for name in ("ignis_tiktok_browser", "ignis_threads_browser", "ignis_instagram_browser"):
         assert "`ignis_browser_relay`" in _packaged(name)
 
 

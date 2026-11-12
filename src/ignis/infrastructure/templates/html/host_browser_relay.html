@@ -107,7 +107,7 @@
     if (answers.size === data.queries.length) {
       submitted = true;
       payload.value = JSON.stringify({
-        ...(data.source === 'threads' ? {source: 'threads'} : {}),
+        ...(data.legacy_envelope ? {} : {source: data.source}),
         request_id: data.request_id, host_task_ref: data.host_task_ref, session_ref: data.session_ref,
         extractor_version: data.extractor_version,
         answers: data.queries.map(item => answers.get(item.query_id)),

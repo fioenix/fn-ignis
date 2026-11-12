@@ -82,6 +82,8 @@ class HostBrowserSearchService:
         if threads_attribution_templates is None:
             threads_attribution_templates = seeded_lexicon_terms("036_threads_attribution.sql", "threads_attribution")
         self._attribution_templates["threads"] = tuple(threads_attribution_templates)
+        self._attribution_templates["instagram"] = tuple(
+            seeded_lexicon_terms("041_instagram_attribution.sql", "instagram_attribution"))
 
     def register_attribution_templates(self, templates, *, source="tiktok") -> None:
         """Replace one source's templates; empty means unavailable, never a cross-source fallback."""
