@@ -98,6 +98,7 @@ src/ignis/infrastructure/connectors/host_browser/
 ├── instagram_search.js     # NEW: instagram-keyword-grid-v1
 └── instagram_handoff.js    # NEW: handoff for the transport T020 selects (opener postMessage or fragment); relay.py loads <source>_handoff.js for every transport
 src/ignis/application/use_cases/host_browser_search.py  # descriptor; TikTok published_at derivation hook
+src/ignis/infrastructure/templates/html/host_browser_relay.html  # answer envelope carries the descriptor's source (TikTok keeps the legacy envelope)
 src/ignis/domain/tiktok_video_id.py                      # NEW: decode publish second from a video id
 src/ignis/interfaces/mcp/guides/
 ├── ignis_browser_relay.md      # NEW shared reference
