@@ -49,6 +49,9 @@ in the order the live run proved, and recovers from each known failure without a
 - Q: A TikTok video id that decodes to a time slightly after capture? → A: Up to one day later is clamped to the
   capture time (clock skew); later than that, or before 2016-09-01, the date stays null (agent decided; basis: FR-007
   and the validator rule that publication cannot follow capture).
+- Q: Do TikTok period views mix the first-collection and publish-day bases across the FR-007 upgrade? → A: No;
+  the TikTok extractor version moves to `tiktok-public-grid-v4`, so its collection path changes and periods across
+  the upgrade report `collection_path_changed` (owner decided, chat 2026-11-12).
 
 ## User Scenarios & Testing *(mandatory)*
 

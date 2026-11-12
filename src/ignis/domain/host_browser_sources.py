@@ -41,7 +41,7 @@ _SOURCES = MappingProxyType({
         origin="https://www.tiktok.com", search_path="/search/video", transport="opener_post_message",
         record_path=r"^/@[A-Za-z0-9_.]+/video/[0-9]+$",
         accepted_record_path=r"/(?:@[A-Za-z0-9_.]+/video/|share/video/)[0-9]+",
-        canonical_path="/share/video/", extractor_version="tiktok-public-grid-v3", platform="tiktok",
+        canonical_path="/share/video/", extractor_version="tiktok-public-grid-v4", platform="tiktok",
         sampling_ordering="visible_grid", legacy_envelope=True, localized_attribution=True,
         validates_locale=False, measured_counters=False, dates_from_content_id=True,
     ),

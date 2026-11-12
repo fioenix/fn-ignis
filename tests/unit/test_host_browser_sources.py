@@ -15,7 +15,7 @@ from ignis.domain.host_browser_search import _version_for_source
     [
         ("tiktok", "https://www.tiktok.com", "/search/video", "opener_post_message",
          r"^/@[A-Za-z0-9_.]+/video/[0-9]+$", "/@fixture/video/123456789",
-         "https://www.tiktok.com/share/video/123456789", "tiktok-public-grid-v3", "visible_grid"),
+         "https://www.tiktok.com/share/video/123456789", "tiktok-public-grid-v4", "visible_grid"),
         ("threads", "https://www.threads.com", "/search", "fragment_receive",
          r"^/(?:@[A-Za-z0-9_.]+/post/|t/)[A-Za-z0-9_-]+(?:/media)?/?$", "/@fixture/post/Ab_12/media",
          "https://www.threads.com/t/Ab_12", "threads-search-top-v2", "top_visible_sample"),

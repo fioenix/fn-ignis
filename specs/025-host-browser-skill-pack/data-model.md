@@ -15,7 +15,7 @@ One immutable record per `source` value (`tiktok`, `threads`, `instagram`).
 | `record_path` | `^/@[A-Za-z0-9_.]+/video/[0-9]+$` | `^/(?:@[A-Za-z0-9_.]+/post/|t/)[A-Za-z0-9_-]+(?:/media)?/?$` | `^/(?:p|reel)/[A-Za-z0-9_-]+/?$` |
 | `accepted_record_path` (validator) | `^/(?:@[A-Za-z0-9_.]+/video/|share/video/)[0-9]+$` | same as `record_path` | same as `record_path` |
 | `canonical_url(path)` | `/share/video/<id>` | `/t/<id>` | `/p/<id>/` |
-| `extractor_version` | `tiktok-public-grid-v3` | `threads-search-top-v2` | `instagram-keyword-grid-v1` |
+| `extractor_version` | `tiktok-public-grid-v4` (v3 before FR-007) | `threads-search-top-v2` | `instagram-keyword-grid-v1` |
 | `platform` | `tiktok` | `threads` | `reels` |
 | `connector_surface` | existing | existing | `instagram_host_browser` (never `reels`, which stays retired) |
 | `sampling.ordering` | `visible_grid` | `top_visible_sample` | `visible_grid` |

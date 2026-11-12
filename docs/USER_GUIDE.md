@@ -332,8 +332,10 @@ A mission naming a retired surface returns `BLOCKED / SURFACE_RETIRED` before co
 A watchlist run removes retired entries from its requested resources and reports them explicitly;
 if none remain, it is blocked. Retirement is never a measured zero.
 
-TikTok now uses `tiktok-public-grid-v3`; Threads uses `threads-search-top-v2`. Watchlist periods
-spanning the upgrade report `not_comparable` with `collection_path_changed` or
+TikTok now uses `tiktok-public-grid-v4`; Threads uses `threads-search-top-v2`. In v4 a TikTok
+observation's publication time is decoded from its video id (the id's upper 32 bits are the publish
+second), so its watchlist period follows the publish day instead of the first collection; v3 kept it
+unknown. Watchlist periods spanning either upgrade report `not_comparable` with `collection_path_changed` or
 `collection_path_mixed` when their collection paths differ or mix.
 
 Threads `threads-search-top-v2` collects a bounded visible Top sample on `www.threads.com/search`.

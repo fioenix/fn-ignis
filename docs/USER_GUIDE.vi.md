@@ -329,8 +329,10 @@ Mission có nguồn đã ngừng hoạt động trả `BLOCKED / SURFACE_RETIRED
 Lượt chạy watchlist loại những nguồn đó khỏi danh sách được yêu cầu và nêu rõ từng nguồn;
 nếu không còn nguồn nào, lượt chạy bị từ chối. Nguồn đã ngừng hoạt động không được tính là số 0 đã đo.
 
-TikTok hiện dùng `tiktok-public-grid-v3`; Threads dùng `threads-search-top-v2`. Các kỳ watchlist
-trải qua thời điểm nâng cấp trả về `not_comparable` với lý do `collection_path_changed` hoặc
+TikTok hiện dùng `tiktok-public-grid-v4`; Threads dùng `threads-search-top-v2`. Từ v4, thời điểm
+đăng của mỗi quan sát TikTok được giải mã từ video id (32 bit cao của id là giây đăng), nên kỳ watchlist
+xếp theo ngày đăng thay vì ngày thu thập đầu tiên; v3 để trống thời điểm này. Các kỳ watchlist trải
+qua một trong hai lần nâng cấp trả về `not_comparable` với lý do `collection_path_changed` hoặc
 `collection_path_mixed` khi đường thu thập khác nhau hoặc bị trộn trong kỳ.
 
 Threads `threads-search-top-v2` chỉ lấy mẫu Top hữu hạn đang hiển thị trên

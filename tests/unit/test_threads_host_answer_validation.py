@@ -28,7 +28,7 @@ def record_data(**overrides):
 
 def answer_data(source=None, **overrides):
     data = dict(request_id="request", host_task_ref="task", session_ref="session",
-                extractor_version="tiktok-public-grid-v3" if source is None else "threads-search-top-v2",
+                extractor_version="tiktok-public-grid-v4" if source is None else "threads-search-top-v2",
                 answers=[dict(query_id="q1", query="synthetic query", page_url="https://www.threads.com/search?q=synthetic%20query",
                               captured_at=CLOCK, search_verified=True, empty_state_visible=False,
                               status="HEALTHY", records=[record_data()])])
@@ -49,7 +49,7 @@ def test_legacy_tiktok_envelopes_keep_their_default_source_and_wire_shape():
     legacy = answer_data()
     answer = HostSearchAnswer.model_validate(legacy)
     assert request.source == answer.source == "tiktok"
-    assert request.extractor_version == answer.extractor_version == "tiktok-public-grid-v3"
+    assert request.extractor_version == answer.extractor_version == "tiktok-public-grid-v4"
     assert "source" not in request.model_dump(mode="json")
     assert answer.model_dump(mode="json") == legacy
 
@@ -61,15 +61,15 @@ def test_threads_request_and_answer_freeze_matching_source_and_version():
     assert request.extractor_version == answer.extractor_version == "threads-search-top-v2"
     assert request.model_dump(mode="json")["source"] == "threads"
     for envelope in (request, answer):
-        for field, value in (("source", "tiktok"), ("extractor_version", "tiktok-public-grid-v3")):
+        for field, value in (("source", "tiktok"), ("extractor_version", "tiktok-public-grid-v4")):
             with pytest.raises(ValidationError, match="frozen"):
                 setattr(envelope, field, value)
 
 
 @pytest.mark.parametrize("source,version", [
-    ("instagram", "threads-search-top-v2"), ("threads", "tiktok-public-grid-v3"),
+    ("instagram", "threads-search-top-v2"), ("threads", "tiktok-public-grid-v4"),
     ("tiktok", "threads-search-top-v2"), ("threads", "threads-mcp-keyword-v1"),
-    ("threads", "threads-search-top-v1"),
+    ("threads", "threads-search-top-v1"), ("tiktok", "tiktok-public-grid-v3"),
 ])
 def test_unsupported_or_cross_source_versions_are_not_browser_envelopes(source, version):
     with pytest.raises(ValidationError):
@@ -397,3 +397,15 @@ def test_t058_casefold_action_label_collision_fails_closed(labels):
             for kind, term in zip(("likes", "replies"), labels)]
     with pytest.raises(ValueError, match="Ambiguous"):
         action_labels_from_rows(rows)
+
+
+def test_threads_never_derives_a_publication_time_from_its_post_id(threads_service):
+    """Spec 025 FR-007 applies to TikTok ids only; a Threads record without a clock stays undated."""
+    from tests.fixtures.meta_host_browser_answers import host_answer
+    request = threads_request(threads_service)
+    payload = host_answer(request)
+    for record in payload["answers"][0]["records"]:
+        record["published_at"] = None
+    threads_service.stage(request["request_id"], payload)
+    receipt = threads_service.submit(request["request_id"], "task", "session")
+    assert receipt["observations"] and all(item["published_at"] is None for item in receipt["observations"])
