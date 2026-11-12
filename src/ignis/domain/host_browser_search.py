@@ -7,7 +7,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationInfo
 from ignis.domain.host_browser_sources import get_source
 
 HostSearchSource = Literal["tiktok", "threads"]
-HostExtractorVersion = Literal["tiktok-public-grid-v3", "threads-search-top-v2"]
+HostExtractorVersion = Literal["tiktok-public-grid-v4", "threads-search-top-v2"]
 
 
 def _version_for_source(source: HostSearchSource) -> HostExtractorVersion:
@@ -30,7 +30,7 @@ class HostSearchRequest(HostEnvelope):
     mode: Literal["TACTICAL", "MISSION"] = "TACTICAL"
     # Omit the legacy default on serialization to preserve existing TikTok envelopes.
     source: HostSearchSource = "tiktok"
-    extractor_version: HostExtractorVersion = "tiktok-public-grid-v3"
+    extractor_version: HostExtractorVersion = "tiktok-public-grid-v4"
     request_id: str
     host_task_ref: str = Field(min_length=1, max_length=128)
     session_ref: str = Field(min_length=1, max_length=128)

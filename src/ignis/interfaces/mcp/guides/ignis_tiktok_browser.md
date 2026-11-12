@@ -6,7 +6,7 @@ Use with the `ignis_browser_relay` guide, which holds the shared steps and failu
 - Transport: the tab script posts the answer to its relay opener and returns
   `{posted, status, records}` synchronously. If it returns
   `{posted: false, reason: 'This tab was not opened by the relay'}`, reopen the search from the relay button.
-- Extractor `tiktok-public-grid-v3` keeps only each video's caption element and the hashtags after it. The
+- Extractor `tiktok-public-grid-v4` keeps only each video's caption element and the hashtags after it. The
   interface language does not gate records.
 - Each observation has a canonical `https://www.tiktok.com/share/video/<id>` link without the account.
   Views and interactions are unknown. `published_at` is decoded from the video id (its upper 32 bits are

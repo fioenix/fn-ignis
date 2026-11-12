@@ -228,3 +228,16 @@ def test_t058_tiktok_v1_and_locale_gated_v2_periods_are_not_comparable(axis):
     result = compare(axis, [before], [after], channel="tiktok")
     assert result["status"] == "not_comparable"
     assert "collection_path_changed" in result["reasons"]
+
+
+@pytest.mark.parametrize("axis", ["seen", "created"])
+def test_tiktok_publish_day_dating_is_a_new_collection_path(axis):
+    """Spec 025 FR-007: v4 dates TikTok by publish second, so periods across the upgrade never compare."""
+    from ignis.infrastructure.connectors.host_browser.validator import collection_path
+    from ignis.domain.host_browser_sources import get_source
+    before = {"collection_path": "host_browser:tiktok-public-grid-v3", "connector_revision": "tiktok-public-grid-v3",
+              "sampling": {"limit": 20, "ordering": "visible_grid"}}
+    after = collection_path("tiktok", get_source("tiktok").extractor_version, 20)
+    result = compare(axis, [before], [after], channel="tiktok")
+    assert result["status"] == "not_comparable"
+    assert "collection_path_changed" in result["reasons"]

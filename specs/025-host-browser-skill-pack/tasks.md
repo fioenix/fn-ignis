@@ -62,7 +62,8 @@ The T001 installed-asset check and its limit are recorded in `quickstart.md`.
 Deviation (2026-11-12): T018 applies the decode where observations are built, in
 `src/ignis/infrastructure/connectors/host_browser/validator.py`, through a descriptor flag
 `dates_from_content_id`, so TACTICAL receipts and MISSION ingestion both get it; the use case builds no
-observations itself.
+observations itself. After review, the owner chose (2026-11-12) to move TikTok to `tiktok-public-grid-v4` so period
+views never mix the two date bases under one collection path.
 
 ## Phase 6: User Story 2 — Instagram keyword search through the host browser (P2)
 

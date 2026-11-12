@@ -77,7 +77,7 @@ async def test_existing_writer_seam_rechecks_before_any_ingress(repository_case,
 
 def staged_answer(request):
     return dict(request_id=request["request_id"], host_task_ref="task", session_ref="chrome",
-                extractor_version="tiktok-public-grid-v3", answers=[dict(
+                extractor_version="tiktok-public-grid-v4", answers=[dict(
                     query_id=query["query_id"], query=query["query"], page_url=query["search_url"],
                     captured_at=datetime.now(timezone.utc).isoformat(), search_verified=True,
                     empty_state_visible=False, status="HEALTHY", locale="vi", records=[dict(

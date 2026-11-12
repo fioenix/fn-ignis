@@ -64,7 +64,7 @@ def prepare(service, **overrides):
 def answer(request, **overrides):
     query = request["queries"][0]
     payload = dict(request_id=request["request_id"], host_task_ref="task-1", session_ref="chrome-1",
-                   extractor_version="tiktok-public-grid-v3", answers=[dict(
+                   extractor_version="tiktok-public-grid-v4", answers=[dict(
                        query_id=query["query_id"], query=query["query"], page_url=query["search_url"],
                        captured_at=datetime.now(timezone.utc).isoformat(), search_verified=True,
                        empty_state_visible=False, status="HEALTHY", locale="vi", records=[dict(
@@ -99,7 +99,7 @@ def test_tactical_result_retains_unknown_metrics_and_exact_provenance(service):
     assert record["published_at"] == "2024-09-23T12:50:20+00:00"
     assert record["metric_value"] is None
     assert record["query"] == "túi đi làm"
-    assert record["collection_path"] == "host_browser:tiktok-public-grid-v3"
+    assert record["collection_path"] == "host_browser:tiktok-public-grid-v4"
     assert "mission_id" not in receipt
     assert receipt["outcomes"][0]["queried_window"] is None
     assert service.submit(request["request_id"], "task-1", "chrome-1") == receipt
