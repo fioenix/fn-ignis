@@ -3,14 +3,19 @@ name: CI
 on:
   push:
     branches: [ main, master, develop, "release/*", "hotfix/*" ]
-    # A release tag runs everything, including the migration-chain tests a pull request may skip.
+    # Release tags run PostgreSQL parity as well as SQLite checks.
     tags: [ "v*" ]
   # Every pull request, whatever it targets. The previous filter listed only main, master and
   # develop, so a stacked pull request -- one based on another feature branch while that branch is
   # still in review -- received no checks at all and looked green because nothing had run.
   pull_request:
+  schedule:
+    - cron: "17 3 * * 1"
   workflow_dispatch:
 
+# Read-only, as in compose-init.yml and performance.yml; the weekly run is where a wider token is least watched.
+permissions:
+  contents: read
 
 jobs:
   secrets:
@@ -34,6 +39,78 @@ jobs:
 
   test:
     name: Test & Lint (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-24.04
+    strategy:
+      # Owner-approved representative CI runtime; compatibility checks for the
+      # wider supported range remain part of local development verification.
+      fail-fast: false
+      matrix:
+        python-version: ["3.12"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.12.17"
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      # --locked installs the exact solution in the committed uv.lock and fails if that lock
+      # disagrees with pyproject.toml. uv pip install re-resolved from the dependency ranges, so
+      # CI could pass on versions no released checkout would ever reproduce.
+      - name: Install locked dependencies
+        run: |
+          uv venv
+          uv sync --locked --extra dev --extra browser
+
+      # Browser extras install the Python API, not its matching browser or Linux libraries.
+      - name: Install locked Playwright Chromium
+        run: |
+          .venv/bin/python -m playwright install --with-deps chromium
+
+      - name: Run Ruff Linter
+        run: |
+          uv run ruff check src/ tests/
+
+      # File groups preserve module fixtures; PostgreSQL tests skip when no test DSN is set.
+      # sysmon uses Python 3.12's lower-overhead coverage instrumentation.
+      - name: Run Test Suite with Coverage
+        env:
+          COVERAGE_CORE: sysmon
+        run: |
+          uv run pytest tests/ -v -n 4 --dist loadgroup --cov=ignis --cov-report=term-missing
+
+      - name: Verify Clean Packaging (uv build)
+        run: |
+          uv build
+
+      # The clean-user journey -- bootstrap from a clean checkout, registration, stdio handshake,
+      # 41-tool discovery, a real tool call -- runs inside the suite above as
+      # tests/integration/test_clean_user_journey.py, against the source tree.
+      #
+      # This step covers what that cannot: the wheel. It installs the built artifact into its own
+      # environment and completes an MCP session from it, so a packaging mistake that an editable
+      # install hides -- a missing template, an unshipped SQL seed -- fails here rather than in a
+      # user's first run. The previous step installed the source tree with `uv pip install -e` and
+      # only imported the module, which proved neither packaging nor usability.
+      - name: Verify the Built Wheel Serves a Real MCP Session
+        run: |
+          set -euo pipefail
+          WHEEL="$(ls "${GITHUB_WORKSPACE}"/dist/*.whl | head -1)"
+          echo "Testing wheel: ${WHEEL}"
+          mkdir -p /tmp/wheel-test && cd /tmp/wheel-test
+          uv venv
+          uv pip install --python .venv/bin/python "${WHEEL}"
+          printf 'DATABASE_URL=sqlite:///%s/wheel_smoke.db\nDEFAULT_GEO=VN\n' "$(pwd)" > wheel.env
+          IGNIS_ENV_FILE="$(pwd)/wheel.env" .venv/bin/python "${GITHUB_WORKSPACE}/scripts/wheel_mcp_smoke.py"
+
+  postgres:
+    name: PostgreSQL parity (Python 3.12)
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     env:
       IGNIS_TEST_POSTGRES_DSN: postgresql://postgres:ignis_test@localhost:5432/postgres
@@ -86,13 +163,6 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-    strategy:
-      # Owner-approved representative CI runtime; compatibility checks for the
-      # wider supported range remain part of local development verification.
-      fail-fast: false
-      matrix:
-        python-version: ["3.12"]
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -102,8 +172,8 @@ jobs:
         with:
           version: "0.12.17"
 
-      - name: Set up Python ${{ matrix.python-version }}
-        run: uv python install ${{ matrix.python-version }}
+      - name: Set up Python 3.12
+        run: uv python install 3.12
 
       # --locked installs the exact solution in the committed uv.lock and fails if that lock
       # disagrees with pyproject.toml. uv pip install re-resolved from the dependency ranges, so
@@ -117,33 +187,6 @@ jobs:
       - name: Install locked Playwright Chromium
         run: |
           .venv/bin/python -m playwright install --with-deps chromium
-
-      - name: Run Ruff Linter
-        run: |
-          uv run ruff check src/ tests/
-
-      # The migration-chain tests (pytest marker `migration_chain`) build the PostgreSQL migration
-      # chain themselves and cost about three minutes. A pull request skips them unless it changes
-      # sql/, the PostgreSQL persistence code, the integration conftest or one of those tests;
-      # pushes to the branches above, release tags and manual runs always include them. The pull request's HEAD is its merge commit, so a
-      # two-dot diff against the base tip is exactly what the pull request changes.
-      - name: Decide whether this run includes the migration-chain tests
-        id: scope
-        env:
-          EVENT: ${{ github.event_name }}
-          BASE_REF: ${{ github.base_ref }}
-        run: |
-          if [ "$EVENT" != "pull_request" ]; then
-            echo "marker=" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          git fetch --no-tags --depth=1 origin "$BASE_REF"
-          chain='^(sql/|src/ignis/infrastructure/persistence/postgres_|tests/integration/(conftest|test_postgres_rls_coverage|test_postgres_migration_contract|test_mission_progress_schema|test_research_work_schema)\.py$)'
-          if git diff --name-only FETCH_HEAD HEAD | grep -qE "$chain"; then
-            echo "marker=" >> "$GITHUB_OUTPUT"
-          else
-            echo "marker=not migration_chain" >> "$GITHUB_OUTPUT"
-          fi
 
       # The services are throwaway: durability buys nothing and every test copies a template
       # database, which fsyncs it. These three settings take effect on reload, without a restart.
@@ -159,27 +202,13 @@ jobs:
                   conn.execute("SELECT pg_reload_conf()")
           PY
 
-      # About 5,200 tests with no single slow file took 15-20 minutes in one process. pytest-xdist
-      # spreads them over the runner's four cores, one test file per worker at a time (--dist
-      # loadgroup, with tests/conftest.py marking each test with its file), so a module's fixtures
-      # and ordering stay as they were; only the long files in SPREAD_ACROSS_WORKERS are split
-      # test by test so one worker does not finish minutes after the others. Each worker runs against
-      # its own PostgreSQL service from IGNIS_TEST_POSTGRES_DSN_POOL, so it sees a server exactly
-      # as the serial run did; -n must not exceed the pool. pytest-cov combines the workers' data
-      # into the same .coverage file the SC-004 gate below reads.
-      #
-      # COVERAGE_CORE=sysmon measures through Python 3.12's sys.monitoring instead of a trace
-      # function, which costs far less per line; the measured lines and the report are the same.
+      # One service per worker isolates server-wide roles; include the full migration chain.
+      # sysmon uses Python 3.12's lower-overhead coverage instrumentation.
       - name: Run Test Suite with Coverage
         env:
-          MARKER: ${{ steps.scope.outputs.marker }}
           COVERAGE_CORE: sysmon
         run: |
-          if [ -n "$MARKER" ]; then
-            uv run pytest tests/ -v -n 4 --dist loadgroup --cov=ignis --cov-report=term-missing -m "$MARKER"
-          else
-            uv run pytest tests/ -v -n 4 --dist loadgroup --cov=ignis --cov-report=term-missing
-          fi
+          uv run pytest tests/ -v -n 4 --dist loadgroup --cov=ignis --cov-report=term-missing
 
       # SC-004 promises at least 85% coverage for the Repository, the RSS Plugin, the YouTube
       # Plugin and the Registry. The step above measures the whole package and prints it; this one
@@ -198,27 +227,3 @@ jobs:
       - name: Enforce the SC-004 Coverage Floor
         run: |
           uv run coverage report --rcfile=.coveragerc.sc004
-
-      - name: Verify Clean Packaging (uv build)
-        run: |
-          uv build
-
-      # The clean-user journey -- bootstrap from a clean checkout, registration, stdio handshake,
-      # 41-tool discovery, a real tool call -- runs inside the suite above as
-      # tests/integration/test_clean_user_journey.py, against the source tree.
-      #
-      # This step covers what that cannot: the wheel. It installs the built artifact into its own
-      # environment and completes an MCP session from it, so a packaging mistake that an editable
-      # install hides -- a missing template, an unshipped SQL seed -- fails here rather than in a
-      # user's first run. The previous step installed the source tree with `uv pip install -e` and
-      # only imported the module, which proved neither packaging nor usability.
-      - name: Verify the Built Wheel Serves a Real MCP Session
-        run: |
-          set -euo pipefail
-          WHEEL="$(ls "${GITHUB_WORKSPACE}"/dist/*.whl | head -1)"
-          echo "Testing wheel: ${WHEEL}"
-          mkdir -p /tmp/wheel-test && cd /tmp/wheel-test
-          uv venv
-          uv pip install --python .venv/bin/python "${WHEEL}"
-          printf 'DATABASE_URL=sqlite:///%s/wheel_smoke.db\nDEFAULT_GEO=VN\n' "$(pwd)" > wheel.env
-          IGNIS_ENV_FILE="$(pwd)/wheel.env" .venv/bin/python "${GITHUB_WORKSPACE}/scripts/wheel_mcp_smoke.py"

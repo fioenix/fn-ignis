@@ -20,6 +20,8 @@ import configparser
 import re
 from pathlib import Path
 
+import yaml
+
 REPO = Path(__file__).resolve().parents[2]
 GATE_CONFIG = REPO / ".coveragerc.sc004"
 CI_WORKFLOW = REPO / ".github" / "workflows" / "ci.yml"
@@ -54,6 +56,14 @@ def _gate() -> configparser.ConfigParser:
 def _include_patterns() -> set:
     raw = _gate().get("report", "include")
     return {line.strip() for line in raw.splitlines() if line.strip()}
+
+
+def _postgres_job() -> dict:
+    return yaml.safe_load(_ci_text())["jobs"]["postgres"]
+
+
+def _postgres_text() -> str:
+    return "\n".join(step.get("run", "") for step in _postgres_job()["steps"])
 
 
 def _ci_text() -> str:
@@ -117,7 +127,7 @@ def test_the_floor_is_the_one_the_criterion_states():
 
 
 def test_ci_runs_the_gate_and_does_not_swallow_its_exit_code():
-    text = _ci_text()
+    text = _postgres_text()
     assert ".coveragerc.sc004" in text, (
         "ci.yml never invokes the gate, so the threshold is enforced only by whoever remembers to"
         " run it locally"
@@ -129,16 +139,19 @@ def test_ci_runs_the_gate_and_does_not_swallow_its_exit_code():
         assert not re.search(r"\|\|\s*true", line), (
             f"the gate's exit code is swallowed: {line.strip()}"
         )
-    assert "continue-on-error: true" not in text.split("Enforce the SC-004 Coverage Floor")[-1], (
+    gate = next(step for step in _postgres_job()["steps"]
+                if step.get("name") == "Enforce the SC-004 Coverage Floor")
+    assert gate.get("continue-on-error") is not True, (
         "the gate step is continue-on-error, so falling below the floor leaves the build green"
     )
 
 
 def test_the_gate_reads_the_coverage_data_the_test_run_produced():
     """Measuring twice would double the suite's cost and could disagree with the printed report."""
-    text = _ci_text()
-    test_step = text.index("Run Test Suite with Coverage")
-    gate_step = text.index("Enforce the SC-004 Coverage Floor")
+    text = _postgres_text()
+    names = [step.get("name") for step in _postgres_job()["steps"]]
+    test_step = names.index("Run Test Suite with Coverage")
+    gate_step = names.index("Enforce the SC-004 Coverage Floor")
     assert test_step < gate_step, (
         "the gate runs before the suite, so it reads stale or absent coverage data"
     )
@@ -190,7 +203,7 @@ def test_no_pragma_no_cover_was_added_to_the_promised_scope():
 
 def test_ci_still_reaches_postgres_only_through_the_test_dsn():
     """Half the Repository is the PostgreSQL adapter; without a database those tests skip."""
-    text = _ci_text()
+    text = yaml.safe_dump(_postgres_job())
     assert "IGNIS_TEST_POSTGRES_DSN" in text, (
         "CI no longer provides a test DSN, so the PostgreSQL adapter's tests skip and the gate"
         " scores the Repository on its SQLite half alone"
@@ -202,20 +215,33 @@ def test_ci_still_reaches_postgres_only_through_the_test_dsn():
     # runtime connection variable, and the wheel smoke step legitimately writes a SQLite one into
     # its own throwaway env file -- so what is refused here is a DATABASE_URL carrying a PostgreSQL
     # connection, or one exported to the job where the suite would pick it up.
+    # Scan the whole workflow, not only this job: the pull-request `test` job must not reach a
+    # configured PostgreSQL database either.
     offenders = [
         line.strip()
-        for line in text.splitlines()
+        for line in _ci_text().splitlines()
         if "DATABASE_URL" in line and "postgres" in line.lower()
     ]
     assert not offenders, (
         "CI points DATABASE_URL at a PostgreSQL server, so the suite can reach a configured"
         " database instead of the throwaway service:\n" + "\n".join(offenders)
     )
-    job_env = text.split("env:", 1)[1].split("services:", 1)[0]
+    job_env = _postgres_job()["env"]
     assert "DATABASE_URL" not in job_env, (
         "DATABASE_URL is exported to the whole test job, where the repository would read it in"
         " preference to the throwaway service"
     )
+
+
+def test_the_pull_request_test_job_exports_no_database_url_or_secret():
+    """The SQLite-only job runs on every pull request; it must not receive a database or a secret."""
+    workflow = yaml.safe_load(_ci_text())
+    test_job = workflow["jobs"]["test"]
+    assert "DATABASE_URL" not in (test_job.get("env") or {}), (
+        "DATABASE_URL is exported to the pull-request test job"
+    )
+    assert "DATABASE_URL" not in (workflow.get("env") or {}), "DATABASE_URL is exported workflow-wide"
+    assert "secrets." not in yaml.safe_dump(test_job), "the pull-request test job reads a repository secret"
 
 
 def test_the_performance_workflow_is_untouched_by_the_coverage_gate():
@@ -228,3 +254,12 @@ def test_the_performance_workflow_is_untouched_by_the_coverage_gate():
     assert (REPO / ".github/workflows/performance.yml").exists(), (
         "the separate SC-001 performance workflow is gone"
     )
+
+
+def test_sc004_is_enforced_only_in_postgres_parity():
+    jobs = yaml.safe_load(_ci_text())["jobs"]
+    owners = [job_id for job_id, job in jobs.items()
+              if any("coverage report --rcfile=.coveragerc.sc004" in step.get("run", "")
+                     for step in job["steps"])]
+    assert owners == ["postgres"]
+    assert jobs["postgres"]["if"] == "github.event_name != 'pull_request'"

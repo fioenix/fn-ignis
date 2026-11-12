@@ -11,12 +11,8 @@ enforce rather than report, that PostgreSQL is reached only through the throwawa
 credential can reach a public build log, and that the job carries a name stable enough to be named
 as a required status check.
 
-T024 first kept the gate off pull requests, to spare every push the two 10,000-observation seeds.
-Spec 002 T022 reverses that: pull requests are opened only at the end of a plan, so the cost falls
-once per plan integration, and a check that never reports on a pull request can never be required.
-The workflow therefore runs on every pull request with no branch or path filter -- a required check
-that a filter skips never reports, and the pull request waits forever. That is a policy, so it is
-pinned like one, and so is everything T022 had to leave alone while adding it.
+The owner decision of 2026-11-12 keeps this measurement off pull requests. Protected-branch
+pushes, release tags, weekly and manual runs retain both backend measurements.
 """
 
 import re
@@ -41,16 +37,11 @@ JOB_NAME = "SC-001 get_top_clusters P95"
 # Branches the gate has to cover: the release line, and the hotfix line that bypasses it.
 PROTECTED_BRANCH_PATTERNS = {"main", "release/*", "hotfix/*"}
 
-# The trigger set and values T022 had to keep while adding `pull_request`. Exact, not a floor: a
+# The post-merge trigger set is exact, not a floor: a
 # trigger that quietly gains a filter or loses a branch changes which commits the gate measures.
-EXPECTED_TRIGGERS = {"push", "pull_request", "schedule", "workflow_dispatch"}
-EXPECTED_PUSH = {"branches": ["main", "release/*", "hotfix/*"]}
+EXPECTED_TRIGGERS = {"push", "schedule", "workflow_dispatch"}
+EXPECTED_PUSH = {"branches": ["main", "release/*", "hotfix/*"], "tags": ["v*"]}
 EXPECTED_SCHEDULE = [{"cron": "17 4 * * 1"}]
-
-# Keys that narrow which pull requests run the workflow. Any of them lets a required check go
-# unreported on some pull request, which then waits forever.
-PULL_REQUEST_BRANCH_FILTERS = ("branches", "branches-ignore")
-PULL_REQUEST_PATH_FILTERS = ("paths", "paths-ignore")
 
 # The runtime T021 pinned. Stated literally rather than compared with Compose Init, which is what
 # test_t021_ci_runtime_pinning.py does: T022 must not move these at all, and a pin compared only
@@ -99,19 +90,6 @@ def _steps_text() -> str:
     return "\n".join(step.get("run", "") for step in _job()["steps"])
 
 
-def _pull_request_trigger() -> dict:
-    """The `pull_request` block, asserted present, so no filter check can pass on its absence.
-
-    A bare `pull_request:` parses as None, which is the unfiltered form this gate wants.
-    """
-    triggers = _triggers(_load(PERFORMANCE_WORKFLOW))
-    assert "pull_request" in triggers, (
-        "pull requests do not run the SC-001 gate, so its check never reports on one and cannot be"
-        " made a required status check"
-    )
-    return triggers["pull_request"] or {}
-
-
 # --- the workflow exists and is its own thing ---------------------------------------------------
 
 
@@ -142,41 +120,11 @@ def test_the_gate_runs_on_the_protected_branches_on_a_schedule_and_on_demand():
     )
 
 
-# --- pull requests: the plan-level integration boundary (spec 002 T022) -------------------------
+# --- pull requests remain outside this workflow ------------------------------------------------
 
 
-def test_the_gate_runs_on_pull_requests():
-    """Pull requests open once per plan, so the benchmark's cost lands at that boundary only."""
-    _pull_request_trigger()
-
-
-def test_the_pull_request_trigger_has_no_branch_filter():
-    """A stacked or retargeted pull request must still report, or a required check blocks it."""
-    pull_request = _pull_request_trigger()
-    narrowed = [key for key in PULL_REQUEST_BRANCH_FILTERS if key in pull_request]
-    assert narrowed == [], (
-        f"pull_request is narrowed by {narrowed}. A required check that a branch filter skips"
-        " never reports, so every pull request outside the filter waits forever."
-    )
-
-
-def test_the_pull_request_trigger_has_no_path_filter():
-    """A read-path regression can come from any file, and a skipped required check never reports."""
-    pull_request = _pull_request_trigger()
-    narrowed = [key for key in PULL_REQUEST_PATH_FILTERS if key in pull_request]
-    assert narrowed == [], (
-        f"pull_request is narrowed by {narrowed}. A pull request touching only unmatched paths"
-        " never gets the check, so a required SC-001 status blocks it forever."
-    )
-
-
-def test_the_pull_request_trigger_keeps_the_default_activity_types():
-    """The defaults include `synchronize`; without it a new head commit is never measured."""
-    pull_request = _pull_request_trigger()
-    assert "types" not in pull_request, (
-        f"pull_request is limited to {pull_request.get('types')!r}. Required checks attach to the"
-        " head commit, so a push that no listed type covers leaves the new head unchecked."
-    )
+def test_the_gate_never_runs_on_pull_requests():
+    assert "pull_request" not in _triggers(_load(PERFORMANCE_WORKFLOW))
 
 
 def test_the_gate_never_runs_as_pull_request_target():
@@ -188,7 +136,7 @@ def test_the_gate_never_runs_as_pull_request_target():
 
 
 def test_the_push_schedule_and_dispatch_triggers_are_unchanged():
-    """Adding pull requests must not trade away the post-merge, weekly or manual measurement."""
+    """Keep post-merge, release-tag, weekly and manual measurement."""
     triggers = _triggers(_load(PERFORMANCE_WORKFLOW))
     assert set(triggers) == EXPECTED_TRIGGERS, (
         f"the workflow triggers are {sorted(triggers, key=str)}; expected exactly"
@@ -465,5 +413,5 @@ def test_the_job_is_bounded_by_the_thirty_minute_timeout():
     timeout = _job().get("timeout-minutes")
     assert timeout == TIMEOUT_MINUTES, (
         f"timeout-minutes is {timeout!r}; expected {TIMEOUT_MINUTES}. Without a bound a hung seed"
-        " holds a runner for six hours, and on a pull request it holds the merge too."
+        " holds a runner for six hours."
     )

@@ -42,7 +42,8 @@ UV_BINARY_VERSION = re.compile(r"\d+\.\d+\.\d+")
 
 # Status names branch protection and the release selects. Renaming any of them detaches a rule.
 NAMES = {
-    CI: ("CI", {"secrets": "Secret scan", "test": "Test & Lint (Python ${{ matrix.python-version }})"}),
+    CI: ("CI", {"secrets": "Secret scan", "test": "Test & Lint (Python ${{ matrix.python-version }})",
+                "postgres": "PostgreSQL parity (Python 3.12)"}),
     PERFORMANCE: ("Performance", {"sc001-read-path-p95": "SC-001 get_top_clusters P95"}),
     COMPOSE_INIT: ("Compose Init", {"compose-fresh-init": "Fresh Compose database init"}),
     DOCKER_PUBLISH: ("Docker Publish to GHCR", {"build-and-push": "Build & Push Docker Image"}),
@@ -343,7 +344,7 @@ def test_the_ci_python_matrix_is_the_owner_selected_runtime():
 
 
 def test_the_postgres_services_keep_their_image():
-    for path, job_id in ((CI, "test"), (PERFORMANCE, "sc001-read-path-p95")):
+    for path, job_id in ((CI, "postgres"), (PERFORMANCE, "sc001-read-path-p95")):
         image = _jobs(path)[job_id]["services"]["postgres"]["image"]
         assert image == POSTGRES_SERVICE_IMAGE, f"{path.name} runs PostgreSQL on {image!r}"
 
@@ -371,3 +372,55 @@ def test_docker_publish_keeps_its_trigger_and_tag_rules():
         assert rule in rules, f"Docker Publish lost the tag rule {rule!r}; found {rules}"
     flavor = [line.strip() for line in str(meta["with"].get("flavor", "")).splitlines() if line.strip()]
     assert DOCKER_LATEST_FLAVOR in flavor, f"Docker Publish lost stable-only latest; flavor is {flavor}"
+
+
+def test_pull_requests_run_only_secret_scan_and_sqlite_tests():
+    workflow = _load(CI)
+    triggers = _triggers(workflow)
+    assert "pull_request" in triggers and triggers["pull_request"] is None
+    assert "pull_request_target" not in triggers
+    jobs = workflow["jobs"]
+    assert set(jobs) == {"secrets", "test", "postgres"}
+    for job_id in ("secrets", "test"):
+        assert "if" not in jobs[job_id]
+        assert "needs" not in jobs[job_id]
+    assert "services" not in jobs["test"]
+    assert "env" not in workflow
+    assert not any(key.startswith("IGNIS_TEST_POSTGRES_DSN") for key in jobs["test"].get("env", {}))
+    steps = jobs["test"]["steps"]
+    assert not any(key.startswith("IGNIS_TEST_POSTGRES_DSN")
+                   for step in steps for key in step.get("env", {}))
+    commands = "\n".join(step.get("run", "") for step in steps)
+    assert "-n 4 --dist loadgroup" in commands
+    assert "ruff check src/ tests/" in commands
+    assert "uv build" in commands and "scripts/wheel_mcp_smoke.py" in commands
+    assert "steps.scope" not in str(steps)
+    assert "ALTER SYSTEM" not in commands
+    assert "coverage report --rcfile=.coveragerc.sc004" not in commands
+
+
+def test_postgres_parity_is_complete_and_never_runs_on_pull_requests():
+    workflow = _load(CI)
+    job = workflow["jobs"]["postgres"]
+    assert job["if"] == "github.event_name != 'pull_request'"
+    assert "strategy" not in job
+    names = [entry.get("name") for path in _workflow_paths(WORKFLOWS)
+             for entry in _jobs(path).values()]
+    assert names.count("PostgreSQL parity (Python 3.12)") == 1
+    assert len(job["services"]) == 4
+    assert all(service["image"] == POSTGRES_SERVICE_IMAGE for service in job["services"].values())
+    pool = job["env"]["IGNIS_TEST_POSTGRES_DSN_POOL"].split(",")
+    assert len(pool) == len(set(pool)) == 4
+    assert job["env"]["IGNIS_TEST_POSTGRES_DSN"] == pool[0]
+    commands = "\n".join(step.get("run", "") for step in job["steps"])
+    assert "uv python install 3.12" in commands
+    assert "ALTER SYSTEM" in commands
+    suite = next(step for step in job["steps"] if step.get("name") == "Run Test Suite with Coverage")
+    assert "pytest tests/" in suite["run"]
+    assert "-n 4 --dist loadgroup" in suite["run"]
+    assert " -m " not in suite["run"] and "MARKER" not in str(suite)
+    assert "coverage report --rcfile=.coveragerc.sc004" in commands
+    triggers = _triggers(workflow)
+    assert triggers["schedule"] == [{"cron": "17 3 * * 1"}]
+    assert triggers["push"] == {"branches": ["main", "master", "develop", "release/*", "hotfix/*"], "tags": ["v*"]}
+    assert "workflow_dispatch" in triggers

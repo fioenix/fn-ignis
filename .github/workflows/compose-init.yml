@@ -6,10 +6,9 @@ name: Compose Init
 # opt-in, so the ordinary suite skips it; without this workflow a later migration could break fresh
 # initialization while every build stayed green.
 #
-# Separate from ci.yml on purpose: a Python matrix failure and a fresh-init failure are different
-# problems, and a separate check name tells them apart at a glance. Separate from performance.yml
-# too: both run on pull requests, but this gate proves fresh database initialization while that one
-# measures read-path latency.
+# Separate checks distinguish initialization failures from parity and performance failures.
+# Run after protected-branch pushes, release tags, weekly and on demand. Pull requests wait
+# only on Secret scan and SQLite Test & Lint (owner decision, 2026-11-12).
 #
 # The database under test is not restated here. Image, environment, mount and the migration list
 # all come from the Compose file and sql/ through the integration test; this workflow supplies a
@@ -19,20 +18,18 @@ name: Compose Init
 on:
   push:
     branches: [ main, "release/*", "hotfix/*" ]
-  # Every pull request, unfiltered. A required check that a branch or path filter skips never
-  # reports, so the pull request would wait on it forever; and stacked pull requests need it too.
-  pull_request:
+    tags: [ "v*" ]
+  schedule:
+    - cron: "17 5 * * 1"
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# One run per ref at a time. A newer push to a pull request supersedes the run in progress, since
-# only the head commit can merge. Protected-branch pushes queue instead: each one is a commit that
-# landed, and cancelling it would leave that commit without a fresh-init verdict.
+# Keep the active run for a ref; newer events may replace a pending run.
 concurrency:
   group: compose-init-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: false
 
 jobs:
   # The job id and `name` are the status string a branch-protection rule selects. Renaming either

@@ -145,3 +145,15 @@ def test_historical_test_literals_are_ignored_by_exact_fingerprint_only():
         f"test_secret_scanning.py:generic-api-key:{line}"
         for line in (128, 129, 131, 132, 133, 134)
     ]
+
+
+def test_secret_scan_remains_unconditional_on_every_pull_request():
+    import yaml  # noqa: PLC0415
+
+    workflow = yaml.safe_load(_read(WORKFLOW))
+    triggers = workflow.get("on", workflow.get(True))
+    assert "pull_request" in triggers and triggers["pull_request"] is None
+    assert "pull_request_target" not in triggers
+    job = workflow["jobs"]["secrets"]
+    assert job["name"] == "Secret scan"
+    assert "if" not in job and "needs" not in job

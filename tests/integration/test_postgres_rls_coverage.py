@@ -39,8 +39,8 @@ from ignis.domain.research_workspace import MarketBriefRevision, ResearchWorkspa
 from ignis.domain.value_objects import GeoCode, PlatformType
 from ignis.infrastructure.persistence.postgres_repository import PostgresTimescaleRepository
 
-# Builds the migration chain itself; CI runs it on main, release tags and pull requests that change
-# sql/ or these chain tests (.github/workflows/ci.yml).
+# Builds the migration chain itself; the PostgreSQL parity job runs it on branch pushes,
+# release tags, weekly and manual runs, never pull requests (.github/workflows/ci.yml).
 pytestmark = pytest.mark.migration_chain
 
 # The last migration an installation could have run before T018; 021 onwards is the upgrade.
