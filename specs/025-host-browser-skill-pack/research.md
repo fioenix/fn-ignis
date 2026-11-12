@@ -108,7 +108,7 @@ there). FR-007's precondition is met; Phase 5 proceeds.
 
 ## T015 relay guide against the findings (2026-11-12)
 
-Each finding the run produced, mapped to where `ignis_browser_relay.md` handles it:
+Each failure the runs produced, mapped to where `ignis_browser_relay.md` handles it:
 
 | Finding | Guide location |
 |---|---|
@@ -120,3 +120,8 @@ Each finding the run produced, mapped to where `ignis_browser_relay.md` handles 
 | Ticket expiry | Failure table, "Relay never stages" |
 | Wrong signed-in profile | "Before you start" and failure table, "Wrong account or profile" |
 | Unsupported UI language | Added: failure table row for Threads `DEGRADED` "page locale is unsupported"; TikTok does not gate on language (TikTok guide) |
+
+Findings outside the relay guide: finding 1 (the packaged path works) needs no row; finding 5 (hashtags
+can carry creator names) is an extractor matter the owner settled as free text outside Principle VII
+(Spec 025 OQ-2, TikTok guide); finding 6 (TikTok dates) is Phase 5, T016–T019; finding 7 (Instagram
+captions only) belongs to Phase 6.
