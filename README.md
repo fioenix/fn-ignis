@@ -111,8 +111,8 @@ signature authority. Representative operations:
   that runs one watchlist; Ignis itself still schedules nothing.
 - The atomic source tool `get_tiktok_video_comments` can answer source-specific questions without a Market verdict.
 - Opt-in `prepare_host_browser_search`, `submit_host_browser_search` and
-  `cancel_host_browser_search` collect bounded public TikTok grids and Threads Top results through an authorized host
-  browser. See [host-browser scope and limits](docs/USER_GUIDE.md#explicit-host-browser-search-tiktok-threads-instagram).
+  `cancel_host_browser_search` collect bounded public TikTok grids, Threads Top results and Instagram keyword-grid captions through an
+  authorized host browser. See [host-browser scope and limits](docs/USER_GUIDE.md#explicit-host-browser-search-tiktok-threads-instagram).
 - `get_mission_evidence_qualification_batch` and
   `submit_mission_evidence_qualifications` record evidence judgments.
 - `submit_mission_claims`, `get_mission_claims`, and `get_mission_analysis` control

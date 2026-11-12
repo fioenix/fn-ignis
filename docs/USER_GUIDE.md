@@ -305,7 +305,8 @@ skill that walks one run step by step: `ignis-tiktok-browser`, `ignis-threads-br
 `ignis-instagram-browser`, with the shared relay steps in the `ignis_browser_relay` guide. The MCP server
 serves the same steps as prompts (`ignis_tiktok_browser`, `ignis_threads_browser`,
 `ignis_instagram_browser`) and as resources under `fn-ignis://guide/`. Instagram accepts records only when the page locale has seeded attribution
-wording (today `en`); other locales return `DEGRADED` with no observations.
+wording (today `en`); other locales return `DEGRADED` with no observations. The grid names no account, so a requester's own
+Instagram posts cannot be excluded from a run; they are stored without identity like any other post.
 
 `prepare_host_browser_search`, `submit_host_browser_search` and `cancel_host_browser_search` provide
 an opt-in, task-bound host path. It needs an explicitly authorized browser and supported host DOM
