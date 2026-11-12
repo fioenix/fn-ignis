@@ -34,14 +34,20 @@
       "voice_of_customer_audit",
       "ignis_track",
       "ignis_listen",
-      "ignis_routine"
+      "ignis_routine",
+      "ignis_browser_relay",
+      "ignis_tiktok_browser",
+      "ignis_threads_browser"
     ],
     "resources": [
       "fn-ignis://sop/market-research",
       "fn-ignis://methodology/opportunity-index",
       "fn-ignis://guide/ignis-track",
       "fn-ignis://guide/ignis-listen",
-      "fn-ignis://guide/ignis-routine"
+      "fn-ignis://guide/ignis-routine",
+      "fn-ignis://guide/ignis-browser-relay",
+      "fn-ignis://guide/ignis-tiktok-browser",
+      "fn-ignis://guide/ignis-threads-browser"
     ]
   }
 }
