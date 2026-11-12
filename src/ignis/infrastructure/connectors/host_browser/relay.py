@@ -13,6 +13,8 @@ from urllib.parse import parse_qs
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from ignis.domain.host_browser_sources import get_source
+
 
 MAX_BODY_BYTES = 1024 * 1024
 _TEMPLATES = Path(__file__).resolve().parents[2] / "templates" / "html"
@@ -31,11 +33,13 @@ class LoopbackRelay:
         if not math.isfinite(lifetime_seconds) or not 0 < lifetime_seconds <= 3600:
             raise ValueError("Relay lifetime must be positive and at most one hour")
         self._source = request.get("source", "tiktok")
-        if self._source not in {"tiktok", "threads"}:
-            raise ValueError("Unsupported host source")
+        try:
+            self._descriptor = get_source(self._source)
+        except ValueError:
+            raise ValueError("Unsupported host source") from None
         self._request_id = request.get("request_id")
         self._fragment_key = (base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
-                              if self._source == "threads" else None)
+                              if self._descriptor.transport == "fragment_receive" else None)
         self._stop = threading.Event()
         self._closed = threading.Event()
         self._deadline = time.monotonic() + lifetime_seconds
@@ -71,7 +75,7 @@ class LoopbackRelay:
                 if self.headers.get_all("Host") != [owner.origin.removeprefix("http://")]:
                     self._send(403, "Invalid host")
                     return False
-                expected_path = owner._path + "receive" if receiver and owner._source == "threads" else owner._path
+                expected_path = owner._path + "receive" if receiver and owner._descriptor.transport == "fragment_receive" else owner._path
                 if self.path != expected_path:
                     self._send(404, "Unknown task")
                     return False
@@ -84,7 +88,7 @@ class LoopbackRelay:
                 return True
 
             def do_GET(self):
-                receiver = owner._source == "threads" and self.path == owner._path + "receive"
+                receiver = owner._descriptor.transport == "fragment_receive" and self.path == owner._path + "receive"
                 if self._authorized(receiver=receiver):
                     self._send(200, owner._receiver_page if receiver else owner._page, receiver=receiver)
 
@@ -137,21 +141,21 @@ class LoopbackRelay:
         self._template = environment.get_template("host_browser_relay.html")
         self._receiver_page = (environment.get_template("host_browser_receiver.html").render(
             nonce=self._nonce, channel=json.dumps("ignis-host-answer:" + self._request_id).replace("<", "\\u003c"),
-        ) if self._source == "threads" else None)
+        ) if self._descriptor.transport == "fragment_receive" else None)
         # Reuse vendored token bytes without its external font links on this capability page.
         self._theme_css = (_TEMPLATES / "_fino_theme.html").read_text().split("<style>", 1)[1].split("</style>", 1)[0]
         queries = [query for query in request.get("queries", ()) if isinstance(query, dict)]
         self.tab_script = self._tab_script(extractor, queries) if queries else ""
         self._page = self._render(
             request=json.dumps(request, ensure_ascii=False), extractor=extractor, queries=queries,
-            nonce=self._nonce, tab_script=self.tab_script, fragment_transport=self._source == "threads",
+            nonce=self._nonce, tab_script=self.tab_script, fragment_transport=self._descriptor.transport == "fragment_receive",
             # Inside <script type="application/json">: no "<" may close the element early.
             relay_data=json.dumps(dict(
                 request_id=request.get("request_id"), host_task_ref=request.get("host_task_ref"),
                 session_ref=request.get("session_ref"), extractor_version=request.get("extractor_version"),
-                source=self._source, origin="https://www.threads.com" if self._source == "threads" else "https://www.tiktok.com",
+                source=self._source, origin=self._descriptor.origin,
                 queries=queries,
-                **({"fragment_key": self._fragment_key} if self._source == "threads" else {}),
+                **({"fragment_key": self._fragment_key} if self._descriptor.transport == "fragment_receive" else {}),
             ), ensure_ascii=False).replace("<", "\\u003c"),
         )
         self._thread = threading.Thread(target=self._serve, name="ignis-task-relay", daemon=True)
@@ -164,8 +168,8 @@ class LoopbackRelay:
                          result_limit=query.get("result_limit")) for query in queries]
         return (f"({handoff.strip()})({extractor.strip()}, "
                 f"{json.dumps(approved, ensure_ascii=False)}, "
-                f"{json.dumps(self.url + 'receive' if self._source == 'threads' else self.origin)}"
-                + (f", {json.dumps(self._request_id)}, {json.dumps(self._fragment_key)}" if self._source == "threads" else "") + ")")
+                f"{json.dumps(self.url + 'receive' if self._descriptor.transport == 'fragment_receive' else self.origin)}"
+                + (f", {json.dumps(self._request_id)}, {json.dumps(self._fragment_key)}" if self._descriptor.transport == "fragment_receive" else "") + ")")
 
     def _render(self, **context) -> str:
         return self._template.render(theme_css=self._theme_css, **context)
@@ -176,7 +180,7 @@ class LoopbackRelay:
                 self._server.handle_request()
         finally:
             self._server.server_close()
-            if self._source == "threads":
+            if self._descriptor.transport == "fragment_receive":
                 # Retained terminal receipts must not retain the ticket's decryption capability.
                 self._fragment_key = None
                 self.tab_script = ""

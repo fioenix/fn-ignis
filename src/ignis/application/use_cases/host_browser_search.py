@@ -7,7 +7,6 @@ import threading
 from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
 from importlib.resources import files
-from urllib.parse import quote
 from uuid import uuid4
 
 from ignis.domain.host_browser_search import HostSearchQuery, HostSearchRequest
@@ -15,6 +14,7 @@ from ignis.infrastructure.caller_storage import current_caller_storage
 from ignis.domain.source_identity import identity_free_source_url
 from ignis.infrastructure.security.pii_sanitizer import mask_author_identity_text
 from ignis.infrastructure.connectors.host_browser.relay import LoopbackRelay
+from ignis.domain.host_browser_sources import get_source
 from ignis.infrastructure.connectors.host_browser.action_labels import action_labels_from_rows, seeded_action_labels
 from ignis.infrastructure.connectors.host_browser.attribution_locales import attribution_locales_from_rows, seeded_attribution_locales
 from ignis.infrastructure.connectors.host_browser.validator import validate_answer
@@ -78,30 +78,22 @@ class HostBrowserSearchService:
         # Tactical preparation opens no database, so it starts from the shipped seed (Spec 012).
         if attribution_templates is None:
             attribution_templates = seeded_lexicon_terms("034_tiktok_attribution.sql", "tiktok_attribution")
-        self._attribution_templates = tuple(attribution_templates)
+        self._attribution_templates = {"tiktok": tuple(attribution_templates)}
         if threads_attribution_templates is None:
             threads_attribution_templates = seeded_lexicon_terms("036_threads_attribution.sql", "threads_attribution")
-        self._threads_attribution_templates = tuple(threads_attribution_templates)
+        self._attribution_templates["threads"] = tuple(threads_attribution_templates)
 
     def register_attribution_templates(self, templates, *, source="tiktok") -> None:
         """Replace one source's templates; empty means unavailable, never a cross-source fallback."""
         with self._lock:
-            if source == "tiktok":
-                self._attribution_templates = tuple(templates)
-            elif source == "threads":
-                self._threads_attribution_templates = tuple(templates)
-            else:
-                raise ValueError("Unsupported host search source")
+            descriptor = get_source(source)
+            self._attribution_templates[descriptor.platform] = tuple(templates)
 
     def attribution_templates_for(self, source="tiktok") -> tuple[str, ...]:
         """Return an immutable source snapshot or fail before creating a ticket/relay."""
         with self._lock:
-            if source == "tiktok":
-                templates = self._attribution_templates
-            elif source == "threads":
-                templates = self._threads_attribution_templates
-            else:
-                raise ValueError("Unsupported host search source")
+            descriptor = get_source(source)
+            templates = self._attribution_templates[descriptor.platform]
             if not templates:
                 raise AttributionVocabularyMissing("No attribution vocabulary is registered for the host source")
             return templates
@@ -109,8 +101,7 @@ class HostBrowserSearchService:
     async def refresh_attribution_templates(self, repository, *, source="tiktok") -> tuple[str, ...]:
         """Load a caller-local immutable snapshot without changing tactical packaged vocabulary."""
         vocabulary = await load_market_vocabulary(repository)
-        templates = (vocabulary.tiktok_attribution if source == "tiktok" else
-                     vocabulary.threads_attribution if source == "threads" else ())
+        templates = getattr(vocabulary, get_source(source).platform + "_attribution")
         if not templates:
             raise AttributionVocabularyMissing("No attribution vocabulary is registered for the host source")
         return tuple(templates)
@@ -124,8 +115,9 @@ class HostBrowserSearchService:
                                  else tuple(attribution_templates))
         if not attribution_templates:
             raise AttributionVocabularyMissing("No attribution vocabulary is registered for the host source")
-        locales = copy.deepcopy(seeded_attribution_locales() if attribution_locales is None else attribution_locales) if source == "tiktok" else {}
-        if source == "tiktok" and not locales:
+        descriptor = get_source(source)
+        locales = copy.deepcopy(seeded_attribution_locales() if attribution_locales is None else attribution_locales) if descriptor.localized_attribution else {}
+        if descriptor.localized_attribution and not locales:
             raise AttributionVocabularyMissing("No attribution vocabulary is registered for the host source")
         if type(lifetime_seconds) is not int or not 0 < lifetime_seconds <= 3600:
             raise ValueError("Lifetime must be finite and at most one hour")
@@ -134,8 +126,7 @@ class HostBrowserSearchService:
             request_id=str(uuid4()), host_task_ref=host_task_ref, session_ref=session_ref, mode=mode, source=source,
             issued_at=now, expires_at=now + timedelta(seconds=lifetime_seconds),
             queries=tuple(HostSearchQuery(query_id=str(uuid4()), query=query,
-                          search_url=("https://www.threads.com/search?q=" if source == "threads" else
-                                      "https://www.tiktok.com/search/video?q=") + quote(query, safe=""),
+                          search_url=descriptor.search_url(query),
                           result_limit=result_limit) for query in queries),
         )
         if any(not query.query.strip() for query in request.queries):
@@ -145,8 +136,8 @@ class HostBrowserSearchService:
             raise ValueError("Each search query may appear once in a batch")
         extractor = files("ignis.infrastructure.connectors.host_browser").joinpath(source + "_search.js").read_text()
         labels = (copy.deepcopy(seeded_action_labels() if action_labels is None else action_labels)
-                  if source == "threads" else {})
-        if source == "threads":
+                  if descriptor.measured_counters else {})
+        if descriptor.measured_counters:
             # Data injection leaves the packaged handoff and relay transport unchanged.
             extractor = ("args => (" + extractor.strip() + ")({...args, action_labels: "
                          + json.dumps(labels, ensure_ascii=True) + "})")
@@ -325,10 +316,11 @@ class HostBrowserSearchService:
             for relay in relays:
                 relay.close()
             attribution_templates = await self.refresh_attribution_templates(executor._repo, source=source)
+            descriptor = get_source(source)
             labels = (action_labels_from_rows(await executor._repo.get_domain_lexicons())
-                      if source == "threads" else {})
+                      if descriptor.measured_counters else {})
             locales = (attribution_locales_from_rows(await executor._repo.get_domain_lexicons())
-                       if source == "tiktok" else {})
+                       if descriptor.localized_attribution else {})
             binding = await prepare_scope(executor, mission_id, source)
             sync = getattr(executor, "_vocabulary_sync", None)
             identity_repo = getattr(sync, "_credential_repository", executor._repo)
