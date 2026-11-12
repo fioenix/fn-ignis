@@ -17,8 +17,8 @@ research task you authorize. Never place a secret in a prompt, command transcrip
 1. Run `./scripts/bootstrap.sh` and restart your MCP client so it loads `ignis-mcp`.
 2. Ask your agent to call `diagnose_system_health` and `verify_connectors_health`. A connector
    reported unavailable stays unavailable until you supply its credential or browser session.
-3. Run one tactical probe. With `YOUTUBE_API_KEY` set, ask for a YouTube search on one keyword.
-   Without it, ask for a TikTok or Threads search through your own signed-in Chrome: the agent calls
+3. Run one tactical probe: ask for a TikTok or Threads search through your own signed-in Chrome. YouTube
+   has no tactical search tool; it is collected inside a confirmed mission (see §2). The agent calls
    `prepare_host_browser_search`, opens the local relay page, opens the approved search tab from it,
    runs the returned tab script once in that tab, and calls `submit_host_browser_search`. A tactical
    probe creates no mission and returns observations, never a market conclusion.
