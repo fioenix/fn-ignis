@@ -135,3 +135,21 @@ async def test_unsupported_host_source_is_refused_before_transport_or_storage(mo
         "synthetic-task", "synthetic-session", ["synthetic"], 3, 60, True, source=source,
     )
     assert result["status"] == "BLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_mission_preparation_refuses_an_unknown_source_as_invalid_scope(monkeypatch):
+    from types import SimpleNamespace
+
+    async def get_mission(mission_id):
+        return SimpleNamespace(id=mission_id)
+
+    monkeypatch.setattr(server, "get_components", lambda: {
+        "repository": SimpleNamespace(get_mission=get_mission),
+        "execute_mission_use_case": SimpleNamespace(_repo=None),
+    })
+    result = await server.handle_prepare_host_browser_search(
+        host_task_ref="mcp-task", session_ref="authorized-host-session", queries=[], result_limit=20,
+        lifetime_seconds=60, authorized=True, mode="MISSION", mission_id="fixture-mission", source="youtube",
+    )
+    assert result == {"status": "BLOCKED", "reason_code": "INVALID_HOST_SEARCH_SCOPE"}

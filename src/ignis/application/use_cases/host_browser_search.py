@@ -86,22 +86,23 @@ class HostBrowserSearchService:
     def register_attribution_templates(self, templates, *, source="tiktok") -> None:
         """Replace one source's templates; empty means unavailable, never a cross-source fallback."""
         with self._lock:
-            descriptor = get_source(source)
-            self._attribution_templates[descriptor.platform] = tuple(templates)
+            get_source(source)
+            self._attribution_templates[source] = tuple(templates)
 
     def attribution_templates_for(self, source="tiktok") -> tuple[str, ...]:
         """Return an immutable source snapshot or fail before creating a ticket/relay."""
         with self._lock:
-            descriptor = get_source(source)
-            templates = self._attribution_templates[descriptor.platform]
+            get_source(source)
+            templates = self._attribution_templates.get(source, ())
             if not templates:
                 raise AttributionVocabularyMissing("No attribution vocabulary is registered for the host source")
             return templates
 
     async def refresh_attribution_templates(self, repository, *, source="tiktok") -> tuple[str, ...]:
         """Load a caller-local immutable snapshot without changing tactical packaged vocabulary."""
+        get_source(source)
         vocabulary = await load_market_vocabulary(repository)
-        templates = getattr(vocabulary, get_source(source).platform + "_attribution")
+        templates = getattr(vocabulary, source + "_attribution", ())
         if not templates:
             raise AttributionVocabularyMissing("No attribution vocabulary is registered for the host source")
         return tuple(templates)

@@ -533,3 +533,23 @@ async def test_upgrade_retires_104_system_rows_but_preserves_operator_and_machin
         with sqlite3.connect(path) as conn:
             after = conn.execute("SELECT * FROM market_lexicons WHERE domain NOT IN (%s) ORDER BY id" % ','.join('?' for _ in MARKET_DOMAIN_COUNTS), tuple(MARKET_DOMAIN_COUNTS)).fetchall()
             assert after == before
+
+
+def test_templates_are_keyed_by_source_name_not_platform(monkeypatch):
+    """A source whose platform differs from its name (Instagram is `reels`) keeps its own templates."""
+    import dataclasses
+    from ignis.application.use_cases import host_browser_search as module
+    from ignis.domain.host_browser_sources import get_source
+
+    renamed = dataclasses.replace(get_source("threads"), platform="reels")
+    real = module.get_source
+    monkeypatch.setattr(module, "get_source", lambda source: renamed if source == "fixture" else real(source))
+    service = module.HostBrowserSearchService()
+    try:
+        with pytest.raises(module.AttributionVocabularyMissing):
+            service.attribution_templates_for("fixture")
+        service.register_attribution_templates(["fixture {author} suffix"], source="fixture")
+        assert service.attribution_templates_for("fixture") == ("fixture {author} suffix",)
+        assert service.attribution_templates_for("threads") == ("Photo by {author} on",)
+    finally:
+        service.close()
