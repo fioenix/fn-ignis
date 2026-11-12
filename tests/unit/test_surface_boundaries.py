@@ -1043,3 +1043,139 @@ def test_select_handoff_candidates_never_returns_a_least_bad_cluster():
     assert select_handoff_candidates({}) == []
     one = _qualified("SUPPLY")
     assert select_handoff_candidates({"c1": [one], "c2": [_qualified("SUPPLY")]}) == []
+
+
+def _cited_ids(report):
+    statements = list(report.strategic_insights) + list(report.actionable_takeaways)
+    return {
+        str(c.observation_id)
+        for item in statements
+        for c in (getattr(item, "citations", None) or [])
+    }
+
+
+def test_attention_conclusions_never_rest_on_excluded_or_context_only_evidence():
+    cluster = uuid4()
+    drama = _attention_signal("Phim ngắn tổng tài tập 3 AI cho cửa hàng bán lẻ", cluster)
+    adjacent = _attention_signal("AI tạo landing page bán hàng", cluster)
+    drama.metric_value, adjacent.metric_value = 407100.0, 165100.0
+    supported = [
+        _attention_signal("Chủ tiệm tạp hóa dùng AI quản lý kho", cluster),
+        _attention_signal("Review AI cho cửa hàng bán lẻ sau 3 tháng", cluster),
+    ]
+    signals = [drama, adjacent, *supported]
+    judgments = [
+        _judged(drama, "EXCLUDED_IRRELEVANT", "FICTION_NEWS_OR_ENTERTAINMENT"),
+        _judged(adjacent, "CONTEXT_ONLY", "ADJACENT_ONLY"),
+        *[_judged(s, "QUALIFIED_SUPPORT", "DIRECT_TO_FRAME") for s in supported],
+    ]
+
+    report = _attention_report(signals, judgments)
+
+    cited = _cited_ids(report)
+    assert cited, "the fixture must produce cited statements"
+    assert str(drama.observation_id) not in cited, "an excluded observation is never cited"
+    assert str(adjacent.observation_id) not in cited, "context-only evidence is never cited"
+    assert cited <= {str(s.observation_id) for s in supported}
+
+
+def test_attention_keeps_unassessed_evidence_until_qualification_completes():
+    cluster = uuid4()
+    judged, pending = _attention_signal("AI cho cửa hàng bán lẻ", cluster), _attention_signal(
+        "Phần mềm AI bán hàng cho shop nhỏ", cluster
+    )
+    report = _attention_report(
+        [judged, pending], [_judged(judged, "QUALIFIED_SUPPORT", "DIRECT_TO_FRAME")]
+    )
+
+    counted = StrategicMarketReasoner.counted_signals(
+        [judged, pending],
+        QualificationContext.build(
+            [judged.observation_id, pending.observation_id],
+            [_judged(judged, "QUALIFIED_SUPPORT", "DIRECT_TO_FRAME")],
+            probe_outcomes=(),
+        ),
+    )
+    assert {s.observation_id for s in counted} == {judged.observation_id, pending.observation_id}
+    assert report.handoff_status == HandoffStatus.QUALIFICATION_REQUIRED.value
+
+
+def test_attention_cluster_trends_and_channel_citations_skip_excluded_members():
+    from ignis.domain.entities import TopicCluster
+
+    cluster_id = uuid4()
+    drama = _attention_signal("Phim ngắn tổng tài AI cho cửa hàng bán lẻ", cluster_id)
+    drama.metric_value = 407100.0
+    kept = _attention_signal("Chủ tiệm tạp hóa dùng AI cho cửa hàng bán lẻ", cluster_id)
+    noise_only = TopicCluster(canonical_name="Phim ngắn", signals=[drama], cross_platform_score=95.0)
+    mixed = TopicCluster(canonical_name="AI bán lẻ", signals=[drama, kept], cross_platform_score=90.0,
+                         summary_text="Short drama dominates")
+    signals = [drama, kept]
+    context = QualificationContext.build(
+        [s.observation_id for s in signals],
+        [_judged(drama, "EXCLUDED_IRRELEVANT", "FICTION_NEWS_OR_ENTERTAINMENT"),
+         _judged(kept, "QUALIFIED_SUPPORT", "DIRECT_TO_FRAME")],
+        probe_outcomes=(), geo="VN", timeframe="7d",
+    )
+    mission = ResearchMission(title=ATTENTION.title, keywords=ATTENTION.keywords, surface="ATTENTION",
+                              platforms=[PlatformType.YOUTUBE])
+
+    report = StrategicMarketReasoner().analyze_mission(
+        mission=mission, signals=signals, clusters=[noise_only, mixed],
+        scorecard=QualityScorecard(), qualification=context,
+    )
+
+    trends = report.verified_cross_platform_trends
+    assert len(trends) == 1, "a cluster made only of excluded evidence is not a verified trend"
+    (trend,) = trends
+    assert trend["measured_reach"] == 1000, "reach counts only the kept observation"
+    assert trend["cross_platform_score"] is None and trend["momentum"] is None
+    assert trend["summary"] != "Short drama dominates"
+    cited = {c.top_citation.observation_id for c in report.channel_summaries if c.top_citation}
+    assert str(drama.observation_id) not in cited
+
+
+def test_maturity_counts_the_missions_own_topic_clusters_not_the_geo_catalogue():
+    from ignis.domain.entities import TopicCluster
+
+    cluster = uuid4()
+    signals = [_attention_signal(f"AI cho cửa hàng bán lẻ {n}", cluster) for n in range(3)]
+    for signal in signals:
+        signal.metric_value = 50000.0
+    unrelated_catalogue = [TopicCluster(canonical_name=f"geo topic {n}") for n in range(20)]
+
+    report = StrategicMarketReasoner().analyze_mission(
+        mission=ATTENTION, signals=signals, clusters=unrelated_catalogue, scorecard=QualityScorecard(),
+    )
+
+    statements = " ".join(getattr(i, "statement", str(i)) for i in report.strategic_insights)
+    assert "20 topic clusters" not in statements, "the geo-wide catalogue is not this mission's spread"
+    assert report.maturity_stage is not None and report.maturity_stage.value != "HYPING", (
+        "one topic cluster in the mission's own evidence does not make a hyping market"
+    )
+
+
+def test_excluded_only_clusters_cannot_raise_attention_maturity():
+    kept = _attention_signal("Chủ tiệm tạp hóa dùng AI cho cửa hàng bán lẻ", uuid4())
+    kept.metric_value = 30000.0
+    dramas = [_attention_signal(f"Phim ngắn AI cho cửa hàng bán lẻ tập {n}", uuid4()) for n in range(2)]
+    for drama in dramas:
+        drama.metric_value = 30000.0
+    signals = [kept, *dramas]
+    judgments = [_judged(kept, "QUALIFIED_SUPPORT", "DIRECT_TO_FRAME"),
+                 *[_judged(d, "EXCLUDED_IRRELEVANT", "FICTION_NEWS_OR_ENTERTAINMENT") for d in dramas]]
+
+    from ignis.domain.entities import TopicCluster
+
+    catalogue = [TopicCluster(canonical_name=s.raw_title, signals=[s]) for s in signals]
+    context = QualificationContext.build(
+        [s.observation_id for s in signals], judgments, probe_outcomes=(), geo="VN", timeframe="7d"
+    )
+    report = StrategicMarketReasoner().analyze_mission(
+        mission=ATTENTION, signals=signals, clusters=catalogue, scorecard=QualityScorecard(),
+        qualification=context,
+    )
+
+    assert report.maturity_stage is not None and report.maturity_stage.value != "HYPING"
+    statements = " ".join(getattr(i, "statement", str(i)) for i in report.strategic_insights)
+    assert "3 topic clusters" not in statements
