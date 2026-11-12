@@ -21,12 +21,13 @@ files, no dependency on an unfinished task).
 - [x] T004 Route `src/ignis/infrastructure/connectors/host_browser/relay.py` source branches through the descriptor
 - [x] T005 Route `src/ignis/infrastructure/connectors/host_browser/validator.py` source branches through the descriptor
 - [x] T006 Route `src/ignis/application/use_cases/host_browser_search.py` and `src/ignis/domain/host_browser_search.py` source branches through the descriptor
-- [ ] T007 Run `tests/unit/test_host_browser_sources.py`, `tests/unit/test_host_browser_search.py`, `tests/unit/test_host_browser_relay.py` and the host-browser cases of `tests/integration/test_author_identity_conformance.py` unchanged: all green, no edited assertion
+- [x] T007 Run `tests/unit/test_host_browser_sources.py`, `tests/unit/test_host_browser_search.py`, `tests/unit/test_host_browser_relay.py` and the host-browser cases of `tests/integration/test_author_identity_conformance.py` unchanged: all green, no edited assertion
 
 Phase 1–2 evidence (2026-11-12, branch `025-source-descriptor`): T002 passed 9 tests before
 routing the four existing consumers. Final sources/search run: 38 passed; relay/conformance run:
 70 passed, 6 skipped; repository conventions: 11 passed; Ruff: passed. The six skips require
-`IGNIS_TEST_POSTGRES_DSN`; T007 remains open for that backend proof. Existing test assertions are
+`IGNIS_TEST_POSTGRES_DSN`; the PostgreSQL parity job on main `ebe9e67` (2026-11-12, 6193 passed,
+36 skipped) supplied that backend proof, which closes T007. Existing test assertions are
 unchanged. Deterministic comparison with the pre-refactor revision also matched prepared responses,
 tab scripts, relay/receiver HTML and staged/submitted receipts byte-for-byte for both sources.
 The T001 installed-asset check and its limit are recorded in `quickstart.md`.
@@ -50,7 +51,7 @@ The T001 installed-asset check and its limit are recorded in `quickstart.md`.
 
 ## Phase 4: User Story 3 — failures named with check and remedy (P3, delivered with US1 text)
 
-- [ ] T015 [US3] Review `ignis_browser_relay.md` against every finding in `research.md` (wheel/editable trap, tab-group drift, async `{}`, opener refusal, expiry, wrong profile, unsupported UI language) and add any missing row; record the mapping in `specs/025-host-browser-skill-pack/research.md`
+- [x] T015 [US3] Review `ignis_browser_relay.md` against every finding in `research.md` (wheel/editable trap, tab-group drift, async `{}`, opener refusal, expiry, wrong profile, unsupported UI language) and add any missing row; record the mapping in `specs/025-host-browser-skill-pack/research.md`
 
 ## Phase 5: TikTok publication date (FR-007, OQ-4)
 
