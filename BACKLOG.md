@@ -132,7 +132,8 @@ Kiểm chứng giá trị:
 
 Sửa phép đo:
 
-- [ ] **MEA-1 — Lấy ngày đăng TikTok từ video id** (S, chuyển thành câu hỏi OQ-4 của Spec 025). Video id TikTok
+- [x] **MEA-1 — Lấy ngày đăng TikTok từ video id** (S, chuyển thành câu hỏi OQ-4 của Spec 025) — merge 12/11/2026
+  (PR #147, #148): đối chiếu với ngày hiển thị rồi mới giải ngày; collection path đổi sang `tiktok-public-grid-v4`. Video id TikTok
   mã hóa giây đăng ở 32 bit cao; bốn id mẫu giải ra 06/2024–09/2026, chưa đối chiếu với ngày hiển thị trên trang.
   Có ngày đăng thì item TikTok không còn lấy lần thu đầu làm mốc, và view trọn đời của video cũ thôi bị tính là
   volume mới. Đổi quy tắc đếm item không có ngày đăng là sửa Spec 016, nên chờ OWN-6. Làm trước VAL-2.
@@ -241,10 +242,13 @@ Bề mặt agent:
 - [x] **BUG-2 — Insight maturity đếm "N topic clusters" trên toàn geo**, không phải cụm của mission
   (`_assess_maturity` dùng `len(clusters)` của `top_clusters_use_case`) — merge 12/11/2026 (PR #141): đếm cụm
   riêng trong tín hiệu của mission; mission thật giờ ghi 8 cụm thay vì 16.
-- [~] **SPEC-025 — Bộ skill host-browser và Instagram Reels qua host browser** — chủ sở hữu yêu cầu và mở lại Reels
-  ngày 11/11/2026. Draft PR #139: research từ lượt chạy thật, spec đã chốt bốn câu ngày 12/11/2026 (mỗi nền tảng
-  một skill với reference dùng chung; giữ hashtag TikTok như tên tự do; Instagram đánh giá như nguồn khác; lấy
-  ngày đăng TikTok từ video id sau khi đối chiếu). Bước tiếp: `/speckit-plan`.
+- [~] **SPEC-025 — Bộ skill host-browser và Instagram qua host browser** — chủ sở hữu yêu cầu ngày 11/11/2026.
+  Đã merge 12/11/2026 (PR #139–#154): mỗi nền tảng một skill (`ignis-tiktok-browser`, `ignis-threads-browser`,
+  `ignis-instagram-browser`) với guide relay dùng chung; ngày đăng TikTok lấy từ video id; Instagram thu chú
+  thích từ lưới tìm kiếm theo từ khóa, cả TACTICAL lẫn MISSION, chỉ nhận bản ghi khi locale trang là `en`.
+  Lượt chạy thật T029: 12 quan sát Instagram trong khoảng 65 giây.
+  Còn mở: T014 (chạy trong session mới, SC-001) và T032 (chạy lại quickstart trên wheel cuối, ghi SC-001..SC-003).
+  SC-003 (≤60 giây) đang trượt: TikTok 69 giây, Threads 79 giây, Instagram khoảng 65 giây.
   Lượt chạy lặp (VAL-3 rút gọn, hai lượt mỗi nguồn): Jaccard TikTok 0,71, Threads 0,45; ghi trong `research.md`.
 - [ ] **ENG-2 — Gỡ code connector đã nghỉ** (M): Reels, Google Trends RSS, nhánh Explore và tìm kiếm headless của
   `TikTokPlugin`; xóa test tương ứng và thu hẹp phạm vi coverage SC-004.

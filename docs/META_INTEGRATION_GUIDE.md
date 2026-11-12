@@ -16,7 +16,7 @@ The host uses its own browser capability and preserves the user's tabs.
 The `threads-search-top-v2` path collects a bounded visible Top sample. Loading, a login wall,
 a challenge or an unparseable page is unavailable, never proof of an empty market. Stored Graph
 credentials do not enable this flow. Ignis does not probe an API grant or fall back to Graph API
-or an internal Playwright collector. See the [user guide](USER_GUIDE.md#explicit-host-browser-tiktok-and-threads-search)
+or an internal Playwright collector. See the [user guide](USER_GUIDE.md#explicit-host-browser-search-tiktok-threads-instagram)
 for scope, counter precision, identity handling and period comparability.
 
 ## Existing sessions and evidence

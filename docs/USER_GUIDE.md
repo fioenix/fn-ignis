@@ -297,7 +297,15 @@ parked with the frozen Market verdict, and
 [the Spec 014 task ledger](../specs/014-evidence-factory/tasks.md) records the Mission Relay,
 research-work and follow-up requirements that remain unmet.
 
-### Explicit host-browser TikTok and Threads search
+### Explicit host-browser search (TikTok, Threads, Instagram)
+
+Three sources use this path: `source="tiktok"` (public video grid), `source="threads"` (signed-in
+keyword search) and `source="instagram"` (signed-in keyword grid, captions only). Each has an agent
+skill that walks one run step by step: `ignis-tiktok-browser`, `ignis-threads-browser` and
+`ignis-instagram-browser`, with the shared relay steps in the `ignis_browser_relay` guide. The MCP server
+serves the same steps as prompts (`ignis_tiktok_browser`, `ignis_threads_browser`,
+`ignis_instagram_browser`) and as resources under `fn-ignis://guide/`. Instagram accepts records only when the page locale has seeded attribution
+wording (today `en`); other locales return `DEGRADED` with no observations.
 
 `prepare_host_browser_search`, `submit_host_browser_search` and `cancel_host_browser_search` provide
 an opt-in, task-bound host path. It needs an explicitly authorized browser and supported host DOM
