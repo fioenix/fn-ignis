@@ -13,5 +13,7 @@ Use with the `ignis_browser_relay` guide, which holds the shared steps and failu
 - Captions are mostly seller listings: supply-side context (what sellers pitch), not customer voice.
 - Hashtags are kept as written. A hashtag can equal a creator's name; it is a free-text name outside
   Principle VII (owner decision, Spec 025). `@mentions` are masked.
+- Records are accepted only on a page language whose attribution wording is seeded (`en` today). Another
+  interface language, such as `vi`, returns `DEGRADED` with no observations: report it, do not retry.
 - A sign-in form or challenge, a missing page language, or a grid without captions returns `DEGRADED`.
 - Live check (2026-11-12): 24 tiles, 12 with a caption.
