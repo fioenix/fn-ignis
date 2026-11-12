@@ -1098,3 +1098,38 @@ def test_attention_keeps_unassessed_evidence_until_qualification_completes():
     )
     assert {s.observation_id for s in counted} == {judged.observation_id, pending.observation_id}
     assert report.handoff_status == HandoffStatus.QUALIFICATION_REQUIRED.value
+
+
+def test_attention_cluster_trends_and_channel_citations_skip_excluded_members():
+    from ignis.domain.entities import TopicCluster
+
+    cluster_id = uuid4()
+    drama = _attention_signal("Phim ngắn tổng tài AI cho cửa hàng bán lẻ", cluster_id)
+    drama.metric_value = 407100.0
+    kept = _attention_signal("Chủ tiệm tạp hóa dùng AI cho cửa hàng bán lẻ", cluster_id)
+    noise_only = TopicCluster(canonical_name="Phim ngắn", signals=[drama], cross_platform_score=95.0)
+    mixed = TopicCluster(canonical_name="AI bán lẻ", signals=[drama, kept], cross_platform_score=90.0,
+                         summary_text="Short drama dominates")
+    signals = [drama, kept]
+    context = QualificationContext.build(
+        [s.observation_id for s in signals],
+        [_judged(drama, "EXCLUDED_IRRELEVANT", "FICTION_NEWS_OR_ENTERTAINMENT"),
+         _judged(kept, "QUALIFIED_SUPPORT", "DIRECT_TO_FRAME")],
+        probe_outcomes=(), geo="VN", timeframe="7d",
+    )
+    mission = ResearchMission(title=ATTENTION.title, keywords=ATTENTION.keywords, surface="ATTENTION",
+                              platforms=[PlatformType.YOUTUBE])
+
+    report = StrategicMarketReasoner().analyze_mission(
+        mission=mission, signals=signals, clusters=[noise_only, mixed],
+        scorecard=QualityScorecard(), qualification=context,
+    )
+
+    trends = report.verified_cross_platform_trends
+    assert len(trends) == 1, "a cluster made only of excluded evidence is not a verified trend"
+    (trend,) = trends
+    assert trend["measured_reach"] == 1000, "reach counts only the kept observation"
+    assert trend["cross_platform_score"] is None and trend["momentum"] is None
+    assert trend["summary"] != "Short drama dominates"
+    cited = {c.top_citation.observation_id for c in report.channel_summaries if c.top_citation}
+    assert str(drama.observation_id) not in cited

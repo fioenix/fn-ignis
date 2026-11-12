@@ -173,7 +173,9 @@ class StrategicMarketReasoner:
         # excluded or context-only.
         counted = self.counted_signals(signals, qualification)
         maturity_stage, maturity_reasons = self._assess_maturity(counted, clusters, geo=mission.geo_code)
-        verified_trends = self._extract_verified_trends(counted, clusters, geo=mission.geo_code)
+        verified_trends = self._extract_verified_trends(
+            counted, clusters, geo=mission.geo_code, restrict=qualification is not None
+        )
 
         # One registry per dossier: the same observation keeps one CIT-xx identifier
         # wherever it is cited, so a reader never mistakes one sighting for two.
@@ -454,12 +456,18 @@ class StrategicMarketReasoner:
         record keeps the live audit it always had.
         """
         if qualification is None or not qualification.probe_outcomes:
+            citable = None
+            if qualification is not None and resolve_surface(mission.surface) is not ResearchSurface.MARKET:
+                citable = {
+                    str(s.observation_id) for s in signals if self._counts(s, qualification)
+                }
             return self.summarize_channel_ingress(
                 mission=mission,
                 signals=signals,
                 auth_status=auth_status,
                 connector_health=connector_health,
                 citation_registry=registry,
+                citable=citable,
             )
         market = resolve_surface(mission.surface) is ResearchSurface.MARKET
         geo_value = self._platform_value(mission.geo_code).upper()
@@ -714,6 +722,7 @@ class StrategicMarketReasoner:
         auth_status: Optional[Dict[str, bool]] = None,
         connector_health: Optional[Dict[str, Any]] = None,
         citation_registry: Optional[Dict[str, CitationEvidence]] = None,
+        citable: Optional[Set[str]] = None,
     ) -> List[ChannelDataSummary]:
         """
         Audit every targeted channel so a silent ingress failure can never be
@@ -761,7 +770,12 @@ class StrategicMarketReasoner:
                 ambiguous = surface == p_val and len(registered) > 1
 
                 if channel_signals:
-                    top_signal = max(channel_signals, key=self._engagement_rank)
+                    # Counts stay raw; only an observation a conclusion may rest on is cited.
+                    eligible = [
+                        s for s in channel_signals
+                        if citable is None or str(s.observation_id) in citable
+                    ]
+                    top_signal = max(eligible, key=self._engagement_rank) if eligible else None
                     summaries.append(
                         ChannelDataSummary(
                             platform=platform,
@@ -769,8 +783,9 @@ class StrategicMarketReasoner:
                             status=ChannelHealthStatus.HEALTHY,
                             signals_count=len(channel_signals),
                             timeframe_used=timeframe_used,
-                            top_citation=self._mint_citation(
-                                top_signal, registry, geo=mission.geo_code
+                            top_citation=(
+                                self._mint_citation(top_signal, registry, geo=mission.geo_code)
+                                if top_signal else None
                             ),
                             notes=(
                                 "Recorded before the connector surface was tracked, and this "
@@ -897,13 +912,24 @@ class StrategicMarketReasoner:
         signals: List[TrendSignal],
         clusters: List[TopicCluster],
         geo: GeoCode = GeoCode.VN,
+        restrict: bool = False,
     ) -> List[Dict[str, Any]]:
+        """Clusters with their reach. With `restrict`, a cluster speaks only through the given
+        observations: one without any is left out, and the cluster's precomputed momentum, score
+        and summary are withheld when any of its members was left behind."""
+        allowed = {str(s.observation_id) for s in signals}
         verified = []
-        for c in clusters[:6]:
+        for c in clusters:
+            if len(verified) >= 6:
+                break
+            members = [s for s in c.signals if str(s.observation_id) in allowed] if restrict else list(c.signals)
+            if restrict and not members:
+                continue
+            partial = restrict and len(members) < len(c.signals)
             p_counts: Dict[str, int] = defaultdict(int)
             total_views = 0.0
             measured = unmeasured = 0
-            for s in c.signals:
+            for s in members:
                 if self._is_localized(s.raw_title, geo=geo):
                     p_counts[s.platform.value if hasattr(s.platform, "value") else str(s.platform)] += 1
                     if s.metadata.get("metric_known") is False:
@@ -913,16 +939,17 @@ class StrategicMarketReasoner:
                         total_views += float(s.metric_value)
 
 
-            default_summary = f"Topic cluster synthesized from {len(c.signals)} signals."
+            default_summary = f"Topic cluster synthesized from {len(members)} signals."
+            momentum = c.momentum_category.value if hasattr(c.momentum_category, "value") else str(c.momentum_category)
             verified.append({
                 "canonical_name": c.topic_label,
-                "momentum": c.momentum_category.value if hasattr(c.momentum_category, "value") else str(c.momentum_category),
-                "cross_platform_score": c.cross_platform_score,
+                "momentum": None if partial else momentum,
+                "cross_platform_score": None if partial else c.cross_platform_score,
                 "platform_diversity": len(p_counts),
                 "total_estimated_reach": None if unmeasured else int(total_views),
                 "measured_reach": int(total_views) if measured else None,
                 "unmeasured_signals": unmeasured,
-                "summary": c.summary_text or default_summary,
+                "summary": default_summary if partial else (c.summary_text or default_summary),
             })
         return verified
 
