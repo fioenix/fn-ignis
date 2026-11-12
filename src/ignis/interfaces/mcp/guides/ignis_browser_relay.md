@@ -58,3 +58,4 @@ Submitting before every required sibling is `STAGED` returns `BLOCKED` / `HOST_S
 | Relay never stages | `expires_at` passed | `cancel_host_browser_search`, then prepare a new request |
 | A rejected payload | Relay closed | Prepare a new request before staging again |
 | Wrong account or profile | The page shows another signed-in account | Stop and ask the requester which profile to use |
+| Threads returns `DEGRADED` with "page locale is unsupported" | The search tab's `<html lang>` is missing or malformed | The source is unavailable for this run; report it and move on. A valid language without seeded labels still passes, with counters unknown |

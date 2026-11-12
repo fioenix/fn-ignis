@@ -105,3 +105,18 @@ date is read from the post header; a date without a year is the current year.
 
 All three agree to the day (the page renders in Asia/Ho_Chi_Minh; none of the times crosses midnight
 there). FR-007's precondition is met; Phase 5 proceeds.
+
+## T015 relay guide against the findings (2026-11-12)
+
+Each finding the run produced, mapped to where `ignis_browser_relay.md` handles it:
+
+| Finding | Guide location |
+|---|---|
+| Wheel install replaced by an editable one (finding 2) | Failure table, "Prepare fails with `No such file or directory`" |
+| Tab-group drift (finding 4) | Step 4 and failure table, "Tab is not in the same group" |
+| Async tab script returns `{}` (finding 3) | Failure table, "Evaluator returns `{}`" |
+| Opener refusal | Failure table, `This tab was not opened by the relay` |
+| Unapproved search page | Failure table, `Unapproved search page` / `This tab is not an approved search page` |
+| Ticket expiry | Failure table, "Relay never stages" |
+| Wrong signed-in profile | "Before you start" and failure table, "Wrong account or profile" |
+| Unsupported UI language | Added: failure table row for Threads `DEGRADED` "page locale is unsupported"; TikTok does not gate on language (TikTok guide) |
