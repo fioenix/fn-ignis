@@ -82,7 +82,7 @@ views never mix the two date bases under one collection path.
 - [x] T026 [US2] Confirm a request naming the retired `reels` surface still returns `SURFACE_RETIRED` with a test in `tests/unit/test_host_browser_search.py`
 - [x] T027 [US2] Name `instagram` in the `prepare_host_browser_search` description in `src/ignis/interfaces/mcp/server.py`; regenerate `hermes_manifest.json` and `.hermes/tools.json`; run `tests/unit/test_tool_manifests_drift.py`
 - [x] T028 [P] [US2] Write `src/ignis/interfaces/mcp/guides/ignis_instagram_browser.md`, register its prompt/resource, add `.agents/skills/ignis-instagram-browser/SKILL.md`
-- [ ] T029 [US2] Live acceptance: quickstart step 4 on the G3 keyword; record count and identity check in `specs/025-host-browser-skill-pack/research.md`
+- [x] T029 [US2] Live acceptance: quickstart step 4 on the G3 keyword; record count and identity check in `specs/025-host-browser-skill-pack/research.md`
 
 Deviations (2026-11-12, TACTICAL pull request): the extractor and handoff are found by the source-name file
 convention (`instagram_search.js`, `instagram_handoff.js`) the relay already uses, not a descriptor field;

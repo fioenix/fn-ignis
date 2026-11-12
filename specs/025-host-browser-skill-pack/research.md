@@ -154,3 +154,30 @@ automatic attribution shape ("Photo/Video by <name> on/in/with …"), and none r
 Instagram's own attribution wording therefore stays unobserved. Records are accepted only on a page locale with
 seeded wording (`instagram_attribution_en`, borrowed from Threads' observed Meta wording); any other locale
 returns `DEGRADED` with no observations until its wording is observed and seeded.
+
+## T029 Instagram live acceptance (2026-11-12)
+
+Server: wheel built from main `fc4fef0` (PR 152 merged), reinstalled, this session's server restarted, and
+`fn-ignis://guide/ignis-instagram-browser` read from it first. Browser: Claude in Chrome on the Finos profile, UI
+`en`. Keyword `áo khoác chống nắng`, `TACTICAL`, `result_limit` 20, steps exactly as the relay and Instagram guides
+list them: prepare, open the relay, click "Open search", evaluate `tab_script` once (the evaluator returned `{}`
+as the guide predicts), relay `STAGED`, submit.
+
+| Measure | Result |
+|---|---|
+| Prepare to accepted | about 65 s (15:49:31 to 15:50:36 UTC) |
+| Outcome | `ACCEPTED`, query `HEALTHY`, 12 observations (SC-002 needs at least 10) |
+| Links | all 12 `https://www.instagram.com/p/<id>`, no account segment, query or fragment |
+| `@handles`, profile links | none in any excerpt |
+| Automatic attribution ("Photo by … on") | none in any excerpt |
+| Phone number, email | one caption: both replaced by `[REDACTED_PHONE]`, `[REDACTED_EMAIL]` |
+| Dates, counters | `published_at` null, `metric_known` false, as designed |
+| Steps outside the guides | none |
+
+Identity check: one caption carries a seller's first name in free text (not quoted here); free-text personal
+names are outside Principle VII under its own documented clause, as for TikTok hashtags (OQ-2). Content is
+seller listings and one garment-maker's advice post: supply-side context, as the guide says, not customer voice.
+The `en` attribution wording stays unobserved on Instagram; the locale gate keeps any other UI language closed.
+
+Limits: about 65 s is over SC-003's 60 s per source, and one run cannot establish its median. The run happened
+in the coordinating session, not a fresh agent, so "no step outside the guides" is not SC-001 evidence.
