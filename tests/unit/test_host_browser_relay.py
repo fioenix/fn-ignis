@@ -665,3 +665,24 @@ def test_tiktok_relay_keeps_its_legacy_envelope_without_a_source(socket_free_rel
     script, data = relay_scripts(relay)
     assert data["legacy_envelope"] is True
     assert "data.legacy_envelope ? {} : {source: data.source}" in script
+
+
+@pytest.mark.parametrize("href", [
+    "https://attacker.invalid/explore/search/keyword/?q=synthetic%201",
+    "https://www.instagram.com/explore/search/keyword/?q=wrong",
+    "https://www.instagram.com/explore/search/keyword/?q=synthetic%201&igsh=1",
+    "https://www.instagram.com/explore/search/keyword/?q=synthetic%201#x",
+    "https://www.instagram.com/explore/tags/synthetic/?q=synthetic%201",
+])
+def test_instagram_handoff_refuses_an_unapproved_page_before_navigation(socket_free_relay, href):
+    relay = socket_free_relay(source="instagram")
+    code = r'''
+const vm=require('vm'),crypto=require('crypto').webcrypto;
+(async()=>{let navigations=0,timers=0;
+const result=await vm.runInNewContext(process.argv[1],{URL,location:{href:process.argv[2],replace:()=>navigations++},
+ window:{opener:null},crypto,TextEncoder,Uint8Array,btoa,setTimeout:()=>timers++});
+console.log(JSON.stringify({result,navigations,timers}));})().catch(e=>{console.error(e);process.exit(1)});
+'''
+    value = run_node(code, relay.tab_script, href)
+    assert value["result"] == {"posted": False, "reason": "Unapproved search page"}
+    assert value["navigations"] == value["timers"] == 0

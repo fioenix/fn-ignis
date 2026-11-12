@@ -28,6 +28,10 @@ class HostBrowserSource:
     # The content id encodes the publication second (Spec 025 FR-007); checked live before use.
     dates_from_content_id: bool = False
     display_name: str = ""
+    # Locale-qualified attribution wording lives in this seed's `<source>_attribution_<locale>` domains.
+    attribution_locale_seed: str = "038_tiktok_attribution_locales.sql"
+    # A locale without observed wording yields no records: the caption field can name the poster.
+    locale_requires_attribution: bool = False
     sample_note: str = "Bounded visible public video grid; window and counters unmeasured"
 
     def search_url(self, query: str) -> str:
@@ -62,8 +66,9 @@ _SOURCES = MappingProxyType({
         record_path=r"^/(?:p|reel)/[A-Za-z0-9_-]+/?$",
         accepted_record_path=r"/(?:p|reel)/([A-Za-z0-9_-]+)/?",
         canonical_path="/p/", extractor_version="instagram-keyword-grid-v1", platform="reels",
-        sampling_ordering="visible_grid", legacy_envelope=False, localized_attribution=False,
+        sampling_ordering="visible_grid", legacy_envelope=False, localized_attribution=True,
         validates_locale=True, measured_counters=False, display_name="Instagram",
+        attribution_locale_seed="041_instagram_attribution.sql", locale_requires_attribution=True,
         sample_note="Bounded visible keyword grid captions; window, dates and counters unmeasured",
     ),
 })

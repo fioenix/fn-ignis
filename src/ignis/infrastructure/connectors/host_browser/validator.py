@@ -63,7 +63,7 @@ def _counters(components, labels):
 def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
                     attribution_templates: tuple[str, ...] = (), self_identities=(), *, author_records=None, action_labels=None, attribution_locales=None) -> dict:
     action_labels = seeded_action_labels() if action_labels is None else action_labels
-    attribution_locales = seeded_attribution_locales() if attribution_locales is None else attribution_locales
+    attribution_locales = seeded_attribution_locales(request.source) if attribution_locales is None else attribution_locales
     answer = HostSearchAnswer.model_validate(payload, context={"request": request})
     if not attribution_templates:
         raise ValueError("Source attribution vocabulary is unavailable")
@@ -106,7 +106,9 @@ def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
             templates = attribution_locales.get(item.locale, ()) if re.fullmatch(r"[a-z]{2,8}", item.locale or "") else ()
         seen, count = set(), 0
         path = collection_path(request.source, request.extractor_version, query.result_limit)
-        for record in item.records:
+        # Without observed wording for this page locale, an excerpt could keep the poster's name.
+        unattributed = descriptor.locale_requires_attribution and not templates
+        for record in () if unattributed else item.records:
             cleaned_url = _content_url(request.source, record.source_url)
             if record.published_at and record.published_at > item.captured_at:
                 raise ValueError("Publication cannot follow capture")
@@ -146,7 +148,9 @@ def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
                        note=descriptor.sample_note)
         unsupported = descriptor.display_name + " page locale is unsupported; no observations collected"
         if not descriptor.legacy_envelope and not descriptor.measured_counters:
-            outcome.update(**path, note=unsupported if item.locale == "unsupported" else descriptor.sample_note)
+            outcome.update(**path, note=unsupported if item.locale == "unsupported" else
+                           (descriptor.display_name + " attribution wording is unobserved for locale " + item.locale
+                            + "; no observations collected") if unattributed else descriptor.sample_note)
         if descriptor.measured_counters:
             outcome.update(**path, note=(unsupported
                                          if item.locale == "unsupported" else

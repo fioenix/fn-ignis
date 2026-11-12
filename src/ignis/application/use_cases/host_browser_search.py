@@ -119,7 +119,7 @@ class HostBrowserSearchService:
         if not attribution_templates:
             raise AttributionVocabularyMissing("No attribution vocabulary is registered for the host source")
         descriptor = get_source(source)
-        locales = copy.deepcopy(seeded_attribution_locales() if attribution_locales is None else attribution_locales) if descriptor.localized_attribution else {}
+        locales = copy.deepcopy(seeded_attribution_locales(source) if attribution_locales is None else attribution_locales) if descriptor.localized_attribution else {}
         if descriptor.localized_attribution and not locales:
             raise AttributionVocabularyMissing("No attribution vocabulary is registered for the host source")
         if type(lifetime_seconds) is not int or not 0 < lifetime_seconds <= 3600:
@@ -322,7 +322,7 @@ class HostBrowserSearchService:
             descriptor = get_source(source)
             labels = (action_labels_from_rows(await executor._repo.get_domain_lexicons())
                       if descriptor.measured_counters else {})
-            locales = (attribution_locales_from_rows(await executor._repo.get_domain_lexicons())
+            locales = (attribution_locales_from_rows(await executor._repo.get_domain_lexicons(), source)
                        if descriptor.localized_attribution else {})
             binding = await prepare_scope(executor, mission_id, source)
             sync = getattr(executor, "_vocabulary_sync", None)

@@ -42,7 +42,7 @@ Cây mã nguồn hiện có migration tới `sql/041_instagram_attribution.sql`,
 tên tác giả, dùng cho tìm kiếm qua trình duyệt host. Migration 040 chỉ
 xóa các dòng `system` thuộc bảy miền từ vựng thị trường đã bỏ; giữ nguyên dòng do người vận hành
 thêm và bằng chứng đã lưu. SQLite áp dụng khi khởi tạo; kho PostgreSQL hiện hữu chỉ áp dụng
-migration còn thiếu này sau 039. `register_domain_lexicon` vẫn lưu và liệt kê từ miền, nhưng chúng
+các migration còn thiếu sau 039 (040 rồi 041). `register_domain_lexicon` vẫn lưu và liệt kê từ miền, nhưng chúng
 không còn tác động đến khớp chủ đề hay nhận diện ngôn ngữ. Từ phục vụ lọc nhiễu, nhận diện ngôn ngữ
 và đọc giao diện vẫn giữ vai trò cũ.
 

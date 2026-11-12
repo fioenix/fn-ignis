@@ -44,7 +44,7 @@ Other client configurations remain unchanged; omitting these options retains the
 The current source tree contains migrations through `sql/041_instagram_attribution.sql`, a seed-only row of
 Instagram attribution wording for host-browser search. Migration 040 deletes only `system` rows in the seven retired market vocabulary domains; operator
 rows and stored evidence remain unchanged. SQLite applies it at bootstrap; existing PostgreSQL
-stores apply only this pending migration after 039. `register_domain_lexicon` still stores and lists
+stores apply only the pending migrations after 039 (040, then 041). `register_domain_lexicon` still stores and lists
 market terms, but they no longer affect topic matching or language detection. Filtering,
 language-detection and interface vocabulary keep their existing roles.
 

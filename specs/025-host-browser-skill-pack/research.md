@@ -145,3 +145,12 @@ in a new tab on click, as the relay does. After load, one read-only evaluation i
 
 Transport chosen: `fragment_receive` (Threads' path). No click, typing or scrolling on the Instagram page; both tabs
 closed after the check. 12 captioned tiles is close to SC-002's floor of 10.
+
+## Instagram attribution check (2026-11-12, PR 152 security review)
+
+Same keyword grid on the Finos profile, UI `en`, one read-only evaluation after load: 24 tiles; 14 render no
+image element, 10 carry an `img[alt]`, and every one of those 10 is the poster's own caption. None matches an
+automatic attribution shape ("Photo/Video by <name> on/in/with …"), and none reads "May be an image of …".
+Instagram's own attribution wording therefore stays unobserved. Records are accepted only on a page locale with
+seeded wording (`instagram_attribution_en`, borrowed from Threads' observed Meta wording); any other locale
+returns `DEGRADED` with no observations until its wording is observed and seeded.

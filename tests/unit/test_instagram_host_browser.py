@@ -35,6 +35,24 @@ def _answer(records, *, status="HEALTHY", locale="en", page=SEARCH, verified=Tru
                     search_verified=verified, empty_state_visible=False, status=status, locale=locale, records=records)])
 
 
+def test_a_locale_without_observed_attribution_wording_yields_no_observations():
+    """Security review PR 152: on an unseeded UI language the caption field could keep the poster's name."""
+    record = dict(source_url="https://www.instagram.com/p/DQx_1-a/", excerpt="Áo khoác Ảnh của Fixture Seller vào 3 tháng 5")
+    sidecar = []
+    receipt = validate_answer(_request(), _answer([record], locale="vi"), _later(), TEMPLATES, author_records=sidecar)
+    assert receipt["observations"] == [] and sidecar == []
+    [outcome] = receipt["outcomes"]
+    assert outcome["status"] == "DEGRADED" and outcome["signals_collected"] == 0
+    assert outcome["note"] == "Instagram attribution wording is unobserved for locale vi; no observations collected"
+    assert "Fixture Seller" not in json.dumps(receipt, ensure_ascii=False)
+
+
+def test_the_packaged_seed_names_the_locales_whose_wording_gates_records():
+    from ignis.infrastructure.connectors.host_browser.attribution_locales import seeded_attribution_locales
+    assert seeded_attribution_locales("instagram") == {"en": ("Photo by {author} on",)}
+    assert seeded_attribution_locales("tiktok") == {"vi": ("do {author} tạo với",)}
+
+
 def test_caption_is_kept_and_identity_is_removed_before_the_receipt():
     records = [
         dict(source_url="https://www.instagram.com/p/DQx_1-a/", excerpt="Áo khoác gió @fixture.handle #aokhoac Photo by Fixture Seller on May 3, 2026."),
