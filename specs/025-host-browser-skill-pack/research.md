@@ -174,7 +174,7 @@ as the guide predicts), relay `STAGED`, submit.
 | Dates, counters | `published_at` null, `metric_known` false, as designed |
 | Steps outside the guides | none |
 
-Identity check: one caption carries a seller's first name in free text ("order em Hà"); free-text personal
+Identity check: one caption carries a seller's first name in free text (not quoted here); free-text personal
 names are outside Principle VII under its own documented clause, as for TikTok hashtags (OQ-2). Content is
 seller listings and one garment-maker's advice post: supply-side context, as the guide says, not customer voice.
 The `en` attribution wording stays unobserved on Instagram; the locale gate keeps any other UI language closed.
