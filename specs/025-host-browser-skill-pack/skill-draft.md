@@ -1,6 +1,6 @@
 # Draft: `ignis-browser-collect` skill (Story 1, TikTok and Threads)
 
-Draft for review under Spec 025; it becomes `.agents/skills/ignis-browser-collect/SKILL.md` and a
+Draft for review under Spec 025. Per OQ-1 (2026-11-12) it splits into one skill per platform plus a shared reference; the steps below become that reference and a
 packaged guide only after the plan. Every step below was run live on 2026-11-11 (`research.md`).
 
 ---

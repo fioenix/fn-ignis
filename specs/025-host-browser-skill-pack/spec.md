@@ -4,7 +4,7 @@
 
 **Created**: 2026-11-11
 
-**Status**: Draft. Open owner questions are listed under Clarifications; plan waits on them.
+**Status**: Clarified 2026-11-12. Ready for `/speckit-plan`.
 
 **Input**: Owner request of 2026-11-11: "Ignis sẽ cần một bộ skill chuyên về scrape TikTok, Reels,
 Threads... bằng browser đó. Mày nên nghiên cứu thực hiện một lần, ghi nhận lại các thao tác thành
@@ -34,21 +34,18 @@ in the order the live run proved, and recovers from each known failure without a
   the only clicks are on the local relay page (agent decided; basis: research note step logs and
   `BACKLOG.md` "Trình duyệt cho đường browser").
 
-### Open owner questions (recorded while the owner is away; nothing below is decided)
-
-- **OQ-1 Packaging.** One skill `ignis-browser-collect` with one reference file per source
-  (recommended), or one skill per source? One skill keeps the shared relay steps in one place.
-- **OQ-2 TikTok hashtags that name the creator.** The TikTok extractor keeps hashtags after the
-  caption; the live run saw hashtags equal to poster handles. Options: (a) drop every hashtag from the
-  stored excerpt (recommended under Principle VII: a hashtag cannot be proved free of a handle without
-  vocabulary); (b) keep hashtags and document them as free-text names outside the principle.
-- **OQ-3 Instagram value.** The keyword grid returns captions only (no date, no counters), mostly from
-  sellers. Should Instagram observations enter as supply-side context (`CONTEXT_ONLY` by default), or
-  be qualified like any other source?
-- **OQ-4 TikTok publication date from the video id.** The upper 32 bits of a TikTok video id are its
-  Unix publish second. Derive `published_at` from it at submit time (recommended once one rendered
-  date is checked against it), which also stops lifetime views of old videos counting as new volume
-  in period views (backlog MEA-1)?
+- Q: OQ-1 How is the skill pack packaged? → A: One skill per platform (TikTok, Threads, Instagram); the shared
+  relay procedure and failure table live once as a reference file that each skill points to, following the
+  skills standard (owner decided, 2026-11-12).
+- Q: OQ-2 TikTok hashtags that equal a creator's handle? → A: Keep hashtags in the excerpt and record them as
+  free-text names outside Principle VII, under the principle's own clause that free-text personal names are
+  outside it and must be documented (owner decided, 2026-11-12). Recorded risk: a hashtag can equal a handle,
+  so stored excerpts may name a creator; `@handles` and profile links stay removed as today.
+- Q: OQ-3 How are Instagram observations qualified? → A: Like any other source, through normal evidence
+  qualification; no default to `CONTEXT_ONLY` (owner decided, 2026-11-12).
+- Q: OQ-4 TikTok publication date from the video id? → A: Yes, after checking decoded dates against the
+  rendered dates of a few real videos; then `published_at` is derived at submit time (owner decided,
+  2026-11-12). Until the check passes, TikTok keeps the Spec 016 first-collection anchor.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -111,8 +108,9 @@ remedy; a review against `research.md` finds none missing.
 
 ### Functional Requirements
 
-- **FR-001**: The repository MUST ship a host-browser collection skill under `.agents/skills/` and as a
-  packaged MCP guide (prompt and resource), so non-repository hosts receive it too.
+- **FR-001**: The repository MUST ship one host-browser collection skill per platform under `.agents/skills/`,
+  sharing one reference for the relay procedure and failure table, and the same guidance as packaged MCP
+  prompts and resources, so non-repository hosts receive it too.
 - **FR-002**: The skill MUST state the step order proven in `research.md` and MUST NOT instruct any
   click, typing or scrolling on a platform page.
 - **FR-003**: The skill MUST name each failure in `research.md` with its check and remedy.
@@ -123,6 +121,10 @@ remedy; a review against `research.md` finds none missing.
 - **FR-006**: No MCP tool may be added or removed; extending the `source` values that
   `prepare_host_browser_search` accepts is a contract change the owner approved with the Reels reopening,
   and its description and manifests MUST be regenerated.
+- **FR-007**: TikTok `published_at` MUST be derived from the video id only after a recorded check against
+  rendered dates; the derivation MUST be deterministic and leave the date null when the id does not parse.
+- **FR-008**: Stored TikTok excerpts keep hashtags; the author-identity conformance documentation MUST list
+  hashtags as free-text names outside Principle VII.
 
 ### Key Entities
 
@@ -143,6 +145,6 @@ remedy; a review against `research.md` finds none missing.
 ## Assumptions
 
 - The owner's permission for real TikTok and Threads sessions (2026-11-11) extends to Instagram on the
-  same Finos profile once the owner confirms OQ-3; until then Story 2 is not run live.
+  same Finos profile.
 - Meta's terms for reading a signed-in page in the owner's own browser were accepted for Threads in
   Spec 020 G1; Instagram falls under the same acceptance unless the owner says otherwise.
