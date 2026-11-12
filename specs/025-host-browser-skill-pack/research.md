@@ -91,3 +91,17 @@ nắng`, `TACTICAL`, `result_limit` 20, one source at a time, steps exactly as t
 - Limit: the run was made by the coordinating session that wrote the guides, not a fresh session, so it
   proves the shipped wheel serves the guides and both sources accept, but not SC-001's "fresh agent
   needs zero steps outside the skill". T014 stays open for that run.
+
+## T016 TikTok rendered date versus video id (2026-11-12)
+
+Three videos accepted in the T014 run, opened by URL on the Finos profile (navigation only). The rendered
+date is read from the post header; a date without a year is the current year.
+
+| Video id | `UTC(id >> 32)` | Rendered date | Match |
+|---|---|---|---|
+| 7643765792374361362 | 2026-05-25 09:55:09 | 5-25 (2026) | yes |
+| 7555873331275222280 | 2025-09-30 13:27:31 | 2025-9-30 | yes |
+| 7381292723459869969 | 2024-06-17 02:25:35 | 2024-6-17 | yes |
+
+All three agree to the day (the page renders in Asia/Ho_Chi_Minh; none of the times crosses midnight
+there). FR-007's precondition is met; Phase 5 proceeds.

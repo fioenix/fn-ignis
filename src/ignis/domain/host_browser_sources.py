@@ -24,6 +24,8 @@ class HostBrowserSource:
     localized_attribution: bool
     validates_locale: bool
     measured_counters: bool
+    # The content id encodes the publication second (Spec 025 FR-007); checked live before use.
+    dates_from_content_id: bool = False
 
     def search_url(self, query: str) -> str:
         return self.origin + self.search_path + "?q=" + quote(query, safe="")
@@ -41,7 +43,7 @@ _SOURCES = MappingProxyType({
         accepted_record_path=r"/(?:@[A-Za-z0-9_.]+/video/|share/video/)[0-9]+",
         canonical_path="/share/video/", extractor_version="tiktok-public-grid-v3", platform="tiktok",
         sampling_ordering="visible_grid", legacy_envelope=True, localized_attribution=True,
-        validates_locale=False, measured_counters=False,
+        validates_locale=False, measured_counters=False, dates_from_content_id=True,
     ),
     "threads": HostBrowserSource(
         origin="https://www.threads.com", search_path="/search", transport="fragment_receive",

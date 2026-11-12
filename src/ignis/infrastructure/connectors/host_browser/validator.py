@@ -10,6 +10,7 @@ from ignis.infrastructure.connectors.host_browser.action_labels import seeded_ac
 from ignis.infrastructure.connectors.host_browser.attribution_locales import seeded_attribution_locales
 from ignis.domain.host_browser_search import HostSearchAnswer, HostSearchRequest
 from ignis.domain.self_content import is_self_authored
+from ignis.domain.tiktok_video_id import published_at_from_video_id
 from ignis.domain.host_browser_sources import get_source
 from ignis.infrastructure.security.pii_sanitizer import mask_author_identity_text, sanitize_pii_text, strip_platform_attribution
 
@@ -121,9 +122,12 @@ def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
                 continue
             seen.add(identity)
             count += 1
+            published_at = record.published_at
+            if published_at is None and descriptor.dates_from_content_id and cleaned_url:
+                published_at = published_at_from_video_id(cleaned_url.rsplit("/", 1)[-1], captured_at=item.captured_at)
             observation = dict(source_url=cleaned_url, excerpt=excerpt, query=query.query, query_id=query.query_id,
                 request_id=request.request_id, captured_at=item.captured_at.isoformat(),
-                published_at=record.published_at.isoformat() if record.published_at else None,
+                published_at=published_at.isoformat() if published_at else None,
                 metric_value=None, metric_kind=None, metric_known=False, collection_path=path["collection_path"])
             if descriptor.measured_counters:
                 observation.update(source=request.source, source_verifiable=cleaned_url is not None,
