@@ -6,8 +6,8 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationInfo
 
 from ignis.domain.host_browser_sources import get_source
 
-HostSearchSource = Literal["tiktok", "threads"]
-HostExtractorVersion = Literal["tiktok-public-grid-v4", "threads-search-top-v2"]
+HostSearchSource = Literal["tiktok", "threads", "instagram"]
+HostExtractorVersion = Literal["tiktok-public-grid-v4", "threads-search-top-v2", "instagram-keyword-grid-v1"]
 
 
 def _version_for_source(source: HostSearchSource) -> HostExtractorVersion:

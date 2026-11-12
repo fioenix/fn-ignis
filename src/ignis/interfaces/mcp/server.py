@@ -714,10 +714,11 @@ async def prepare_host_browser_search(
     lifetime_seconds: int, authorized: bool, mode: str = "TACTICAL", mission_id: Optional[str] = None,
     source: str = "tiktok",
 ) -> dict:
-    """Prepare one finite public TikTok or Threads search batch through an authorized host browser.
+    """Prepare one finite public TikTok, Threads or Instagram search batch through an authorized host browser.
 
     This opt-in loopback relay does not export cookies or collect in the background. TACTICAL
-    creates no mission. Source defaults to tiktok; threads uses the bounded Top browser sample.
+    creates no mission. Source defaults to tiktok; threads uses the bounded Top browser sample;
+    instagram uses the keyword grid's captions.
     MISSION requires an existing confirmed mission_id, queries=[] and
     result_limit=20; its full query union and limit derive from authority, including falsifiers.
     The host executes the packaged deterministic extractor and stages its JSON via
@@ -3920,6 +3921,18 @@ def get_ignis_threads_browser_guide() -> str:
 def prompt_ignis_threads_browser() -> str:
     """Guide the agent through a Threads host-browser search; collects nothing by itself."""
     return _host_browser_guide("ignis_threads_browser")
+
+
+@mcp.resource("fn-ignis://guide/ignis-instagram-browser")
+def get_ignis_instagram_browser_guide() -> str:
+    """Instagram specifics for host-browser search."""
+    return _host_browser_guide("ignis_instagram_browser")
+
+
+@mcp.prompt(name="ignis_instagram_browser")
+def prompt_ignis_instagram_browser() -> str:
+    """Guide the agent through an Instagram host-browser search; collects nothing by itself."""
+    return _host_browser_guide("ignis_instagram_browser")
 
 
 @mcp.prompt(name="voice_of_customer_audit")

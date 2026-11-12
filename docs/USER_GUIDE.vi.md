@@ -30,10 +30,11 @@ Không đặt bí mật trong prompt, transcript lệnh hay báo cáo.
 
 ### Nâng cấp kho dữ liệu hiện có
 
-Chuỗi migration trong mã nguồn kết thúc ở `sql/040_retire_market_domain_vocabulary.sql`. Migration
+Chuỗi migration trong mã nguồn kết thúc ở `sql/041_instagram_attribution.sql`, một dòng seed về cách Instagram
+ghi tên tác giả cho tìm kiếm qua trình duyệt host; không đổi schema hay bằng chứng. Migration
 040 chỉ xóa các dòng `system` thuộc bảy miền từ vựng thị trường đã bỏ; giữ nguyên dòng do người vận
 hành thêm và bằng chứng đã lưu. SQLite áp dụng khi khởi tạo; kho PostgreSQL hiện hữu chỉ áp dụng
-migration còn thiếu này sau 039. `register_domain_lexicon` vẫn lưu và liệt kê từ miền, nhưng chúng
+các migration còn thiếu sau 039 (040 rồi 041). `register_domain_lexicon` vẫn lưu và liệt kê từ miền, nhưng chúng
 không còn tác động đến khớp chủ đề hay nhận diện ngôn ngữ. Từ phục vụ lọc nhiễu, nhận diện ngôn ngữ
 và đọc giao diện vẫn giữ vai trò cũ.
 
@@ -317,8 +318,9 @@ khuyến nghị kinh doanh. Host chỉ đóng tab do nhiệm vụ tạo, giữ n
 
 ### Thu thập Threads qua host và so sánh đường thu thập
 
-`prepare_host_browser_search` có tham số tùy chọn `source="threads"`. Khi bỏ qua tham số này,
-tool giữ `source="tiktok"`. Submit và cancel vẫn nhận ba tham số ID. Tổng số tool hiện là 41.
+`prepare_host_browser_search` có tham số tùy chọn `source="threads"` hoặc `source="instagram"`. Khi bỏ
+qua tham số này, tool giữ `source="tiktok"`. Instagram đọc chú thích từ lưới tìm kiếm theo từ khóa khi đã
+đăng nhập (hiện chỉ ở chế độ TACTICAL); nguồn `reels` đã ngừng vẫn bị từ chối. Submit và cancel vẫn nhận ba tham số ID. Tổng số tool hiện là 41.
 Threads chỉ thu thập qua trình duyệt host được cho phép. Phần thu thập bằng Playwright và
 các tool gợi ý, xu hướng chỉ trả kết quả không khả dụng đã bị gỡ. Credential Threads đã lưu
 không chứng minh có thể thu thập; Ignis không probe quyền API hay tự chuyển sang đường API.

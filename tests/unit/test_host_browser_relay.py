@@ -324,9 +324,11 @@ def socket_free_relay(monkeypatch):
     relays = []
     def create(source="threads", count=1):
         request = handoff_request()
-        request.update(source=source, extractor_version="threads-search-top-v2" if source == "threads" else "tiktok-public-grid-v1")
+        request.update(source=source, extractor_version={"threads": "threads-search-top-v2",
+            "instagram": "instagram-keyword-grid-v1"}.get(source, "tiktok-public-grid-v1"))
+        search = "/explore/search/keyword/" if source == "instagram" else "/search"
         request["queries"] = [dict(query_id=f"query-{i+1}", query=f"synthetic {i+1}", result_limit=3,
-            search_url=f"https://www.{source}.com/search?q=synthetic%20{i+1}") for i in range(count)]
+            search_url=f"https://www.{source}.com{search}?q=synthetic%20{i+1}") for i in range(count)]
         relay = module.LoopbackRelay(request,
             "arg => ({...arg, status: 'HEALTHY', records: [{source_url: 'https://www.threads.com/@fixture/post/ID'}]})",
             lambda answer: {}, 10)
@@ -611,3 +613,76 @@ def test_t058_oversized_ascii_content_length_does_not_escape_handler(socket_free
     handler.end_headers = lambda: None
     handler.do_POST()
     assert statuses == [413]
+
+
+def test_instagram_relay_answer_keeps_its_source_through_validation_and_staging(socket_free_relay):
+    """Every non-legacy source carries `source` in the envelope; TikTok's legacy envelope does not."""
+    from datetime import datetime, timedelta, timezone
+    from ignis.domain.host_browser_search import HostSearchQuery, HostSearchRequest
+    from ignis.infrastructure.connectors.host_browser.validator import validate_answer
+
+    relay = socket_free_relay(source="instagram")
+    script, data = relay_scripts(relay)
+    assert data["legacy_envelope"] is False
+    code = r'''
+const vm=require('vm'), crypto=require('crypto').webcrypto;
+const data=JSON.parse(process.argv[1]), script=process.argv[2], tabScript=process.argv[3];
+(async()=>{
+let listener, urls=[], payload={value:''}, status={textContent:''};
+const document={getElementById:id=>id==='relay-data'?{textContent:JSON.stringify(data)}:id==='payload'?payload:status,
+ querySelector:s=>s==='form'?{requestSubmit:()=>{}}:{addEventListener:()=>{}}};
+class BroadcastChannel {constructor(){} set onmessage(cb){listener=cb} close(){}}
+const shared={crypto,TextEncoder,TextDecoder,Uint8Array,atob,btoa,URL,Map,JSON};
+vm.runInNewContext(script,{...shared,document,BroadcastChannel,window:{open:()=>({}),addEventListener:()=>{}},CSS:{escape:x=>x}});
+let navigate;
+const tab={...shared,location:{href:data.queries[0].search_url,replace:url=>urls.push(url)},window:{opener:null},setTimeout:cb=>navigate=cb};
+const posted=await vm.runInNewContext(tabScript,tab); navigate();
+await listener({data:urls[0].split('#')[1]});
+console.log(JSON.stringify({posted,payload:JSON.parse(payload.value)}));
+})().catch(e=>{console.error(e);process.exit(1)});
+'''
+    result = run_node(code, json.dumps(data), script, relay.tab_script)
+    assert result["posted"]["posted"] is True
+    payload = result["payload"]
+    assert payload["source"] == "instagram"
+    query = data["queries"][0]
+    answer = payload["answers"][0]
+    answer.pop("result_limit")  # The synthetic extractor echoes its arguments; the packaged one does not.
+    now = datetime.now(timezone.utc)
+    answer.update(page_url=query["search_url"], captured_at=now.isoformat(), search_verified=True,
+                  empty_state_visible=False, locale="en", status="HEALTHY",
+                  records=[dict(source_url="https://www.instagram.com/p/DQx_1-a/", excerpt="Caption")])
+    request = HostSearchRequest(request_id=data["request_id"], host_task_ref=data["host_task_ref"],
+        session_ref=data["session_ref"], source="instagram", issued_at=now - timedelta(seconds=1),
+        expires_at=now + timedelta(seconds=60), queries=(HostSearchQuery(query_id=query["query_id"],
+        query=query["query"], search_url=query["search_url"], result_limit=3),))
+    receipt = validate_answer(request, payload, now, ("Photo by {author} on",))
+    assert receipt["source"] == "instagram" and receipt["observations"][0]["source"] == "instagram"
+
+
+def test_tiktok_relay_keeps_its_legacy_envelope_without_a_source(socket_free_relay):
+    relay = socket_free_relay(source="tiktok")
+    script, data = relay_scripts(relay)
+    assert data["legacy_envelope"] is True
+    assert "data.legacy_envelope ? {} : {source: data.source}" in script
+
+
+@pytest.mark.parametrize("href", [
+    "https://attacker.invalid/explore/search/keyword/?q=synthetic%201",
+    "https://www.instagram.com/explore/search/keyword/?q=wrong",
+    "https://www.instagram.com/explore/search/keyword/?q=synthetic%201&igsh=1",
+    "https://www.instagram.com/explore/search/keyword/?q=synthetic%201#x",
+    "https://www.instagram.com/explore/tags/synthetic/?q=synthetic%201",
+])
+def test_instagram_handoff_refuses_an_unapproved_page_before_navigation(socket_free_relay, href):
+    relay = socket_free_relay(source="instagram")
+    code = r'''
+const vm=require('vm'),crypto=require('crypto').webcrypto;
+(async()=>{let navigations=0,timers=0;
+const result=await vm.runInNewContext(process.argv[1],{URL,location:{href:process.argv[2],replace:()=>navigations++},
+ window:{opener:null},crypto,TextEncoder,Uint8Array,btoa,setTimeout:()=>timers++});
+console.log(JSON.stringify({result,navigations,timers}));})().catch(e=>{console.error(e);process.exit(1)});
+'''
+    value = run_node(code, relay.tab_script, href)
+    assert value["result"] == {"posted": False, "reason": "Unapproved search page"}
+    assert value["navigations"] == value["timers"] == 0

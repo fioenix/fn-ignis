@@ -53,6 +53,13 @@ in the order the live run proved, and recovers from each known failure without a
   the TikTok extractor version moves to `tiktok-public-grid-v4`, so its collection path changes and periods across
   the upgrade report `collection_path_changed` (owner decided, chat 2026-11-12).
 
+
+### Session 2026-11-12
+
+- Q: T020 gate: may the agent use a real Instagram session on the Finos profile? → A: Yes (owner decided,
+  chat 2026-11-12). Covers the T020 spike and the T029 live acceptance; the platform-page boundary is unchanged.
+- Q: T020 transport for Instagram? → A: `fragment_receive`, as for Threads: a tab opened from a local page by a
+  button click loses `window.opener` once Instagram loads (agent decided; basis: T020 spike in `research.md`).
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - One skill runs a TikTok or Threads search end to end (Priority: P1)

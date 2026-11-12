@@ -32,6 +32,7 @@ SEEDS = (
     "036_threads_attribution.sql",
     "037_threads_action_labels.sql",
     "038_tiktok_attribution_locales.sql",
+    "041_instagram_attribution.sql",
 )
 
 

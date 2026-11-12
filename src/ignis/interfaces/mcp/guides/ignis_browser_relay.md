@@ -1,7 +1,8 @@
 # Ignis host-browser relay
 
 Shared procedure for collecting one bounded keyword search through the requester's own signed-in
-Chrome. The source guides (`ignis_tiktok_browser`, `ignis_threads_browser`) add what differs per platform.
+Chrome. The source guides (`ignis_tiktok_browser`, `ignis_threads_browser`, `ignis_instagram_browser`) add what
+differs per platform.
 Every step below was run live on 2026-11-11.
 
 ## Before you start

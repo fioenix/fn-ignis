@@ -24,6 +24,7 @@ MACHINERY_DOMAINS = frozenset({
     "tiktok_ui_noise",
     "tiktok_attribution",
     "threads_attribution",
+    "instagram_attribution",
     "foreign_phrases",
     "portuguese_words",
 })
@@ -48,6 +49,7 @@ class MarketVocabulary:
     tiktok_ui_noise: List[str] = field(default_factory=list)
     tiktok_attribution: List[str] = field(default_factory=list)
     threads_attribution: List[str] = field(default_factory=list)
+    instagram_attribution: List[str] = field(default_factory=list)
     foreign_phrases: List[str] = field(default_factory=list)
     portuguese_words: List[str] = field(default_factory=list)
     probe_templates: Dict[str, List[str]] = field(default_factory=dict)
@@ -98,6 +100,7 @@ async def load_market_vocabulary(repository: ITrendRepository) -> MarketVocabula
         tiktok_ui_noise=grouped.get("tiktok_ui_noise", []),
         tiktok_attribution=grouped.get("tiktok_attribution", []),
         threads_attribution=grouped.get("threads_attribution", []),
+        instagram_attribution=grouped.get("instagram_attribution", []),
         foreign_phrases=grouped.get("foreign_phrases", []),
         portuguese_words=grouped.get("portuguese_words", []),
         probe_templates=_templates_for(PROBE_TEMPLATE_PREFIX),

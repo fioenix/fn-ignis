@@ -21,6 +21,7 @@ SEED_FILES = (
     "036_threads_attribution.sql",
     "037_threads_action_labels.sql",
     "038_tiktok_attribution_locales.sql",
+    "041_instagram_attribution.sql",
     # Run by the SQLite bootstrap after the vocabulary replay; missing from a wheel, the retired
     # UI-noise terms would silently come back on every installed SQLite database.
     "020_retire_ambiguous_tiktok_ui_noise.sql",
@@ -29,7 +30,7 @@ SEED_FILES = (
 # Not a seed: PostgreSQL-only, and read by no bootstrap. The Compose init and an operator applying
 # sql/ by hand need the whole chain, so the newest migration is pinned here and shipped with it.
 NEWEST_POSTGRES_ONLY_MIGRATION = "039_remove_seeded_taxonomy.sql"
-NEWEST_MIGRATION = "040_retire_market_domain_vocabulary.sql"
+NEWEST_MIGRATION = "041_instagram_attribution.sql"
 # The closed sdist member list: runtime package, the SQL chain, and the build metadata. Anything
 # else -- tests, docs, examples, reports, handoff notes, agent or local settings -- must not ship.
 SDIST_MEMBERS = {"src/ignis", "sql", "pyproject.toml", "README.md", "LICENSE"}
@@ -220,7 +221,7 @@ async def test_packaged_sql_bootstrap_keeps_lexicons_without_taxonomy(tmp_path, 
     monkeypatch.setattr(resources, 'PACKAGED_SQL_DIR', packaged)
     monkeypatch.setattr(resources, 'REPOSITORY_SQL_DIR', tmp_path / 'absent')
     names = sorted(path.name for path in packaged.glob('*.sql'))
-    assert [int(name[:3]) for name in names] == list(range(1, 41))
+    assert [int(name[:3]) for name in names] == list(range(1, 42))
     assert names[-1] == NEWEST_MIGRATION
     path = tmp_path / 'installed.sqlite3'
     for _ in range(2):

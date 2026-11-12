@@ -75,7 +75,7 @@ def _host_browser_section():
 
 def test_host_browser_search_covers_both_sources_in_one_mission_run():
     section = _host_browser_section()
-    for rule in ('source="tiktok"', 'source="threads"', "sibling tickets", "one mission run",
+    for rule in ('source="tiktok"', 'source="threads"', 'source="instagram"', "sibling tickets", "one mission run",
                  "stage both", "IDs only", "read back", "not a default collector or an automatic fallback"):
         assert rule in section, rule
 
@@ -139,7 +139,7 @@ def test_routine_distinguishes_threads_host_search_from_saved_sign_in():
 
 def test_manual_stage_requires_the_complete_envelope_and_reprepare_after_rejection():
     section = _host_browser_section()
-    for rule in ("full envelope", "`source`", "Threads only", "`request_id`", "`host_task_ref`",
+    for rule in ("full envelope", "`source`", "omitted for TikTok", "`request_id`", "`host_task_ref`",
                  "`session_ref`", "`extractor_version`", "`answers`", "one answer per approved query",
                  "prepare order", "extractor's retained object", "never reconstruct, transcribe or repair",
                  "rejected payload closes the relay", "prepare a new ticket"):

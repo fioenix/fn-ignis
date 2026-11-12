@@ -128,7 +128,7 @@ async def test_bound_mission_scope_is_not_rebound_for_a_different_caller(monkeyp
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("source", ["instagram", "threads-mcp-keyword-v1", "THREADS", ""])
+@pytest.mark.parametrize("source", ["reels", "threads-mcp-keyword-v1", "THREADS", "INSTAGRAM", ""])
 async def test_unsupported_host_source_is_refused_before_transport_or_storage(monkeypatch, source):
     monkeypatch.setattr(server, "get_components", lambda: pytest.fail("Invalid source reached storage"))
     result = await server.handle_prepare_host_browser_search(
@@ -153,3 +153,22 @@ async def test_mission_preparation_refuses_an_unknown_source_as_invalid_scope(mo
         lifetime_seconds=60, authorized=True, mode="MISSION", mission_id="fixture-mission", source="youtube",
     )
     assert result == {"status": "BLOCKED", "reason_code": "INVALID_HOST_SEARCH_SCOPE"}
+
+
+
+
+@pytest.mark.asyncio
+async def test_mission_scope_refuses_instagram_until_mission_routing_lands():
+    """Spec 025: Instagram is TACTICAL only; a mission scope fails closed before any ticket or relay."""
+    from types import SimpleNamespace
+    from ignis.application.use_cases.host_browser_mission import prepare_scope
+
+    class Store:
+        async def load_mission_evidence_snapshot(self, mission_id):
+            manifest = SimpleNamespace(allowed_resources=("instagram_host_browser",),
+                                       authority_boundary=SimpleNamespace(browser_session=True))
+            return SimpleNamespace(mission=SimpleNamespace(workspace_id="w", status="PENDING", surface="market"),
+                                   manifest=manifest, brief=None)
+
+    with pytest.raises(ValueError, match="outside confirmed authority"):
+        await prepare_scope(SimpleNamespace(_workspace_store=Store()), "fixture", "instagram")
