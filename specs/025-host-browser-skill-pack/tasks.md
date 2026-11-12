@@ -54,10 +54,15 @@ The T001 installed-asset check and its limit are recorded in `quickstart.md`.
 
 ## Phase 5: TikTok publication date (FR-007, OQ-4)
 
-- [ ] T016 [US1] Live check: open three or more accepted TikTok videos on the Finos profile, compare the rendered date with `UTC(video_id >> 32)`, record each pair in `specs/025-host-browser-skill-pack/research.md`; stop this phase if any pair differs by more than one day
-- [ ] T017 [P] [US1] Write failing tests for decoding (valid id, non-numeric, before 2016-09-01, future beyond one day) in `tests/unit/test_tiktok_video_id.py`
-- [ ] T018 [US1] Add `src/ignis/domain/tiktok_video_id.py` and apply it at submit time to new TikTok observations whose `published_at` is null in `src/ignis/application/use_cases/host_browser_search.py`
-- [ ] T019 [US1] Update the TikTok guide's date note in `src/ignis/interfaces/mcp/guides/ignis_tiktok_browser.md`
+- [x] T016 [US1] Live check: open three or more accepted TikTok videos on the Finos profile, compare the rendered date with `UTC(video_id >> 32)`, record each pair in `specs/025-host-browser-skill-pack/research.md`; stop this phase if any pair differs by more than one day
+- [x] T017 [P] [US1] Write failing tests for decoding (valid id, non-numeric, before 2016-09-01, future beyond one day) in `tests/unit/test_tiktok_video_id.py`
+- [x] T018 [US1] Add `src/ignis/domain/tiktok_video_id.py` and apply it at submit time to new TikTok observations whose `published_at` is null in `src/ignis/application/use_cases/host_browser_search.py`
+- [x] T019 [US1] Update the TikTok guide's date note in `src/ignis/interfaces/mcp/guides/ignis_tiktok_browser.md`
+
+Deviation (2026-11-12): T018 applies the decode where observations are built, in
+`src/ignis/infrastructure/connectors/host_browser/validator.py`, through a descriptor flag
+`dates_from_content_id`, so TACTICAL receipts and MISSION ingestion both get it; the use case builds no
+observations itself.
 
 ## Phase 6: User Story 2 — Instagram keyword search through the host browser (P2)
 

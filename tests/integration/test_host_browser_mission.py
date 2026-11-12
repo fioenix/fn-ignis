@@ -275,7 +275,9 @@ async def test_host_mission_uses_canonical_writer_and_never_rewrites_replayed_ev
         assert receipt["mission"]["channel_outcomes"][0]["queried_window"] is None
         assert receipt["mission"]["evidence_frame"]["frame_digest"]
         held = await repository_case.repository.get_mission_signals(mission.id)
-        assert held[0].published_at == (datetime.fromisoformat(publication) if publication else None)
+        # FR-007: without a host-supplied time, the TikTok video id supplies the publish second.
+        derived = datetime.fromisoformat("2024-09-23T12:50:20+00:00")
+        assert held[0].published_at == (datetime.fromisoformat(publication) if publication else derived)
         assert held[0].metadata["metric_known"] is False
         from ignis.application.use_cases.get_evidence_qualification_batch import _metric_highlight
         assert _metric_highlight(held[0]) == "Metric unmeasured"

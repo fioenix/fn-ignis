@@ -46,6 +46,9 @@ in the order the live run proved, and recovers from each known failure without a
 - Q: OQ-4 TikTok publication date from the video id? → A: Yes, after checking decoded dates against the
   rendered dates of a few real videos; then `published_at` is derived at submit time (owner decided,
   2026-11-12). Until the check passes, TikTok keeps the Spec 016 first-collection anchor.
+- Q: A TikTok video id that decodes to a time slightly after capture? → A: Up to one day later is clamped to the
+  capture time (clock skew); later than that, or before 2016-09-01, the date stays null (agent decided; basis: FR-007
+  and the validator rule that publication cannot follow capture).
 
 ## User Scenarios & Testing *(mandatory)*
 

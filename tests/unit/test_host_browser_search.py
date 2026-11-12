@@ -95,7 +95,8 @@ def test_tactical_result_retains_unknown_metrics_and_exact_provenance(service):
     assert receipt["status"] == "ACCEPTED"
     assert receipt["mode"] == "TACTICAL"
     record = receipt["observations"][0]
-    assert record["published_at"] is None
+    # FR-007: the TikTok video id carries the publish second; metrics stay unknown.
+    assert record["published_at"] == "2024-09-23T12:50:20+00:00"
     assert record["metric_value"] is None
     assert record["query"] == "túi đi làm"
     assert record["collection_path"] == "host_browser:tiktok-public-grid-v3"
@@ -316,3 +317,21 @@ def test_t060_tiktok_answers_must_come_from_the_video_results_page(page, accepte
     else:
         with pytest.raises(ValueError, match="does not match"):
             validate_answer(request, payload, datetime.now(timezone.utc), ("do {author} tạo với",))
+
+
+def test_tiktok_publication_stays_unknown_when_the_record_has_no_video_id(service):
+    request = prepare(service)
+    payload = answer(request)
+    payload["answers"][0]["records"][0]["source_url"] = None
+    service.stage(request["request_id"], payload)
+    record = service.submit(request["request_id"], "task-1", "chrome-1")["observations"][0]
+    assert record["published_at"] is None
+
+
+def test_a_host_supplied_tiktok_publication_time_is_kept_over_the_id(service):
+    request = prepare(service)
+    payload = answer(request)
+    payload["answers"][0]["records"][0]["published_at"] = "2024-09-24T00:00:00+00:00"
+    service.stage(request["request_id"], payload)
+    record = service.submit(request["request_id"], "task-1", "chrome-1")["observations"][0]
+    assert record["published_at"] == "2024-09-24T00:00:00+00:00"
