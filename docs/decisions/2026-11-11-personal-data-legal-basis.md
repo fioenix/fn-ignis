@@ -23,9 +23,9 @@ Article numbers below follow the GV Lawyers alert and are **unverified** against
 
 ## Gaps found in the repository (verified 2026-11-11)
 
-1. Retention of 13 months is a label only. `src/ignis/application/use_cases/watchlists.py:32` says runs are
-   "removable after 13 months by an explicit retention action", and Spec 016 FR-014 requires that action;
-   no code deletes expired observations.
+1. The 13-month retention action exists (`scripts/prune_expired_observations.py`, Spec 016 T014): dry run by
+   default, `--apply` deletes expired observations that no stored claim or research work references. What is
+   missing is the record of why 13 months and this trigger satisfy the law.
 2. The 2026-10-21 decision requires consent before an artifact is published outside the machine; no
    check enforces it, and Spec 015 strips identity fields but not personal data inside free text.
 3. No document maps Ignis's processing to a purpose, a legal basis and a deletion trigger.
@@ -42,8 +42,8 @@ Article numbers below follow the GV Lawyers alert and are **unverified** against
 | Declared accounts | Account the requester names for one mission | Study a brand's own account | Withdrawal by the requester, or mission deletion |
 | Semantic judgment by the host model and TypeSafe | The fields a judgment needs | Relevance and support scoring | Not stored by Ignis beyond the judgment row |
 
-- Implement the explicit retention action of Spec 016 FR-014 (backlog CMP-2) under the owner's
-  migration gate, never on a schedule.
+- Keep the existing explicit retention action (Spec 016 FR-014) as the Article 14 deletion mechanism; running
+  `--apply` on a real store stays an owner decision, never a schedule.
 - Add a publish gate that scans quotes for residual personal data and asks for explicit confirmation
   before an artifact leaves the machine (backlog CMP-3).
 
@@ -60,4 +60,4 @@ Article numbers below follow the GV Lawyers alert and are **unverified** against
 
 - Until the owner accepts this record, Ignis's processing has no written legal basis; nothing in this
   draft changes behaviour.
-- CMP-2 and CMP-3 stay blocked on the owner's acceptance of the deletion triggers above.
+- CMP-3 stays blocked on the owner's acceptance of this record.
