@@ -2482,6 +2482,21 @@ async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform
             judged = qualification.judgment_of(item.get("observation_id"))
             item["qualification_relation"] = judged.relation.value if judged else "UNASSESSED"
             item["qualification_reason"] = judged.reason_code.value if judged else None
+        progress = qualification.progress
+        # Insights, maturity and their citations rest only on these observations.
+        analysis["analysis_basis"] = {
+            "status": "PROVISIONAL" if progress.unassessed else "QUALIFIED",
+            "counted_observations": len(
+                comp["strategic_reasoner"].counted_signals(signals, qualification)
+            ),
+            "excluded_irrelevant": progress.excluded_irrelevant,
+            "context_only": progress.context_only,
+            "unassessed": progress.unassessed,
+            "note": (
+                "Excluded and context-only observations are never counted or cited. "
+                "Unassessed observations are counted until qualification completes."
+            ),
+        }
 
     analysis["quality_scorecard"] = {
         "overall_confidence": scorecard.overall_confidence,

@@ -144,7 +144,8 @@ remedy; a review against `research.md` finds none missing.
 
 ## Assumptions
 
-- The owner's permission for real TikTok and Threads sessions (2026-11-11) extends to Instagram on the
-  same Finos profile.
+- The owner's permission for real TikTok and Threads sessions (2026-11-11) does not by itself cover
+  Instagram. A live Instagram session needs the owner's explicit yes (AGENTS.md section 8), asked at T020
+  and recorded in Clarifications; until then no Instagram step runs with `authorized: true`.
 - Meta's terms for reading a signed-in page in the owner's own browser were accepted for Threads in
   Spec 020 G1; Instagram falls under the same acceptance unless the owner says otherwise.
