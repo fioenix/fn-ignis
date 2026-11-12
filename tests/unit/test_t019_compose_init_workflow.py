@@ -6,9 +6,9 @@ volume to a healthy database. It is opt-in, so the ordinary suite skips it, and 
 ran it unless an operator remembered to. A migration could therefore break fresh initialization
 while every build stayed green.
 
-These contracts pin the wiring that makes the gate worth having: it runs on every pull request and
-on the protected branches, it reaches the real test and nothing else, a skipped run cannot pass for
-a green one, it carries no credential or database of its own, and it reports under one stable name
+These contracts pin the wiring that makes the gate worth having: it runs after protected-branch
+pushes, release tags, weekly and on demand, never on pull requests. It reaches the real test and
+nothing else, a skipped run cannot pass for a green one, it carries no credential or database of its own, and it reports under one stable name
 that a branch-protection rule can select. Making that name *required* is a GitHub settings
 operation this repository cannot perform or prove; these tests only guarantee the name exists and
 cannot drift silently.
@@ -155,19 +155,15 @@ def test_the_stable_names_are_unique_across_every_workflow():
 # --- when it runs --------------------------------------------------------------------------------
 
 
-def test_the_gate_runs_on_every_pull_request_without_a_filter():
-    """A required check that a filter skips never reports, and the pull request waits forever."""
+def test_the_gate_never_runs_on_pull_requests():
     triggers = _triggers(_workflow())
-    assert "pull_request" in triggers, "pull requests do not run the gate, so it cannot be required"
-    pull_request = triggers["pull_request"] or {}
-    for narrowing in ("branches", "branches-ignore", "paths", "paths-ignore"):
-        assert narrowing not in pull_request, (
-            f"pull_request is narrowed by {narrowing!r}. A skipped required check never reports,"
-            " so an unmatched pull request blocks forever -- and a stacked one is never checked."
-        )
+    assert "pull_request" not in triggers
     assert "pull_request_target" not in triggers, (
         "pull_request_target runs fork code with the base repository's token and secrets"
     )
+    assert set(triggers) == {"push", "schedule", "workflow_dispatch"}
+    assert triggers["push"]["tags"] == ["v*"]
+    assert triggers["schedule"] == [{"cron": "17 5 * * 1"}]
 
 
 def test_the_gate_runs_on_protected_branch_pushes_and_on_demand():
@@ -208,16 +204,14 @@ def test_a_hung_init_is_bounded_by_a_timeout():
 def test_duplicate_runs_on_one_ref_cannot_pile_up():
     concurrency = _workflow().get("concurrency")
     assert isinstance(concurrency, dict), (
-        "no concurrency group, so every push to a pull request starts another full Compose init"
+        "no concurrency group, so events for one ref can start overlapping Compose init runs"
     )
     group = str(concurrency.get("group", ""))
     assert "github.ref" in group, f"the concurrency group {group!r} is not scoped to the ref"
     assert "compose-init" in group, (
         f"the concurrency group {group!r} could collide with another workflow's group"
     )
-    assert concurrency.get("cancel-in-progress") == "${{ github.event_name == 'pull_request' }}", (
-        "only superseded pull-request runs may be cancelled; protected-branch pushes must queue"
-    )
+    assert concurrency.get("cancel-in-progress") is False, "active fresh-init runs must finish"
 
 
 # --- what it installs and what it runs ----------------------------------------------------------

@@ -2317,3 +2317,16 @@ def test_wheel_smoke_refuses_host_contract_drift_at_42_tools(tmp_path, mode):
     module = _smoke()
     with pytest.raises(module.SmokeFailure, match="host-browser schema"):
         module.run_smoke(_fake(tmp_path, mode), response_timeout=10, exit_timeout=10)
+
+
+def test_pr_sqlite_job_keeps_build_and_wheel_mcp_smoke():
+    workflow = yaml.safe_load(_read(REPO / ".github/workflows/ci.yml"))
+    job = workflow["jobs"]["test"]
+    assert "if" not in job and "needs" not in job
+    assert "services" not in job
+    commands = [step.get("run", "") for step in job["steps"]]
+    build = next(index for index, command in enumerate(commands) if "uv build" in command)
+    smoke = next(index for index, command in enumerate(commands) if "scripts/wheel_mcp_smoke.py" in command)
+    assert build < smoke
+    assert 'uv pip install --python .venv/bin/python "${WHEEL}"' in commands[smoke]
+    assert "DATABASE_URL=sqlite:///" in commands[smoke]

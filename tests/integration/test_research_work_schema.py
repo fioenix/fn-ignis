@@ -9,8 +9,8 @@ from psycopg import sql
 
 from tests.integration.conftest import SCHEMA_MIGRATIONS, runtime_owner
 
-# Builds the migration chain itself; CI runs it on main, release tags and pull requests that change
-# sql/ or these chain tests (.github/workflows/ci.yml).
+# Builds the migration chain itself; the PostgreSQL parity job runs it on branch pushes,
+# release tags, weekly and manual runs, never pull requests (.github/workflows/ci.yml).
 pytestmark = pytest.mark.migration_chain
 
 ROOT = Path(__file__).resolve().parents[2]

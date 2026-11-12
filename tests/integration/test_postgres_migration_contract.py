@@ -27,8 +27,8 @@ from conftest import (
     runtime_owner,
 )
 
-# Builds the migration chain itself; CI runs it on main, release tags and pull requests that change
-# sql/ or these chain tests (.github/workflows/ci.yml).
+# Builds the migration chain itself; the PostgreSQL parity job runs it on branch pushes,
+# release tags, weekly and manual runs, never pull requests (.github/workflows/ci.yml).
 pytestmark = pytest.mark.migration_chain
 
 SECURITY_MIGRATION = "006_supabase_security_hardening.sql"
