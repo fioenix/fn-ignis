@@ -1165,7 +1165,16 @@ def test_excluded_only_clusters_cannot_raise_attention_maturity():
     judgments = [_judged(kept, "QUALIFIED_SUPPORT", "DIRECT_TO_FRAME"),
                  *[_judged(d, "EXCLUDED_IRRELEVANT", "FICTION_NEWS_OR_ENTERTAINMENT") for d in dramas]]
 
-    report = _attention_report(signals, judgments)
+    from ignis.domain.entities import TopicCluster
+
+    catalogue = [TopicCluster(canonical_name=s.raw_title, signals=[s]) for s in signals]
+    context = QualificationContext.build(
+        [s.observation_id for s in signals], judgments, probe_outcomes=(), geo="VN", timeframe="7d"
+    )
+    report = StrategicMarketReasoner().analyze_mission(
+        mission=ATTENTION, signals=signals, clusters=catalogue, scorecard=QualityScorecard(),
+        qualification=context,
+    )
 
     assert report.maturity_stage is not None and report.maturity_stage.value != "HYPING"
     statements = " ".join(getattr(i, "statement", str(i)) for i in report.strategic_insights)
