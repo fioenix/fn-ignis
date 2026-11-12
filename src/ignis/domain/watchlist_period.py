@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import json
+import unicodedata
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
@@ -284,7 +285,7 @@ def _merge(items: Iterable[PeriodItem], *, dated_google: bool = True) -> List[_M
         entry.title, entry.excerpt = entry.title or item.title, entry.excerpt or item.excerpt
         entry.link = entry.link or item.link
         entry.relevant = entry.relevant or item.relevant
-        entry.query_keywords.update(keyword.casefold() for keyword in item.query_keywords)
+        entry.query_keywords.update(_fold(keyword) for keyword in item.query_keywords)
         # A Google Trends source is a search term measured per dated appearance (above), so a
         # source-wide first sighting would misplace a later appearance; it applies to posts only.
         if item.channel != "google" and item.first_seen is not None and (
@@ -297,6 +298,11 @@ def _merge(items: Iterable[PeriodItem], *, dated_google: bool = True) -> List[_M
     return [entry for entry in merged.values() if entry.observations]
 
 
+def _fold(text: str) -> str:
+    """Case-folded NFC: browser and API text can arrive decomposed, and one word stays one term."""
+    return unicodedata.normalize("NFC", text).casefold()
+
+
 def _mentions(text: str, keyword: str) -> bool:
     return re.search(rf"(?<!\w){re.escape(keyword)}(?!\w)", text) is not None
 
@@ -305,10 +311,10 @@ def _belongs(entry: _Merged, queries: frozenset, single_topic: bool) -> bool:
     """The query that found the item decides, even after its topic left the watchlist. Without a
     recorded query, a one-topic watchlist holds the item; otherwise its text decides, word by word."""
     if entry.query_keywords:
-        return bool(set(k.casefold() for k in entry.query_keywords) & queries)
+        return bool(set(_fold(k) for k in entry.query_keywords) & queries)
     if single_topic:
         return True
-    text = f"{entry.title} {entry.excerpt}".casefold()
+    text = _fold(f"{entry.title} {entry.excerpt}")
     return any(_mentions(text, keyword) for keyword in queries)
 
 
@@ -338,7 +344,7 @@ def _terms(entry: _Merged, keywords: frozenset, noise: frozenset) -> set:
     pairs = set()
     # Title and excerpt are paired apart, so no term spans the boundary between them.
     for field_text in (entry.title, entry.excerpt):
-        text = _NOT_WORDS.sub(" ", field_text or "").casefold()
+        text = _fold(_NOT_WORDS.sub(" ", field_text or ""))
         tokens = [t for t in _TOKEN.findall(text) if len(t) > 1 and not t.isdigit() and t not in noise]
         pairs.update(f"{a} {b}" for a, b in zip(tokens, tokens[1:]))
     return {pair for pair in pairs if not any(pair in keyword for keyword in keywords)}
@@ -460,9 +466,9 @@ def compare_periods(
     single_topic = len(topics) == 1
     topic_rows = []
     for topic in topics:
-        keywords = frozenset(k.casefold() for k in topic.get("keywords", ()))
+        keywords = frozenset(_fold(k) for k in topic.get("keywords", ()))
         # A run also queries each brand by its declared name (research R1).
-        queries = keywords | {str(b.get("declared_name", "")).casefold() for b in topic.get("brands", ()) or ()} - {""}
+        queries = keywords | {_fold(str(b.get("declared_name", ""))) for b in topic.get("brands", ()) or ()} - {""}
         mine = [e for e in merged if e.relevant and _belongs(e, queries, single_topic)]
         placed = [(e, *_placed(e)) for e in mine]
         topic_items: List[Tuple[_Merged, str, datetime]] = []
@@ -470,7 +476,7 @@ def compare_periods(
         for channel in channels:
             completing = [c for c in coverage
                           if c.channel == channel and c.status in COMPLETING_STATUSES
-                          and (not c.queried_keywords or {k.casefold() for k in c.queried_keywords} & queries)]
+                          and (not c.queried_keywords or {_fold(k) for k in c.queried_keywords} & queries)]
             days = {local_date(c.completed_at) for c in completing}
             unjudged_days = {local_date(c.completed_at) for c in completing if not c.judged}
             gaps = {"current": missing_days(period, days), "previous": missing_days(previous, days)}
@@ -563,14 +569,14 @@ def compare_seen_periods(
                       key=lambda c: (CHANNEL_ORDER.index(c) if c in CHANNEL_ORDER else len(CHANNEL_ORDER), c))
     rows = []
     for topic in topics:
-        keywords = frozenset(k.casefold() for k in topic.get("keywords", ()))
-        queries = keywords | {str(b.get("declared_name", "")).casefold()
+        keywords = frozenset(_fold(k) for k in topic.get("keywords", ()))
+        queries = keywords | {_fold(str(b.get("declared_name", "")))
                               for b in topic.get("brands", ()) or ()} - {""}
         cells = []
         for channel in channels:
             held = {which: [s for s in snapshots if s.channel == channel and s.status in COMPLETING_STATUSES
                             and span.contains(local_date(s.completed_at))
-                            and {k.casefold() for k in s.queried_keywords} & queries]
+                            and {_fold(k) for k in s.queried_keywords} & queries]
                     for which, span in spans.items()}
             counts = {which: len(found) for which, found in held.items()}
             cell = {"axis": "seen", "channel": channel, "measured_on_sample": channel in SAMPLED_CHANNELS,
