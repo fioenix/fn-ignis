@@ -1043,3 +1043,23 @@ def test_select_handoff_candidates_never_returns_a_least_bad_cluster():
     assert select_handoff_candidates({}) == []
     one = _qualified("SUPPLY")
     assert select_handoff_candidates({"c1": [one], "c2": [_qualified("SUPPLY")]}) == []
+
+
+def test_maturity_counts_the_missions_own_topic_clusters_not_the_geo_catalogue():
+    from ignis.domain.entities import TopicCluster
+
+    cluster = uuid4()
+    signals = [_attention_signal(f"AI cho cửa hàng bán lẻ {n}", cluster) for n in range(3)]
+    for signal in signals:
+        signal.metric_value = 50000.0
+    unrelated_catalogue = [TopicCluster(canonical_name=f"geo topic {n}") for n in range(20)]
+
+    report = StrategicMarketReasoner().analyze_mission(
+        mission=ATTENTION, signals=signals, clusters=unrelated_catalogue, scorecard=QualityScorecard(),
+    )
+
+    statements = " ".join(getattr(i, "statement", str(i)) for i in report.strategic_insights)
+    assert "20 topic clusters" not in statements, "the geo-wide catalogue is not this mission's spread"
+    assert report.maturity_stage is not None and report.maturity_stage.value != "HYPING", (
+        "one topic cluster in the mission's own evidence does not make a hyping market"
+    )
