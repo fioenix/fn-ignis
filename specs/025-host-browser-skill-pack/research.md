@@ -67,3 +67,27 @@ Same keyword, same profile, same `result_limit` 12, second run about 44 minutes 
   record count itself moved from 9 to 7 because the extractor keeps only fully rendered cards.
 - Two runs per source are a floor, not the backlog's three-run study; read this as a first estimate of
   sampling noise, not a tolerance. The 30 percent Jaccard kill line proposed in VAL-3 is not crossed.
+
+## T014 live acceptance on the built wheel (2026-11-12)
+
+Server: wheel `fn_ignis-0.10.0` built from main `ebe9e67` (Spec 025 Phase 2 and 3 merged), reinstalled
+into the server environment and restarted; `fn-ignis://guide/ignis-tiktok-browser` was read from the
+running server before the run. Browser: Claude in Chrome on the Finos profile. Keyword `áo khoác chống
+nắng`, `TACTICAL`, `result_limit` 20, one source at a time, steps exactly as the packaged
+`ignis_browser_relay` guide lists them.
+
+| Source | Prepare to accepted | Accepted | Outcome | Steps outside the guide |
+|---|---|---|---|---|
+| TikTok | 69 s | 12 | HEALTHY, `search_verified` | none |
+| Threads (Top) | 79 s | 8 | HEALTHY, `search_verified` | none |
+
+- Threads' evaluator returned `{}` as the guide predicts; after two seconds the tab was on `/receive`
+  ("Answer sent to the relay") and submit returned `ACCEPTED`. The script ran once.
+- Both runs exceed SC-003's 60 seconds. Each includes a deliberate 8-second page-load wait and the
+  agent's tool round trips; the 2026-11-11 baseline of about 40 seconds for TikTok had no fixed wait.
+  SC-003 is not met by this run; the wait is the first thing to shorten (guide step 5 is optional).
+- Identity: no Threads excerpt carries a handle or profile link. Seven TikTok excerpts keep hashtags
+  that read as creator or channel names; this is the documented OQ-2 exception, not a leak.
+- Limit: the run was made by the coordinating session that wrote the guides, not a fresh session, so it
+  proves the shipped wheel serves the guides and both sources accept, but not SC-001's "fresh agent
+  needs zero steps outside the skill". T014 stays open for that run.
