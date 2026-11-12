@@ -178,3 +178,6 @@ Identity check: one caption carries a seller's first name in free text (not quot
 names are outside Principle VII under its own documented clause, as for TikTok hashtags (OQ-2). Content is
 seller listings and one garment-maker's advice post: supply-side context, as the guide says, not customer voice.
 The `en` attribution wording stays unobserved on Instagram; the locale gate keeps any other UI language closed.
+
+Limits: about 65 s is over SC-003's 60 s per source, and one run cannot establish its median. The run happened
+in the coordinating session, not a fresh agent, so "no step outside the guides" is not SC-001 evidence.
