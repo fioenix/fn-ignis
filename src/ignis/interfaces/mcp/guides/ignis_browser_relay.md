@@ -14,7 +14,13 @@ Every step below was run live on 2026-11-11.
 - On a platform page, never click, type, scroll, sign in, consent or solve a challenge. The only clicks are
   on the local relay page.
 
-## Steps (one source at a time)
+## Steps
+
+TACTICAL runs one source at a time, steps 1–9 each. A MISSION with several host sources in scope
+(TikTok and Threads) is one run: prepare a sibling ticket per source with the same mission, `host_task_ref`
+and `session_ref`, stage every one of them (steps 2–7 per source), and only then submit once (step 8).
+Submitting before every required sibling is `STAGED` returns `BLOCKED` / `HOST_SEARCH_NOT_ACCEPTABLE`.
+
 
 1. Call `prepare_host_browser_search` with `source`, `mode` (`TACTICAL`, or `MISSION` with a confirmed
    mission id, `queries=[]` and `result_limit=20`), the exact queries, `result_limit`, `lifetime_seconds`

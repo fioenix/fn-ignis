@@ -59,6 +59,7 @@ def test_the_relay_guide_keeps_the_rules_the_collect_skill_states():
     for rule in ("evaluate `tab_script` once", "never immediately after `posted: true`", "`DEGRADED`",
                  "click, type, scroll, sign in"):
         assert rule.lower() in relay.lower(), rule
+    assert "stage every one of them" in relay.lower() and "stage both before submitting either" in collect.lower()
     assert "Never close a tab immediately after `posted: true`" in collect
     assert "no typing, clicking, scrolling, signing in" in collect
 
