@@ -51,7 +51,7 @@ thứ tự**, chưa phải cam kết; các quyết định 21/10 và 09/11 giữ
      high-demand, low-supply market white spaces" (`server.py:2814`).
    - Năm skill Ignis nằm trong `.agents/skills/`, repo không có `.claude/skills`. Ba skill track, listen và
      routine có bản MCP prompt; `ignis-collect` và `ignis-analyze` thì không, nên Claude Desktop không đọc được hai skill này.
-5. **Tuân thủ mới ở mức mô tả.**
+5. **Tuân thủ mới ở mức mô tả** (chủ sở hữu bỏ phần hồ sơ pháp lý ngày 12/11/2026; giữ các quy tắc sản phẩm).
    - Lệnh xóa dữ liệu quá 13 tháng đã có (`scripts/prune_expired_observations.py`, Spec 016 T014: chạy thử
      mặc định, `--apply`, giữ observation còn được claim hoặc research work tham chiếu). Bản đầu của mục này ghi
      nhầm là chưa có; code review ngày 12/11/2026 chỉ ra.
@@ -136,8 +136,8 @@ Sửa phép đo:
   mã hóa giây đăng ở 32 bit cao; bốn id mẫu giải ra 06/2024–09/2026, chưa đối chiếu với ngày hiển thị trên trang.
   Có ngày đăng thì item TikTok không còn lấy lần thu đầu làm mốc, và view trọn đời của video cũ thôi bị tính là
   volume mới. Đổi quy tắc đếm item không có ngày đăng là sửa Spec 016, nên chờ OWN-6. Làm trước VAL-2.
-- [~] **MEA-2 — Chuẩn hóa NFC trước khi tách token** trong `_terms` và dedupe (S, agent tự quyết) — PR #137 mở
-  ngày 11/11/2026, chờ review: văn bản, từ khóa và tên khai báo cùng đi qua một bước NFC rồi casefold.
+- [x] **MEA-2 — Chuẩn hóa NFC trước khi tách token** trong `_terms` và dedupe (S, agent tự quyết) — merge
+  12/11/2026 (PR #137): văn bản, từ khóa và tên khai báo cùng đi qua một bước NFC rồi casefold.
 - [ ] **MEA-3 — Cỡ mẫu và độ bất định trên từng ô** (M). Mỗi ô có n, trung vị và tổng đã cắt đuôi; dưới một
   sàn đặt trong `runtime_configs` thì gắn lý do `low_n`. Guide không bao giờ hiện phần trăm thay đổi mà không
   kèm n. Hủy phần khoảng tin cậy nếu khoảng đó phủ 0 ở hơn 90% ô golden set; khi đó chỉ hiện số đếm.
@@ -201,7 +201,7 @@ Bề mặt agent:
   và resource (M). Guide nói trước rằng kỳ chưa kết thúc thì bị từ chối, và giới thiệu `get_mission_relay_snapshot`
   làm view cho ngày đầu. Đóng gói `ignis-collect` và `ignis-analyze` thành MCP prompt, thay đường dẫn `specs/`
   bằng trích đoạn đóng gói kèm theo. Kiểm Claude Code có tìm thấy `.agents/skills` không.
-- [~] **AGX-5 — `USER_GUIDE.md` mở đầu bằng "10 phút đầu tiên"** (S) — PR #138 mở ngày 11/11/2026, chờ review;
+- [~] **AGX-5 — `USER_GUIDE.md` mở đầu bằng "10 phút đầu tiên"** (S) — phần hướng dẫn đã merge 12/11/2026 (PR #138);
   lịch sử migration giữ nguyên dưới đề mục riêng thay vì chuyển sang tài liệu khác. Còn lại: bootstrap in ra connector
   nào cần biến môi trường nào, chỉ in tên biến.
 - [ ] **AGX-6 — Một envelope kết quả có kiểu** (M, viết thành spec): `status`, `reason_code`, `next_actions` và
@@ -215,21 +215,17 @@ Bề mặt agent:
 
 ### Tuân thủ — song song, không chờ pilot
 
-- [~] **CMP-1 — Ghi căn cứ pháp lý theo Luật 91/2025/QH15 và Nghị định 356/2025/NĐ-CP** — draft ADR `Proposed`
-  ở PR #140 (11/11/2026), chờ chủ sở hữu và luật sư đọc; (S, cộng rà soát pháp lý
-  bên ngoài). Ánh xạ từng loại xử lý (văn bản bình luận, marker theo mission, tài khoản khai báo) tới mục đích,
-  căn cứ và điều kiện xóa theo Điều 14. Trả lời hai câu chưa kiểm:
-  - Nội dung đã công khai có cần đồng ý không?
-  - Đánh giá tác động theo Điều 20 có áp dụng khi dữ liệu đi qua model của host và TypeSafe không?
-
-  Chủ sở hữu ký duyệt lập trường.
+- [-] **CMP-1 — Ghi căn cứ pháp lý theo Luật 91/2025/QH15 và Nghị định 356/2025/NĐ-CP** — bỏ ngày 12/11/2026 theo
+  quyết định của chủ sở hữu: Ignis là mã nguồn mở, không làm hồ sơ pháp lý; công sức dành cho hiệu quả sản phẩm.
+  Draft ADR ở PR #140 đã đóng, branch giữ lại.
 - [x] **CMP-2 — Lệnh xóa dữ liệu quá 13 tháng do người dùng gọi** — đã có từ Spec 016 T014:
   `scripts/prune_expired_observations.py` chạy thử mặc định, xóa thật với `--apply`, giữ observation còn được claim
-  hoặc research work tham chiếu, chạy được trên cả SQLite và PostgreSQL, không lên lịch. Việc còn lại thuộc CMP-1:
-  ghi điều kiện xóa này vào căn cứ pháp lý. Chạy `--apply` trên store thật vẫn cần chủ sở hữu duyệt (AGENTS.md §8).
+  hoặc research work tham chiếu, chạy được trên cả SQLite và PostgreSQL, không lên lịch. Chạy `--apply` trên store
+  thật vẫn cần chủ sở hữu duyệt (AGENTS.md §8).
 - [ ] **CMP-3 — Cổng che dữ liệu cá nhân và xác nhận trước khi publish artifact** (M). Quét tên, số điện thoại và
-  @mention còn sót trong trích dẫn. Spec 015 chỉ gỡ trường danh tính, không gỡ dữ liệu cá nhân nằm trong văn bản.
-  Đạt: không lọt trên fixture có tên người Việt và số điện thoại.
+  @mention còn sót trong trích dẫn. Spec 015 đã gỡ @mention và handle trong văn bản (FR-011) và che email, số
+  điện thoại theo mẫu; còn hở tên người viết tự do (FR-012) và việc xác nhận trước khi publish. Đây là việc sản phẩm
+  theo Principle VII, không phải hồ sơ pháp lý. Đạt: không lọt trên fixture có tên người Việt.
 
 ### Nền kỹ thuật — giảm chi phí thay đổi
 
@@ -238,14 +234,17 @@ Bề mặt agent:
 - [ ] **ENG-0 — Phát hành các bản sửa của Spec 024** (đã merge, chưa phát hành): gỡ `fetch_from_all` và sửa việc
   đăng ký lại từ trong lexicon. Gom vào bản phát hành kế tiếp; bump và tag cần chủ sở hữu duyệt (AGENTS.md §4).
 - [ ] **ENG-10 — `_contiguous_phrase` chỉ đọc `canonical_name`** — nợ nhỏ giữ nguyên từ 09/11, sửa khi chạm tới.
-- [~] **BUG-1 — Phân tích ATTENTION dùng cả bằng chứng đã bị loại** (một session khác báo ngày 11/11/2026, khi chạy một mission ATTENTION thật) — PR #136
-  mở, chờ review. Kết luận chỉ dựa trên observation không bị loại và không phải CONTEXT_ONLY; thêm
+- [x] **BUG-1 — Phân tích ATTENTION dùng cả bằng chứng đã bị loại** (một session khác báo ngày 11/11/2026, khi chạy
+  một mission ATTENTION thật) — merge 12/11/2026 (PR #136), sau hai vòng review bắt thêm lỗi ở cụm chủ đề và
+  citation fallback. Kết luận chỉ dựa trên observation không bị loại và không phải CONTEXT_ONLY; thêm
   `analysis_basis` (`PROVISIONAL`/`QUALIFIED`); quyết định của chủ sở hữu ghi ở Spec 011.
-- [~] **BUG-2 — Insight maturity đếm "N topic clusters" trên toàn geo**, không phải cụm của mission
-  (`_assess_maturity` dùng `len(clusters)` của `top_clusters_use_case`) — PR #141 mở ngày 12/11/2026: đếm cụm
+- [x] **BUG-2 — Insight maturity đếm "N topic clusters" trên toàn geo**, không phải cụm của mission
+  (`_assess_maturity` dùng `len(clusters)` của `top_clusters_use_case`) — merge 12/11/2026 (PR #141): đếm cụm
   riêng trong tín hiệu của mission; mission thật giờ ghi 8 cụm thay vì 16.
 - [~] **SPEC-025 — Bộ skill host-browser và Instagram Reels qua host browser** — chủ sở hữu yêu cầu và mở lại Reels
-  ngày 11/11/2026. Draft PR #139 có research từ lượt chạy thật, spec và bản nháp skill; chờ bốn câu OQ-1..OQ-4.
+  ngày 11/11/2026. Draft PR #139: research từ lượt chạy thật, spec đã chốt bốn câu ngày 12/11/2026 (mỗi nền tảng
+  một skill với reference dùng chung; giữ hashtag TikTok như tên tự do; Instagram đánh giá như nguồn khác; lấy
+  ngày đăng TikTok từ video id sau khi đối chiếu). Bước tiếp: `/speckit-plan`.
   Lượt chạy lặp (VAL-3 rút gọn, hai lượt mỗi nguồn): Jaccard TikTok 0,71, Threads 0,45; ghi trong `research.md`.
 - [ ] **ENG-2 — Gỡ code connector đã nghỉ** (M): Reels, Google Trends RSS, nhánh Explore và tìm kiếm headless của
   `TikTokPlugin`; xóa test tương ứng và thu hẹp phạm vi coverage SC-004.
