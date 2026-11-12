@@ -1411,3 +1411,83 @@ async def test_v3_locale_never_gates_canonical_mission_storage(repository_case, 
         assert repository_case.counts()["observations"] == expected_count
     finally:
         service.close()
+
+
+
+@pytest.mark.asyncio
+async def test_instagram_mission_ingests_reels_platform_under_its_own_surface(repository_case, tmp_path, monkeypatch):
+    """Spec 025 T024a: a mission allowing instagram_host_browser admits source instagram."""
+    from tests.fixtures.meta_host_browser_answers import NoSocketRelay, host_answer
+    from ignis.application.use_cases import host_browser_search as module
+    monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
+    store, _, mission, executor = await assignment(repository_case.repository, tmp_path,
+                                                   required=("instagram_host_browser",))
+    service = HostBrowserSearchService()
+    try:
+        request = await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True, source="instagram")
+        assert request["source"] == "instagram" and request["extractor_version"] == "instagram-keyword-grid-v1"
+        service.stage(request["request_id"], host_answer(request))
+        receipt = await service.submit_mission(executor, request["request_id"], "task", "chrome")
+        assert receipt["status"] == "ACCEPTED"
+        signals = await repository_case.repository.get_mission_signals(mission.id)
+        assert len(signals) == 1 and signals[0].platform is PlatformType.REELS
+        [signal] = signals
+        # Missions keep the validated handle-free link as observed; it already names no account.
+        assert signal.source_url == "https://www.instagram.com/p/Synthetic025I0/"
+        assert signal.metadata["connector_surface"] == "instagram_host_browser"
+        assert signal.metadata["collection_path"] == "host_browser:instagram-keyword-grid-v1"
+        assert signal.published_at is None
+        assert "Synthetic Other Person" not in signal.raw_title and "synthetic.mention" not in signal.raw_title
+        probes = {p.connector_surface: p for p in await store.get_latest_completed_probe_outcomes(mission.id)}
+        assert set(probes) == {"instagram_host_browser"}
+        probe = probes["instagram_host_browser"]
+        assert probe.platform == "reels" and probe.signals_collected == 1
+        assert probe.scope_attestation["collection_path"] == "host_browser:instagram-keyword-grid-v1"
+    finally:
+        service.close()
+
+
+@pytest.mark.asyncio
+async def test_unstaged_optional_instagram_sibling_is_not_requested(repository_case, tmp_path, monkeypatch):
+    from tests.fixtures.meta_host_browser_answers import NoSocketRelay, host_answer
+    from ignis.application.use_cases import host_browser_search as module
+    monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
+    store, _, mission, executor = await assignment(repository_case.repository, tmp_path,
+                                                   required=("tiktok_video",), optional=("instagram_host_browser",))
+    service = HostBrowserSearchService()
+    try:
+        request = await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True, source="tiktok")
+        service.stage(request["request_id"], host_answer(request))
+        await service.submit_mission(executor, request["request_id"], "task", "chrome")
+        probes = {p.connector_surface: p for p in await store.get_latest_completed_probe_outcomes(mission.id)}
+        assert probes["instagram_host_browser"].status is ChannelHealthStatus.NOT_REQUESTED
+        assert probes["instagram_host_browser"].signals_collected == 0
+        assert probes["tiktok_video"].status is ChannelHealthStatus.HEALTHY
+    finally:
+        service.close()
+
+
+@pytest.mark.asyncio
+async def test_instagram_mission_on_an_unseeded_locale_stores_no_observation(repository_case, tmp_path, monkeypatch):
+    from tests.fixtures.meta_host_browser_answers import NoSocketRelay, host_answer
+    from ignis.application.use_cases import host_browser_search as module
+    monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
+    _, _, mission, executor = await assignment(repository_case.repository, tmp_path, required=("instagram_host_browser",))
+    service = HostBrowserSearchService()
+    try:
+        request = await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True, source="instagram")
+        answer = host_answer(request)
+        for item in answer["answers"]:
+            item["locale"] = "vi"
+        service.stage(request["request_id"], answer)
+        await service.submit_mission(executor, request["request_id"], "task", "chrome")
+        assert await repository_case.repository.get_mission_signals(mission.id) == []
+    finally:
+        service.close()
+
+
+@pytest.mark.asyncio
+async def test_a_mission_naming_retired_reels_stays_refused(repository_case, tmp_path):
+    from ignis.domain.research_workspace import RetiredSurfaceError
+    with pytest.raises(RetiredSurfaceError):
+        await assignment(repository_case.repository, tmp_path, required=("reels",))
