@@ -10,31 +10,26 @@ from ignis.infrastructure.connectors.host_browser.action_labels import seeded_ac
 from ignis.infrastructure.connectors.host_browser.attribution_locales import seeded_attribution_locales
 from ignis.domain.host_browser_search import HostSearchAnswer, HostSearchRequest
 from ignis.domain.self_content import is_self_authored
-from ignis.domain.source_identity import identity_free_source_url
+from ignis.domain.host_browser_sources import get_source
 from ignis.infrastructure.security.pii_sanitizer import mask_author_identity_text, sanitize_pii_text, strip_platform_attribution
 
 
 def collection_path(source, version, limit):
     """Normalized measurement facts, independent of random task ids and capture time."""
     return dict(collection_path="host_browser:" + version, connector_revision=version,
-                sampling=dict(limit=limit, ordering="top_visible_sample" if source == "threads" else "visible_grid"))
+                sampling=dict(limit=limit, ordering=get_source(source).sampling_ordering))
 
 
 def _content_url(source, raw):
     if raw is None:
         return None
     url = urlsplit(raw)
-    expected = "www.threads.com" if source == "threads" else "www.tiktok.com"
-    if url.scheme != "https" or url.netloc != expected or url.query or url.fragment:
+    descriptor = get_source(source)
+    if url.scheme != "https" or url.netloc != descriptor.origin.removeprefix("https://") or url.query or url.fragment:
         raise ValueError("Expected canonical public content URL")
-    pattern = (r"/(?:@[A-Za-z0-9_.]+/post/|t/)([A-Za-z0-9_-]+)(?:/media)?/?" if source == "threads"
-               else r"/(?:@[A-Za-z0-9_.]+/video/|share/video/)[0-9]+")
-    match = re.fullmatch(pattern, url.path)
-    if not match:
+    if not re.fullmatch(descriptor.accepted_record_path, url.path):
         raise ValueError("Expected canonical public content URL")
-    if source == "threads":
-        return "https://www.threads.com/t/" + match.group(1)
-    return identity_free_source_url(source, raw, {})
+    return descriptor.canonical_url(url.path, original_url=raw)
 
 
 def _counters(components, labels):
@@ -81,15 +76,16 @@ def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
     if len(answer.answers) != len(expected) or {item.query_id for item in answer.answers} != set(expected):
         raise ValueError("Every approved query requires exactly one answer")
     observations, outcomes = [], []
-    origin = "www.threads.com" if request.source == "threads" else "www.tiktok.com"
-    search_path = "/search" if request.source == "threads" else "/search/video"
+    descriptor = get_source(request.source)
+    origin = descriptor.origin.removeprefix("https://")
+    search_path = descriptor.search_path
     for item in answer.answers:
         query = expected[item.query_id]
         page = urlsplit(item.page_url)
         if (page.scheme != "https" or page.netloc != origin or page.path != search_path or page.fragment
                 or parse_qs(page.query, keep_blank_values=True) != {"q": [query.query]} or item.query != query.query):
             raise ValueError("Search page does not match the approved query")
-        if request.source == "threads":
+        if descriptor.validates_locale:
             if not re.fullmatch(r"[a-z]{2,8}|unsupported", item.locale or "") or item.status == "EMPTY_NO_DATA":
                 raise ValueError("Unsupported Threads locale or unproved empty state")
             if item.locale == "unsupported" and (item.status != "DEGRADED" or item.records or item.search_verified):
@@ -105,7 +101,7 @@ def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
         if item.records and not item.search_verified:
             raise ValueError("Unverified page cannot provide observations")
         templates = attribution_templates
-        if request.source == "tiktok":
+        if descriptor.localized_attribution:
             templates = attribution_locales.get(item.locale, ()) if re.fullmatch(r"[a-z]{2,8}", item.locale or "") else ()
         seen, count = set(), 0
         path = collection_path(request.source, request.extractor_version, query.result_limit)
@@ -129,7 +125,7 @@ def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
                 request_id=request.request_id, captured_at=item.captured_at.isoformat(),
                 published_at=record.published_at.isoformat() if record.published_at else None,
                 metric_value=None, metric_kind=None, metric_known=False, collection_path=path["collection_path"])
-            if request.source == "threads":
+            if descriptor.measured_counters:
                 observation.update(source=request.source, source_verifiable=cleaned_url is not None,
                                    counters=_counters(record.counters, action_labels.get(item.locale, {})), **path)
             observations.append(observation)
@@ -140,7 +136,7 @@ def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
         outcome = dict(query_id=query.query_id, query=query.query, status=status, signals_collected=count,
                        queried_window=None, search_verified=item.search_verified,
                        note="Bounded visible public video grid; window and counters unmeasured")
-        if request.source == "threads":
+        if descriptor.measured_counters:
             outcome.update(**path, note=("Threads page locale is unsupported; no observations collected"
                                          if item.locale == "unsupported" else
                                          ("Bounded visible Top sample; counters unmeasured for locale " + item.locale
@@ -149,6 +145,6 @@ def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
         outcomes.append(outcome)
     receipt = dict(status="ACCEPTED", mode=request.mode, request_id=request.request_id,
                    observations=observations, outcomes=outcomes)
-    if request.source == "threads":
+    if not descriptor.legacy_envelope:
         receipt["source"] = request.source
     return receipt

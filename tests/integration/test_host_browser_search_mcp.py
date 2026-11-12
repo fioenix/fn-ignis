@@ -54,7 +54,7 @@ def test_server_exit_closes_all_task_listeners_even_on_failure(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_preparation_without_attribution_vocabulary_names_the_gap(monkeypatch):
-    monkeypatch.setattr(server._host_browser_search_service, "_attribution_templates", ())
+    monkeypatch.setitem(server._host_browser_search_service._attribution_templates, "tiktok", ())
     result = await server.handle_prepare_host_browser_search(
         host_task_ref="mcp-task", session_ref="authorized-host-session", queries=["túi đi làm"],
         result_limit=2, lifetime_seconds=60, authorized=True,

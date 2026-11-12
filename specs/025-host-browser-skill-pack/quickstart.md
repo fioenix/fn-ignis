@@ -14,3 +14,15 @@ research profile (Finos for the owner) and that profile is signed in to TikTok, 
 5. TikTok after FR-007: pick three accepted videos, open each page, compare the rendered date with
    `published_at`; record the comparison in `research.md`.
 6. Confirm a request for the retired `reels` surface still returns `SURFACE_RETIRED`.
+
+## Phase 1 packaged asset check (T001)
+
+Read-only check; do not run `uv sync` or `uv run` against the running server's installation:
+
+```bash
+find /Users/fioenix/Projects/fn-ignis/.venv/lib/python3.14/site-packages/ignis/infrastructure/connectors/host_browser -maxdepth 1 -name '*.js' -print
+```
+
+On 2026-11-12 this returned `tiktok_search.js`, `tiktok_handoff.js`, `threads_search.js` and
+`threads_handoff.js`. This confirms the installed assets exist; it does not verify which code a
+running MCP process has loaded or establish live acceptance of this refactor.
