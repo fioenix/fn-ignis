@@ -14,6 +14,7 @@ class HostBrowserSource:
     origin: str
     search_path: str
     transport: Literal["opener_post_message", "fragment_receive"]
+    # What the extractor emits; the validator accepts the wider accepted_record_path (T003 review).
     record_path: str
     accepted_record_path: str
     canonical_path: str

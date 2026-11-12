@@ -29,6 +29,7 @@ def test_existing_source_values(name, origin, path, transport, record_path, cont
     assert source.transport == transport
     assert source.record_path == record_path
     assert re.fullmatch(source.record_path, content_path)
+    assert re.fullmatch(source.accepted_record_path, content_path)
     assert source.canonical_url(content_path) == canonical
     assert _content_url(name, origin + content_path) == canonical
     assert source.extractor_version == _version_for_source(name) == version
