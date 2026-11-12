@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from ignis.application.use_cases.execute_mission import TERMINAL_MISSION_STATES
 from ignis.domain.entities import TrendSignal
 from ignis.domain.harness_models import ChannelHealthStatus
-from ignis.domain.host_browser_sources import get_source
+from ignis.domain.host_browser_sources import get_source, host_source_names
 from ignis.domain.research_workspace import ResearchSurface, resolve_surface, require_active_resources
 from ignis.domain.value_objects import PlatformType
 from ignis.infrastructure.connectors.registry import SearchPassResult, SurfaceProbeResult
@@ -38,12 +38,12 @@ async def prepare_scope(executor, mission_id, source="tiktok"):
     require_active_resources(manifest.allowed_resources)
     if mission.status.upper() in TERMINAL_MISSION_STATES or mission.status.upper() == "RUNNING":
         raise ValueError("Mission is not pending collection")
-    surface = "tiktok_video" if source == "tiktok" else "threads" if source == "threads" else None
+    surface = get_source(source).connector_surface
     if surface not in manifest.allowed_resources or not manifest.authority_boundary.browser_session:
         raise ValueError("Host source is outside confirmed authority")
-    host_sources = tuple(name for name, resource in (("tiktok", "tiktok_video"), ("threads", "threads"))
-                         if resource in manifest.allowed_resources)
-    host_surfaces = tuple("tiktok_video" if name == "tiktok" else name for name in host_sources)
+    host_sources = tuple(name for name in host_source_names()
+                         if get_source(name).connector_surface in manifest.allowed_resources)
+    host_surfaces = tuple(get_source(name).connector_surface for name in host_sources)
     if resolve_surface(mission.surface) is ResearchSurface.MARKET and snapshot.brief is None:
         raise ValueError("Confirmed Market Brief is required")
     preliminary = await executor._build_collection_plan(mission, manifest, {})
@@ -60,7 +60,7 @@ async def prepare_scope(executor, mission_id, source="tiktok"):
         raise ValueError("A required non-host surface is unavailable")
     requirements["resources"] = tuple(requirements.get("resources", ())) + host_surfaces
     requirements["surface_requirements"] = {**requirements.get("surface_requirements", {}), **{
-        ("tiktok_video" if name == "tiktok" else name): dict(
+        get_source(name).connector_surface: dict(
             authority_tier="browser_session", quota_costs={},
             connector_path="host_browser:" + get_source(name).extractor_version,
             connector_revision=get_source(name).extractor_version,
@@ -81,15 +81,15 @@ async def prepare_scope(executor, mission_id, source="tiktok"):
     return dict(mission=mission, manifest=manifest, requirements=requirements, plan=plan,
                 queries=executor._collection_queries(plan), digest=snapshot_digest(snapshot), source=source,
                 host_sources=tuple(name for name in host_sources
-                                   if ("tiktok_video" if name == "tiktok" else name) in requirements["resources"]),
+                                   if get_source(name).connector_surface in requirements["resources"]),
                 required_host_sources=tuple(name for name in host_sources
-                    if ("tiktok_video" if name == "tiktok" else name) in manifest.required_channels))
+                    if get_source(name).connector_surface in manifest.required_channels))
 
 
 async def ingest_scope(executor, binding, receipt, *, author_records=None):
     # A legacy single-host receipt and a composed source receipt use the same writer seam.
     receipts = receipt.get("sources") or {binding.get("source", "tiktok"): receipt}
-    host_surfaces = {"tiktok_video" if name == "tiktok" else name for name in binding["host_sources"]}
+    host_surfaces = {get_source(name).connector_surface for name in binding["host_sources"]}
     def require_lifetime():
         if datetime.now(timezone.utc) >= binding["expires_at"]:
             raise ValueError("Host mission request expired")
@@ -115,16 +115,16 @@ async def ingest_scope(executor, binding, receipt, *, author_records=None):
         signals, outcomes = list(other.signals), list(other.outcomes)
         for source in binding["host_sources"]:
             if source not in receipts:
-                outcomes.append(SurfaceProbeResult(platform=source,
-                    connector_surface="tiktok_video" if source == "tiktok" else source,
+                outcomes.append(SurfaceProbeResult(platform=get_source(source).platform,
+                    connector_surface=get_source(source).connector_surface,
                     status=ChannelHealthStatus.NOT_REQUESTED, signals_collected=0,
                     note="Optional host source was not staged; no fallback was requested"))
         for source, staged in receipts.items():
-            surface = "tiktok_video" if source == "tiktok" else source
-            version = get_source(source).extractor_version
+            descriptor = get_source(source)
+            surface, version = descriptor.connector_surface, descriptor.extractor_version
             path = collection_path(source, version, 20)
             host_signals = [TrendSignal(
-                platform=PlatformType(source), raw_title=record["excerpt"], metric_value=0.0,
+                platform=PlatformType(descriptor.platform), raw_title=record["excerpt"], metric_value=0.0,
                 source_url=record["source_url"], geo_code=binding["mission"].geo_code,
                 captured_at=datetime.fromisoformat(record["captured_at"]),
                 published_at=datetime.fromisoformat(record["published_at"]) if record["published_at"] else None,
@@ -140,7 +140,7 @@ async def ingest_scope(executor, binding, receipt, *, author_records=None):
             status = "DEGRADED" if "DEGRADED" in statuses else "HEALTHY" if host_signals else "EMPTY_NO_DATA"
             # Canonical executor assigns markers/declared tokens before any clustering or write.
             outcomes.append(SurfaceProbeResult(
-                platform=source, connector_surface=surface, status=ChannelHealthStatus(status),
+                platform=descriptor.platform, connector_surface=surface, status=ChannelHealthStatus(status),
                 signals_collected=len(host_signals), queried_keywords=tuple(binding["queries"]), queried_window=None,
                 scope_attestation={"query_outcomes": staged["outcomes"], "metric_known": False, **path},
                 authority_tier="browser_session", connector_path=path["collection_path"],

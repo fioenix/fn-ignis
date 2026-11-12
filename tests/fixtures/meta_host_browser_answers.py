@@ -19,6 +19,7 @@ def host_answer(request, *, empty=False, degraded=False, context=False):
     for index, query in enumerate(request["queries"]):
         record = dict(source_url=(f"https://www.threads.com/@synthetic.header/post/Synthetic020Q{index}/media"
                                   if source == "threads" else
+                                  f"https://www.instagram.com/p/Synthetic025I{index}/" if source == "instagram" else
                                   f"https://www.tiktok.com/@synthetic.header/video/{7417820067028536584 + index}"),
                       excerpt="Synthetic body @synthetic.mention", published_at="2026-10-27T01:02:03.123456Z")
         if context:
@@ -31,11 +32,14 @@ def host_answer(request, *, empty=False, degraded=False, context=False):
                       captured_at=datetime.now(timezone.utc).isoformat(), search_verified=not degraded,
                       empty_state_visible=empty, status="DEGRADED" if degraded else "EMPTY_NO_DATA" if empty else "HEALTHY",
                       records=[] if empty or degraded else [record], locale="vi")
-        if source == "threads":
+        if source == "instagram":
+            record["excerpt"] += " Photo by Synthetic Other Person on October 27"
+            record["published_at"] = None
+        if source in ("threads", "instagram"):
             answer["locale"] = "en"
         answers.append(answer)
     result = dict(request_id=request["request_id"], host_task_ref=request["host_task_ref"], session_ref=request["session_ref"],
                   extractor_version=request["extractor_version"], answers=answers)
-    if source == "threads":
+    if source != "tiktok":
         result["source"] = source
     return result

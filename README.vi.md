@@ -146,7 +146,7 @@ biểu diễn nhánh này.
 
 `prepare_host_browser_search` có tham số tùy chọn `source="threads"` hoặc `source="instagram"`. Khi bỏ
 qua tham số này, tool giữ `source="tiktok"`. Instagram đọc chú thích từ lưới tìm kiếm theo từ khóa khi đã
-đăng nhập (hiện chỉ ở chế độ TACTICAL); nguồn `reels` đã ngừng vẫn bị từ chối. Submit và cancel vẫn nhận ba tham số ID. Tổng số tool hiện là 41.
+đăng nhập (trong mission dùng surface `instagram_host_browser`); nguồn `reels` đã ngừng vẫn bị từ chối. Submit và cancel vẫn nhận ba tham số ID. Tổng số tool hiện là 41.
 Threads chỉ thu thập qua trình duyệt host được cho phép. Phần thu thập bằng Playwright và
 các tool gợi ý, xu hướng chỉ trả kết quả không khả dụng đã bị gỡ. Credential Threads đã lưu
 không chứng minh có thể thu thập; Ignis không probe quyền API hay tự chuyển sang đường API.

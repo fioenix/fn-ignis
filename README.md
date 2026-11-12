@@ -139,7 +139,7 @@ diagrams of this branch.
 ### Threads host collection and period paths
 
 `prepare_host_browser_search` accepts optional `source="threads"` or `source="instagram"`; omitting it
-keeps `source="tiktok"`. Instagram reads captions from the signed-in keyword grid (TACTICAL only for now);
+keeps `source="tiktok"`. Instagram reads captions from the signed-in keyword grid (mission surface `instagram_host_browser`);
 the retired `reels` surface stays refused. Submit and cancel keep their three ID parameters. There are still 41 tools.
 Threads collection uses only the authorized host browser. Internal Playwright collection and
 placeholder suggestion/trending tools have been removed. Stored Threads credentials do not

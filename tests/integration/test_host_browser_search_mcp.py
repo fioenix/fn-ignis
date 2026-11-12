@@ -156,19 +156,3 @@ async def test_mission_preparation_refuses_an_unknown_source_as_invalid_scope(mo
 
 
 
-
-@pytest.mark.asyncio
-async def test_mission_scope_refuses_instagram_until_mission_routing_lands():
-    """Spec 025: Instagram is TACTICAL only; a mission scope fails closed before any ticket or relay."""
-    from types import SimpleNamespace
-    from ignis.application.use_cases.host_browser_mission import prepare_scope
-
-    class Store:
-        async def load_mission_evidence_snapshot(self, mission_id):
-            manifest = SimpleNamespace(allowed_resources=("instagram_host_browser",),
-                                       authority_boundary=SimpleNamespace(browser_session=True))
-            return SimpleNamespace(mission=SimpleNamespace(workspace_id="w", status="PENDING", surface="market"),
-                                   manifest=manifest, brief=None)
-
-    with pytest.raises(ValueError, match="outside confirmed authority"):
-        await prepare_scope(SimpleNamespace(_workspace_store=Store()), "fixture", "instagram")

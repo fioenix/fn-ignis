@@ -359,6 +359,57 @@ async def test_threads_host_receipt_tables_journal_logs_have_no_header_or_media_
 
 
 @pytest.mark.asyncio
+async def test_instagram_host_receipt_tables_journal_logs_have_no_caption_identity(
+    repository_case, tmp_path, monkeypatch, caplog, persistent_key
+):
+    """Spec 025 T025: an Instagram caption naming its poster or a mention leaves neither anywhere."""
+    from ignis.application.use_cases import host_browser_search as module
+    from tests.fixtures.meta_host_browser_answers import NoSocketRelay, host_answer
+    from tests.fixtures.author_identity_sentinels import SENTINEL_REELS_HANDLE, SENTINEL_TIKTOK_NICKNAME
+    caplog.set_level(logging.DEBUG)
+    monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
+    store, _, mission, executor = await assignment(repository_case.repository, tmp_path,
+                                                   required=("instagram_host_browser",))
+    service = HostBrowserSearchService()
+    try:
+        request = await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True, source="instagram")
+        payload = host_answer(request)
+        for item in payload["answers"]:
+            item["records"][0]["excerpt"] = (f"Áo khoác gió @{SENTINEL_REELS_HANDLE} "
+                                             f"Photo by {SENTINEL_TIKTOK_NICKNAME} on October 27")
+        service.stage(request["request_id"], payload)
+        staged = repr(service._tickets[request["request_id"]]["receipt"])
+        receipt = await service.submit_mission(executor, request["request_id"], "task", "chrome")
+        surfaces = {f"table {name}": text for name, text in _table_texts(repository_case).items()}
+        surfaces.update({f"file {name}": text for name, text in _file_texts(tmp_path).items()})
+        surfaces.update(receipt=json.dumps(receipt, default=str), staged=staged, logs=caplog.text)
+        surfaces.update(await _mcp_responses(repository_case, mission, tmp_path, monkeypatch))
+        assert _leaks(surfaces, [SENTINEL_REELS_HANDLE, SENTINEL_TIKTOK_NICKNAME]) == []
+        assert repository_case.counts()["observations"] == 1
+    finally:
+        service.close()
+
+
+@pytest.mark.asyncio
+async def test_instagram_account_link_is_refused_before_any_write(repository_case, tmp_path, monkeypatch):
+    from ignis.application.use_cases import host_browser_search as module
+    from tests.fixtures.meta_host_browser_answers import NoSocketRelay, host_answer
+    from tests.fixtures.author_identity_sentinels import SENTINEL_REELS_HANDLE
+    monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
+    _, _, mission, executor = await assignment(repository_case.repository, tmp_path, required=("instagram_host_browser",))
+    service = HostBrowserSearchService()
+    try:
+        request = await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True, source="instagram")
+        payload = host_answer(request)
+        payload["answers"][0]["records"][0]["source_url"] = f"https://www.instagram.com/{SENTINEL_REELS_HANDLE}/p/Synthetic025I0/"
+        with pytest.raises(ValueError):
+            service.stage(request["request_id"], payload)
+        assert repository_case.counts()["observations"] == 0
+    finally:
+        service.close()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("source", ["tiktok", "threads"])
 async def test_review_host_policy_keeps_marker_and_declared_mentions_without_identity_leaks(
     repository_case, tmp_path, monkeypatch, caplog, persistent_key, source

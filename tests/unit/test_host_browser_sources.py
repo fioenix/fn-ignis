@@ -77,3 +77,10 @@ def test_instagram_descriptor_routes_the_keyword_grid_without_the_retired_reels_
                 "https://www.tiktok.com/share/video/123"):
         with pytest.raises(ValueError):
             _content_url("instagram", raw)
+
+
+def test_each_source_names_the_mission_surface_that_admits_it():
+    from ignis.domain.host_browser_sources import host_source_names
+    assert host_source_names() == ("tiktok", "threads", "instagram")
+    assert {name: get_source(name).connector_surface for name in host_source_names()} == {
+        "tiktok": "tiktok_video", "threads": "threads", "instagram": "instagram_host_browser"}

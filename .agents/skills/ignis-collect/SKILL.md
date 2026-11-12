@@ -47,11 +47,11 @@ for collection and confirm the host tooling is connected to it; with several bro
 If tooling asks for or refuses origin access (source site or loopback relay), stop and ask the
 requester to grant access in the host; ungranted means that source is unavailable for this run.
 
-Call `prepare_host_browser_search` with source="tiktok", source="threads" or source="instagram" (TACTICAL only), explicit task/session
+Call `prepare_host_browser_search` with source="tiktok", source="threads" or source="instagram", explicit task/session
 references, authorization, result and lifetime bounds. For MISSION, use the confirmed mission ID,
 queries=[] and result_limit=20; the mission supplies the full query union, including falsifiers.
-When both sources are in scope, prepare sibling tickets for the same mission/task/session/frame,
-stage both before submitting either, and compose one mission run. Preparation holds no mission writer.
+When two or more sources are in scope, prepare sibling tickets for the same mission/task/session/frame,
+stage both before submitting either (every sibling when there are three), and compose one mission run. Preparation holds no mission writer.
 
 Open the returned loopback relay in the confirmed browser. For each query, check
 cancellation/expiry and owner interruption, click "Open search" in the relay (a few seconds apart), wait for results to load,
