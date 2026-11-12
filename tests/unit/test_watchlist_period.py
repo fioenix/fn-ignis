@@ -453,3 +453,17 @@ async def test_created_view_matches_the_frozen_pre_feature_response(kind, start)
         for created in topic["channels"]:
             assert created.pop("axis") == "created"
     assert result == json.loads((directory / f"{kind}.json").read_text())
+
+
+def test_a_term_written_in_decomposed_unicode_is_the_same_term():
+    import unicodedata
+
+    day = CURRENT.start + timedelta(days=2)
+    composed = item("tt:nfc", "tiktok", at(day), [(at(day, 20), 5, {"likes": 1})], metadata=TIKTOK,
+                    title="matcha latte sữa tươi")
+    decomposed = item("tt:nfd", "tiktok", at(day), [(at(day, 20), 5, {"likes": 1})], metadata=TIKTOK,
+                      title=unicodedata.normalize("NFD", "matcha latte sữa tươi"))
+    terms = cell(compare(items() + [composed, decomposed]), "tiktok")["new_terms"]
+    matching = [t for t in terms if unicodedata.normalize("NFC", t["term"]) == "sữa tươi"]
+    assert len(matching) == 1, "one term, not one per Unicode form"
+    assert matching[0]["current_items"] == 2
