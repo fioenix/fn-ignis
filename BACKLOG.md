@@ -52,7 +52,9 @@ thứ tự**, chưa phải cam kết; các quyết định 21/10 và 09/11 giữ
    - Năm skill Ignis nằm trong `.agents/skills/`, repo không có `.claude/skills`. Ba skill track, listen và
      routine có bản MCP prompt; `ignis-collect` và `ignis-analyze` thì không, nên Claude Desktop không đọc được hai skill này.
 5. **Tuân thủ mới ở mức mô tả.**
-   - Lưu 13 tháng chỉ là một dòng nhãn (`watchlists.py:32`); không có thao tác xóa observation.
+   - Lệnh xóa dữ liệu quá 13 tháng đã có (`scripts/prune_expired_observations.py`, Spec 016 T014: chạy thử
+     mặc định, `--apply`, giữ observation còn được claim hoặc research work tham chiếu). Bản đầu của mục này ghi
+     nhầm là chưa có; code review ngày 12/11/2026 chỉ ra.
    - Luật Bảo vệ dữ liệu cá nhân 91/2025/QH15 có hiệu lực từ 01/01/2026, cùng Nghị định 356/2025/NĐ-CP
      thay Nghị định 13/2023. Repo chưa ghi căn cứ pháp lý nào cho việc xử lý.
    - Quy tắc "đồng ý trước khi publish" của quyết định 21/10 chưa có cổng nào kiểm.
@@ -92,7 +94,7 @@ nhánh theo kết quả giai đoạn 1.
 - [ ] **OWN-4 — Phán định phạm vi của "đổi signature tool".** Hai câu cần trả lời:
   - Thêm `description` cho tham số và thêm annotation có tính là đổi signature không?
   - Ẩn 11 tool vận hành sau một profile (vẫn gọi được) có còn thỏa "41 tool độc lập callable" không?
-  
+
   AGX-3 và AGX-7 chờ câu trả lời này.
 - [x] **OWN-5 — Ngân sách Jev và model** cho VAL-2 (chấm golden set, ghim `jev-1.14.0`) và AGX-1 (eval chọn tool) —
   chủ sở hữu duyệt ngày 11/11/2026 ("xài thoải mái"). Vẫn giữ spend guard, và chỉ gửi những trường mà phép chấm cần.
@@ -185,7 +187,7 @@ Bề mặt agent:
   - Đối chứng âm (phần mềm tồn kho cho xưởng may) vẫn ra Gap Report.
   - Ít nhất một đối chứng dương đạt 0,70 citation support.
   - Có bằng chứng cung không dựa trên view.
-  
+
   Chủ sở hữu quyết việc mở lại.
 
 **Làm ở cả hai nhánh:**
@@ -200,8 +202,8 @@ Bề mặt agent:
   làm view cho ngày đầu. Đóng gói `ignis-collect` và `ignis-analyze` thành MCP prompt, thay đường dẫn `specs/`
   bằng trích đoạn đóng gói kèm theo. Kiểm Claude Code có tìm thấy `.agents/skills` không.
 - [~] **AGX-5 — `USER_GUIDE.md` mở đầu bằng "10 phút đầu tiên"** (S) — PR #138 mở ngày 11/11/2026, chờ review;
-  lịch sử migration giữ nguyên dưới đề mục riêng thay vì chuyển sang tài liệu khác. Chuyển lịch sử migration sang tài liệu
-  riêng. Bootstrap in ra connector nào cần biến môi trường nào, chỉ in tên biến.
+  lịch sử migration giữ nguyên dưới đề mục riêng thay vì chuyển sang tài liệu khác. Còn lại: bootstrap in ra connector
+  nào cần biến môi trường nào, chỉ in tên biến.
 - [ ] **AGX-6 — Một envelope kết quả có kiểu** (M, viết thành spec): `status`, `reason_code`, `next_actions` và
   `data`; đặt `isError` cho các lỗi; công bố danh sách enum của các trạng thái. Đây là đổi hình dạng kết quả trả
   về, nên chủ sở hữu duyệt.
@@ -219,12 +221,12 @@ Bề mặt agent:
   căn cứ và điều kiện xóa theo Điều 14. Trả lời hai câu chưa kiểm:
   - Nội dung đã công khai có cần đồng ý không?
   - Đánh giá tác động theo Điều 20 có áp dụng khi dữ liệu đi qua model của host và TypeSafe không?
-  
+
   Chủ sở hữu ký duyệt lập trường.
-- [ ] **CMP-2 — Lệnh xóa dữ liệu quá 13 tháng do người dùng gọi**, có chạy thử trả số dòng (M), không lên lịch.
-  Đây là FR-014 của Spec 016 chưa được đáp ứng, không phải phạm vi mới: phải giữ mọi thứ mà claim hoặc bằng
-  chứng còn giữ đang tham chiếu. Phụ thuộc CMP-1. Việc xóa biến đổi bằng chứng đã lưu, nên cần chủ sở hữu duyệt (AGENTS.md §8). Đạt: có test
-  chứng minh không dòng nào cũ hơn mốc còn lại.
+- [x] **CMP-2 — Lệnh xóa dữ liệu quá 13 tháng do người dùng gọi** — đã có từ Spec 016 T014:
+  `scripts/prune_expired_observations.py` chạy thử mặc định, xóa thật với `--apply`, giữ observation còn được claim
+  hoặc research work tham chiếu, chạy được trên cả SQLite và PostgreSQL, không lên lịch. Việc còn lại thuộc CMP-1:
+  ghi điều kiện xóa này vào căn cứ pháp lý. Chạy `--apply` trên store thật vẫn cần chủ sở hữu duyệt (AGENTS.md §8).
 - [ ] **CMP-3 — Cổng che dữ liệu cá nhân và xác nhận trước khi publish artifact** (M). Quét tên, số điện thoại và
   @mention còn sót trong trích dẫn. Spec 015 chỉ gỡ trường danh tính, không gỡ dữ liệu cá nhân nằm trong văn bản.
   Đạt: không lọt trên fixture có tên người Việt và số điện thoại.
@@ -275,7 +277,8 @@ Bề mặt agent:
 
 ### Không làm
 
-- Không thêm connector browser mới (Instagram, Facebook, hồi sinh Reels), và không đọc trang Shopee hay Lazada dưới bất kỳ hình thức nào.
+- Không thêm connector browser mới (Facebook…), trừ Instagram Reels qua host browser mà chủ sở hữu đã mở lại ngày
+  11/11/2026 trong Spec 025; không đọc trang Shopee hay Lazada dưới bất kỳ hình thức nào.
 - Không tính MCP cộng đồng (vidIQ, trendsmcp, HasData, meta-mcp…) là chính hãng; không dùng MCP hay API của Ads để nghiên cứu thị trường.
 - Không nhập CSV Keyword Planner làm bối cảnh nhu cầu: chính sách của Google không cho dùng keyword research
   cho nghiên cứu thị trường (khảo sát 27/10, xem bản đồ nguồn).
