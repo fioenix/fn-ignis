@@ -1133,3 +1133,40 @@ def test_attention_cluster_trends_and_channel_citations_skip_excluded_members():
     assert trend["summary"] != "Short drama dominates"
     cited = {c.top_citation.observation_id for c in report.channel_summaries if c.top_citation}
     assert str(drama.observation_id) not in cited
+
+
+def test_maturity_counts_the_missions_own_topic_clusters_not_the_geo_catalogue():
+    from ignis.domain.entities import TopicCluster
+
+    cluster = uuid4()
+    signals = [_attention_signal(f"AI cho cửa hàng bán lẻ {n}", cluster) for n in range(3)]
+    for signal in signals:
+        signal.metric_value = 50000.0
+    unrelated_catalogue = [TopicCluster(canonical_name=f"geo topic {n}") for n in range(20)]
+
+    report = StrategicMarketReasoner().analyze_mission(
+        mission=ATTENTION, signals=signals, clusters=unrelated_catalogue, scorecard=QualityScorecard(),
+    )
+
+    statements = " ".join(getattr(i, "statement", str(i)) for i in report.strategic_insights)
+    assert "20 topic clusters" not in statements, "the geo-wide catalogue is not this mission's spread"
+    assert report.maturity_stage is not None and report.maturity_stage.value != "HYPING", (
+        "one topic cluster in the mission's own evidence does not make a hyping market"
+    )
+
+
+def test_excluded_only_clusters_cannot_raise_attention_maturity():
+    kept = _attention_signal("Chủ tiệm tạp hóa dùng AI cho cửa hàng bán lẻ", uuid4())
+    kept.metric_value = 30000.0
+    dramas = [_attention_signal(f"Phim ngắn AI cho cửa hàng bán lẻ tập {n}", uuid4()) for n in range(2)]
+    for drama in dramas:
+        drama.metric_value = 30000.0
+    signals = [kept, *dramas]
+    judgments = [_judged(kept, "QUALIFIED_SUPPORT", "DIRECT_TO_FRAME"),
+                 *[_judged(d, "EXCLUDED_IRRELEVANT", "FICTION_NEWS_OR_ENTERTAINMENT") for d in dramas]]
+
+    report = _attention_report(signals, judgments)
+
+    assert report.maturity_stage is not None and report.maturity_stage.value != "HYPING"
+    statements = " ".join(getattr(i, "statement", str(i)) for i in report.strategic_insights)
+    assert "3 topic clusters" not in statements

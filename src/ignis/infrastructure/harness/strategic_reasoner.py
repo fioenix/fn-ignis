@@ -895,7 +895,8 @@ class StrategicMarketReasoner:
             return None, ["Video reach is unmeasured; maturity cannot be assessed."]
 
         avg_views = sum(float(s.metric_value) for s in video_signals) / float(len(video_signals))
-        total_clusters = len(clusters)
+        # The spread is the mission's own evidence; `clusters` is the geo-wide catalogue.
+        total_clusters = len({s.cluster_id for s in signals if s.cluster_id is not None})
 
         if avg_views > 20000 and total_clusters >= 3:
             reasons.append(f"High average reach ({avg_views:,.0f} views/video) across {total_clusters} topic clusters.")
