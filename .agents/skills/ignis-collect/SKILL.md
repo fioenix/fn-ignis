@@ -51,7 +51,7 @@ Call `prepare_host_browser_search` with source="tiktok", source="threads" or sou
 references, authorization, result and lifetime bounds. For MISSION, use the confirmed mission ID,
 queries=[] and result_limit=20; the mission supplies the full query union, including falsifiers.
 When two or more sources are in scope, prepare sibling tickets for the same mission/task/session/frame,
-stage both before submitting either (every sibling when there are three), and compose one mission run. Preparation holds no mission writer.
+stage every sibling before submitting any, and compose one mission run. Preparation holds no mission writer.
 
 Open the returned loopback relay in the confirmed browser. For each query, check
 cancellation/expiry and owner interruption, click "Open search" in the relay (a few seconds apart), wait for results to load,

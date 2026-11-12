@@ -76,7 +76,7 @@ def _host_browser_section():
 def test_host_browser_search_covers_both_sources_in_one_mission_run():
     section = _host_browser_section()
     for rule in ('source="tiktok"', 'source="threads"', 'source="instagram"', "sibling tickets", "one mission run",
-                 "stage both", "IDs only", "read back", "not a default collector or an automatic fallback"):
+                 "stage every sibling before submitting any", "IDs only", "read back", "not a default collector or an automatic fallback"):
         assert rule in section, rule
 
 

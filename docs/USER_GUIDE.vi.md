@@ -294,7 +294,16 @@ Chưa công bố cách cài qua PyPI. Chạy `.venv/bin/pytest tests/` (đúng p
 ghi các pilot đang đóng băng cùng chế độ Market verdict. Các yêu cầu chưa đạt
 của Mission Relay, công việc nghiên cứu và bổ sung chứng cứ nằm trong
 [danh sách việc của Spec 014](../specs/014-evidence-factory/tasks.md).
-### Tìm kiếm TikTok và Threads qua trình duyệt host
+### Tìm kiếm qua trình duyệt host (TikTok, Threads, Instagram)
+
+Đường này dùng cho ba nguồn: `source="tiktok"` (lưới video công khai), `source="threads"` (tìm theo từ
+khóa khi đã đăng nhập) và `source="instagram"` (lưới theo từ khóa khi đã đăng nhập, chỉ lấy chú thích).
+Mỗi nguồn có một agent skill hướng dẫn từng bước của một lượt chạy: `ignis-tiktok-browser`,
+`ignis-threads-browser` và `ignis-instagram-browser`; các bước relay dùng chung nằm trong guide
+`ignis_browser_relay`. MCP server cũng cung cấp các bước này dưới dạng prompt
+(`ignis_tiktok_browser`, `ignis_threads_browser`, `ignis_instagram_browser`) và resource trong `fn-ignis://guide/`. Instagram chỉ nhận bản ghi
+khi ngôn ngữ của trang đã có mẫu câu ghi công trong seed (hiện chỉ có `en`); ngôn ngữ khác trả `DEGRADED`
+và không có quan sát nào.
 
 Ba tool `prepare_host_browser_search`, `submit_host_browser_search` và
 `cancel_host_browser_search` cung cấp đường thu thập chủ động chọn, chỉ trong nhiệm vụ được duyệt.
@@ -302,7 +311,7 @@ Host dùng phiên trình duyệt được cho phép và mở trang relay localho
 mở đúng trang tìm kiếm công khai; `tab_script` do bước chuẩn bị trả về, chạy trong từng tab vừa mở, gửi kết quả về
 relay và chỉ trả lại số đếm. Relay tự stage khi mọi truy vấn đã có kết quả; vẫn có thể điền form bằng
 JSON giữ trong bộ nhớ như trước. MCP nhận kết quả bằng ID; không cần chép lại bản ghi qua mô hình,
-xuất cookie hay mở cổng gỡ lỗi. Câu ghi công tác giả của TikTok bị bỏ khỏi trích đoạn trước khi trả
+xuất cookie hay mở cổng gỡ lỗi. Câu ghi công tác giả của nguồn được chọn bị bỏ khỏi trích đoạn trước khi trả
 về hoặc lưu; nếu chưa nạp mẫu câu ghi công, bước chuẩn bị bị từ chối với mã
 `AUTHOR_ATTRIBUTION_VOCABULARY_MISSING`.
 
