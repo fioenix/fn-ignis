@@ -406,6 +406,8 @@ def test_threads_never_derives_a_publication_time_from_its_post_id(threads_servi
     payload = host_answer(request)
     for record in payload["answers"][0]["records"]:
         record["published_at"] = None
+    # A numeric shortcode would decode to a plausible date if Threads ever used the TikTok rule.
+    payload["answers"][0]["records"][0]["source_url"] = "https://www.threads.com/t/7643765792374361362"
     threads_service.stage(request["request_id"], payload)
     receipt = threads_service.submit(request["request_id"], "task", "session")
     assert receipt["observations"] and all(item["published_at"] is None for item in receipt["observations"])
