@@ -76,7 +76,7 @@ views never mix the two date bases under one collection path.
 - [x] T022 [P] [US2] Write failing validator and submit tests from an Instagram-shaped fixture (caption kept, account path rejected, cross-source URL rejected, empty grid DEGRADED) in `tests/unit/test_host_browser_search.py`
 - [x] T023 [US2] Add the Instagram descriptor and extend `HostSearchSource` in `src/ignis/domain/host_browser_sources.py` and `src/ignis/domain/host_browser_search.py`, with the handoff file name in the descriptor
 - [x] T024 [US2] Write the packaged extractor `instagram-keyword-grid-v1` (tile `img[alt]` caption, NFC, attribution removed, `kind_hint`, login/challenge → DEGRADED) in `src/ignis/infrastructure/connectors/host_browser/instagram_search.js`, plus `instagram_handoff.js` implementing the transport T020 chose (opener postMessage or fragment); test prepare and staging for that transport in `tests/unit/test_host_browser_relay.py`; make `src/ignis/infrastructure/templates/html/host_browser_relay.html` put the descriptor's `source` in the answer envelope for every non-legacy source (TikTok keeps its legacy envelope without `source`), and test that the relay page's script, run through the validator and staging, keeps `source: "instagram"`
-- [x] T024a [US2] Write failing mission tests: a confirmed mission allowing `instagram_host_browser` admits source `instagram`, ingests its receipt as platform `reels` with surface `instagram_host_browser`, reports an unstaged Instagram sibling as NOT_REQUESTED, and persists on SQLite and PostgreSQL; a mission naming retired `reels` stays refused, in `tests/unit/test_host_browser_mission.py`
+- [x] T024a [US2] Write failing mission tests: a confirmed mission allowing `instagram_host_browser` admits source `instagram`, ingests its receipt as platform `reels` with surface `instagram_host_browser`, reports an unstaged Instagram sibling as NOT_REQUESTED, and persists on SQLite and PostgreSQL; a mission naming retired `reels` stays refused, in `tests/integration/test_host_browser_mission.py` (PostgreSQL persistence runs in the post-merge parity job)
 - [x] T024b [US2] Route `src/ignis/application/use_cases/host_browser_mission.py` admission, sibling composition, outcomes and ingestion (surface, platform, extractor version) through the descriptor instead of the TikTok/Threads conditionals
 - [x] T025 [US2] Add an Instagram fixture with an author sentinel to `tests/integration/test_author_identity_conformance.py`; document hashtags as free-text names outside Principle VII next to the TikTok rule (FR-008)
 - [x] T026 [US2] Confirm a request naming the retired `reels` surface still returns `SURFACE_RETIRED` with a test in `tests/unit/test_host_browser_search.py`
@@ -91,14 +91,14 @@ link is `https://www.instagram.com/p/<id>` without a trailing slash, like the ot
 from a new seed-only `sql/041_instagram_attribution.sql` (Threads' observed Meta wording, rechecked at T029).
 T024a, T024b and T025 (mission routing and the mission conformance fixture) landed in a second pull request:
 the descriptor carries `connector_surface`; a mission stores the validated handle-free link as observed
-(`/p/<id>/`); the requester's own Instagram posts cannot be excluded because the grid names no account.
+(`/p/<id>/` or `/reel/<id>/`); the requester's own Instagram posts cannot be excluded because the grid names no account.
 
 **Checkpoint**: Story 2 PR with both reviews; security review covers the new untrusted-input path and Principle VII.
 
 ## Phase 7: Polish
 
-- [ ] T030 [P] Update `docs/USER_GUIDE.md` and `docs/USER_GUIDE.vi.md` host-browser sections to name the three sources and the skills
-- [ ] T031 [P] Record Spec 025 status in `BACKLOG.md` (SPEC-025, MEA-1)
+- [x] T030 [P] Update `docs/USER_GUIDE.md` and `docs/USER_GUIDE.vi.md` host-browser sections to name the three sources and the skills
+- [x] T031 [P] Record Spec 025 status in `BACKLOG.md` (SPEC-025, MEA-1)
 - [ ] T032 Run quickstart steps 1–6 once more on the final wheel; record SC-001..SC-003 results in `specs/025-host-browser-skill-pack/research.md`
 
 ## Dependencies
