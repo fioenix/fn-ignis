@@ -10,18 +10,26 @@ files, no dependency on an unfinished task).
 
 ## Phase 1: Setup
 
-- [ ] T001 Confirm the running MCP server is a wheel install with packaged `host_browser/*.js` (memory: plain `uv sync`/`uv run` breaks it); record the check command in `specs/025-host-browser-skill-pack/quickstart.md`
+- [x] T001 Confirm the running MCP server is a wheel install with packaged `host_browser/*.js` (memory: plain `uv sync`/`uv run` breaks it); record the check command in `specs/025-host-browser-skill-pack/quickstart.md`
 
 ## Phase 2: Foundational (blocks every story)
 
 **Goal**: one per-source descriptor replaces the binary `threads`/`tiktok` branches (38 lines, 4 modules) with no behaviour change.
 
-- [ ] T002 Write descriptor parity tests that pin today's TikTok and Threads values (origin, search path, search URL, transport, record pattern, canonical URL, extractor version, sampling ordering) in `tests/unit/test_host_browser_sources.py`
-- [ ] T003 Add `src/ignis/infrastructure/connectors/host_browser/sources.py` with one frozen descriptor per source and a lookup that refuses unknown sources (data-model.md)
-- [ ] T004 Route `src/ignis/infrastructure/connectors/host_browser/relay.py` source branches through the descriptor
-- [ ] T005 Route `src/ignis/infrastructure/connectors/host_browser/validator.py` source branches through the descriptor
-- [ ] T006 Route `src/ignis/application/use_cases/host_browser_search.py` and `src/ignis/domain/host_browser_search.py` source branches through the descriptor
+- [x] T002 Write descriptor parity tests that pin today's TikTok and Threads values (origin, search path, search URL, transport, record pattern, canonical URL, extractor version, sampling ordering) in `tests/unit/test_host_browser_sources.py`
+- [x] T003 Add `src/ignis/domain/host_browser_sources.py` with one frozen descriptor per source and a lookup that refuses unknown sources (data-model.md)
+- [x] T004 Route `src/ignis/infrastructure/connectors/host_browser/relay.py` source branches through the descriptor
+- [x] T005 Route `src/ignis/infrastructure/connectors/host_browser/validator.py` source branches through the descriptor
+- [x] T006 Route `src/ignis/application/use_cases/host_browser_search.py` and `src/ignis/domain/host_browser_search.py` source branches through the descriptor
 - [ ] T007 Run `tests/unit/test_host_browser_sources.py`, `tests/unit/test_host_browser_search.py`, `tests/unit/test_host_browser_relay.py` and the host-browser cases of `tests/integration/test_author_identity_conformance.py` unchanged: all green, no edited assertion
+
+Phase 1–2 evidence (2026-11-12, branch `025-source-descriptor`): T002 passed 9 tests before
+routing the four existing consumers. Final sources/search run: 38 passed; relay/conformance run:
+70 passed, 6 skipped; repository conventions: 11 passed; Ruff: passed. The six skips require
+`IGNIS_TEST_POSTGRES_DSN`; T007 remains open for that backend proof. Existing test assertions are
+unchanged. Deterministic comparison with the pre-refactor revision also matched prepared responses,
+tab scripts, relay/receiver HTML and staged/submitted receipts byte-for-byte for both sources.
+The T001 installed-asset check and its limit are recorded in `quickstart.md`.
 
 **Checkpoint**: TikTok and Threads behave byte-identically; one PR with both reviews.
 

@@ -4,12 +4,14 @@ from typing import Literal, Self
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationInfo, model_serializer, model_validator
 
+from ignis.domain.host_browser_sources import get_source
+
 HostSearchSource = Literal["tiktok", "threads"]
 HostExtractorVersion = Literal["tiktok-public-grid-v3", "threads-search-top-v2"]
 
 
 def _version_for_source(source: HostSearchSource) -> HostExtractorVersion:
-    return "threads-search-top-v2" if source == "threads" else "tiktok-public-grid-v3"
+    return get_source(source).extractor_version
 
 
 class HostEnvelope(BaseModel):
@@ -39,7 +41,7 @@ class HostSearchRequest(HostEnvelope):
     @model_serializer(mode="wrap")
     def serialize_legacy_defaults(self, handler):
         data = handler(self)
-        if self.source == "tiktok":
+        if get_source(self.source).legacy_envelope:
             data.pop("source", None)
             data.pop("extractor_version", None)
         return data
@@ -47,8 +49,10 @@ class HostSearchRequest(HostEnvelope):
     @model_validator(mode="before")
     @classmethod
     def default_source_version(cls, value):
-        if isinstance(value, dict) and "extractor_version" not in value and value.get("source") == "threads":
-            return {**value, "extractor_version": "threads-search-top-v2"}
+        if isinstance(value, dict) and "extractor_version" not in value:
+            source = value.get("source", "tiktok")
+            if source in HostSearchSource.__args__ and not get_source(source).legacy_envelope:
+                return {**value, "extractor_version": get_source(source).extractor_version}
         return value
 
     @model_validator(mode="after")
@@ -127,7 +131,7 @@ class HostSearchAnswer(HostEnvelope):
     @model_serializer(mode="wrap")
     def serialize_legacy_answer(self, handler):
         data = handler(self)
-        if self.source == "tiktok":
+        if get_source(self.source).legacy_envelope:
             data.pop("source", None)
         return data
 
