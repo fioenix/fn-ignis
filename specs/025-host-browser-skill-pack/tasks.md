@@ -17,7 +17,7 @@ files, no dependency on an unfinished task).
 **Goal**: one per-source descriptor replaces the binary `threads`/`tiktok` branches (38 lines, 4 modules) with no behaviour change.
 
 - [x] T002 Write descriptor parity tests that pin today's TikTok and Threads values (origin, search path, search URL, transport, record pattern, canonical URL, extractor version, sampling ordering) in `tests/unit/test_host_browser_sources.py`
-- [x] T003 Add `src/ignis/infrastructure/connectors/host_browser/sources.py` with one frozen descriptor per source and a lookup that refuses unknown sources (data-model.md)
+- [x] T003 Add `src/ignis/domain/host_browser_sources.py` with one frozen descriptor per source and a lookup that refuses unknown sources (data-model.md)
 - [x] T004 Route `src/ignis/infrastructure/connectors/host_browser/relay.py` source branches through the descriptor
 - [x] T005 Route `src/ignis/infrastructure/connectors/host_browser/validator.py` source branches through the descriptor
 - [x] T006 Route `src/ignis/application/use_cases/host_browser_search.py` and `src/ignis/domain/host_browser_search.py` source branches through the descriptor
@@ -67,7 +67,7 @@ The T001 installed-asset check and its limit are recorded in `quickstart.md`.
 - [ ] T020 [US2] Spike (read-only, live): on the Finos profile, open the keyword grid from a relay-opened tab and confirm whether `window.opener` survives Instagram's navigation; choose the transport (opener or fragment) and record it in `specs/025-host-browser-skill-pack/research.md`
 - [ ] T021 [P] [US2] Write failing descriptor tests for `instagram` (origin, keyword path, `/p/<id>/` and `/reel/<id>/` patterns, canonical URL, platform `reels`, surface `instagram_host_browser`) in `tests/unit/test_host_browser_sources.py`
 - [ ] T022 [P] [US2] Write failing validator and submit tests from an Instagram-shaped fixture (caption kept, account path rejected, cross-source URL rejected, empty grid DEGRADED) in `tests/unit/test_host_browser_search.py`
-- [ ] T023 [US2] Add the Instagram descriptor and extend `HostSearchSource` in `src/ignis/infrastructure/connectors/host_browser/sources.py` and `src/ignis/domain/host_browser_search.py`
+- [ ] T023 [US2] Add the Instagram descriptor and extend `HostSearchSource` in `src/ignis/domain/host_browser_sources.py` and `src/ignis/domain/host_browser_search.py`
 - [ ] T024 [US2] Write the packaged extractor `instagram-keyword-grid-v1` (tile `img[alt]` caption, NFC, attribution removed, `kind_hint`, login/challenge → DEGRADED) in `src/ignis/infrastructure/connectors/host_browser/instagram_search.js`, plus `instagram_handoff.js` only if T020 chose the fragment transport
 - [ ] T025 [US2] Add an Instagram fixture with an author sentinel to `tests/integration/test_author_identity_conformance.py`; document hashtags as free-text names outside Principle VII next to the TikTok rule (FR-008)
 - [ ] T026 [US2] Confirm a request naming the retired `reels` surface still returns `SURFACE_RETIRED` with a test in `tests/unit/test_host_browser_search.py`

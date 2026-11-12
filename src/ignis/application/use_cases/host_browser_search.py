@@ -14,7 +14,7 @@ from ignis.infrastructure.caller_storage import current_caller_storage
 from ignis.domain.source_identity import identity_free_source_url
 from ignis.infrastructure.security.pii_sanitizer import mask_author_identity_text
 from ignis.infrastructure.connectors.host_browser.relay import LoopbackRelay
-from ignis.infrastructure.connectors.host_browser.sources import get_source
+from ignis.domain.host_browser_sources import get_source
 from ignis.infrastructure.connectors.host_browser.action_labels import action_labels_from_rows, seeded_action_labels
 from ignis.infrastructure.connectors.host_browser.attribution_locales import attribution_locales_from_rows, seeded_attribution_locales
 from ignis.infrastructure.connectors.host_browser.validator import validate_answer

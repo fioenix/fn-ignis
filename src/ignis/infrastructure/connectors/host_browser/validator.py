@@ -10,7 +10,7 @@ from ignis.infrastructure.connectors.host_browser.action_labels import seeded_ac
 from ignis.infrastructure.connectors.host_browser.attribution_locales import seeded_attribution_locales
 from ignis.domain.host_browser_search import HostSearchAnswer, HostSearchRequest
 from ignis.domain.self_content import is_self_authored
-from ignis.infrastructure.connectors.host_browser.sources import get_source
+from ignis.domain.host_browser_sources import get_source
 from ignis.infrastructure.security.pii_sanitizer import mask_author_identity_text, sanitize_pii_text, strip_platform_attribution
 
 

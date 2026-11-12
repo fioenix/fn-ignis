@@ -13,7 +13,7 @@ from urllib.parse import parse_qs
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from ignis.infrastructure.connectors.host_browser.sources import get_source
+from ignis.domain.host_browser_sources import get_source
 
 
 MAX_BODY_BYTES = 1024 * 1024

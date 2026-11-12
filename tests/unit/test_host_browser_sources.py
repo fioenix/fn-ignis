@@ -5,7 +5,7 @@ import re
 
 import pytest
 
-from ignis.infrastructure.connectors.host_browser.sources import get_source
+from ignis.domain.host_browser_sources import get_source
 from ignis.infrastructure.connectors.host_browser.validator import _content_url, collection_path
 from ignis.domain.host_browser_search import _version_for_source
 

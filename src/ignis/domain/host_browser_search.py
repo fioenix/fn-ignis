@@ -4,7 +4,7 @@ from typing import Literal, Self
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationInfo, model_serializer, model_validator
 
-from ignis.infrastructure.connectors.host_browser.sources import get_source
+from ignis.domain.host_browser_sources import get_source
 
 HostSearchSource = Literal["tiktok", "threads"]
 HostExtractorVersion = Literal["tiktok-public-grid-v3", "threads-search-top-v2"]
