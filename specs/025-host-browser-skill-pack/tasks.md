@@ -30,12 +30,12 @@ files, no dependency on an unfinished task).
 **Goal**: a fresh agent completes TikTok and Threads TACTICAL searches using only the skills (SC-001).
 **Independent test**: quickstart steps 1–3 for TikTok and Threads.
 
-- [ ] T008 [P] [US1] Write the shared relay reference (step order, `STAGED` check, async `{}` handling, tab-group re-read, close tabs) from `research.md` in `src/ignis/interfaces/mcp/guides/ignis_browser_relay.md`
-- [ ] T009 [P] [US1] Write TikTok specifics (opener transport, `window.opener` refusal, unknown counters, null dates until FR-007) in `src/ignis/interfaces/mcp/guides/ignis_tiktok_browser.md`
-- [ ] T010 [P] [US1] Write Threads specifics (fragment transport, `/receive`, rounded counters, UI label locales) in `src/ignis/interfaces/mcp/guides/ignis_threads_browser.md`
-- [ ] T011 [US1] Write failing tests that the four guide prompts and resources are registered and packaged in the wheel in `tests/unit/test_host_browser_guides.py`
-- [ ] T012 [US1] Register `ignis_browser_relay`, `ignis_tiktok_browser`, `ignis_threads_browser` prompts and `fn-ignis://guide/...` resources in `src/ignis/interfaces/mcp/server.py`
-- [ ] T013 [P] [US1] Add thin skills pointing at the packaged guides in `.agents/skills/ignis-tiktok-browser/SKILL.md` and `.agents/skills/ignis-threads-browser/SKILL.md`; replace the host-browser section of `.agents/skills/ignis-collect/SKILL.md` with a pointer
+- [x] T008 [P] [US1] Write the shared relay reference (step order, `STAGED` check, async `{}` handling, tab-group re-read, close tabs) from `research.md` in `src/ignis/interfaces/mcp/guides/ignis_browser_relay.md`
+- [x] T009 [P] [US1] Write TikTok specifics (opener transport, `window.opener` refusal, unknown counters, null dates until FR-007) in `src/ignis/interfaces/mcp/guides/ignis_tiktok_browser.md`
+- [x] T010 [P] [US1] Write Threads specifics (fragment transport, `/receive`, rounded counters, UI label locales) in `src/ignis/interfaces/mcp/guides/ignis_threads_browser.md`
+- [x] T011 [US1] Write failing tests that the four guide prompts and resources are registered and packaged in the wheel in `tests/unit/test_host_browser_guides.py`
+- [x] T012 [US1] Register `ignis_browser_relay`, `ignis_tiktok_browser`, `ignis_threads_browser` prompts and `fn-ignis://guide/...` resources in `src/ignis/interfaces/mcp/server.py`
+- [x] T013 [P] [US1] Add thin skills pointing at the packaged guides in `.agents/skills/ignis-tiktok-browser/SKILL.md` and `.agents/skills/ignis-threads-browser/SKILL.md`. Deviation (2026-11-12): the host-browser section of `.agents/skills/ignis-collect/SKILL.md` stays, because `tests/unit/test_ignis_skills.py` pins it; `tests/unit/test_host_browser_guides.py` instead checks that the packaged relay guide keeps the same safety rules
 - [ ] T014 [US1] Live acceptance: fresh session, TikTok and Threads per quickstart steps 1–3; record wall time and any step outside the skill in `specs/025-host-browser-skill-pack/research.md`
 
 **Checkpoint**: Story 1 PR (guides, skills, registration) with both reviews.

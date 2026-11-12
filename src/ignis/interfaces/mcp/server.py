@@ -3865,6 +3865,48 @@ def prompt_ignis_routine(watchlist_id: Optional[str] = None) -> str:
     return f"Selected watchlist: `{selected}`\n\n{guide}"
 
 
+def _host_browser_guide(name: str) -> str:
+    # Packaged in the wheel so hosts without the repository's skills receive the same procedure (Spec 025).
+    from importlib import resources
+    return resources.files("ignis.interfaces.mcp").joinpath(f"guides/{name}.md").read_text(encoding="utf-8")
+
+
+@mcp.resource("fn-ignis://guide/ignis-browser-relay")
+def get_ignis_browser_relay_guide() -> str:
+    """Shared steps and failure table for a host-browser search through the requester's Chrome."""
+    return _host_browser_guide("ignis_browser_relay")
+
+
+@mcp.prompt(name="ignis_browser_relay")
+def prompt_ignis_browser_relay() -> str:
+    """Guide the agent through one host-browser search relay; collects nothing by itself."""
+    return _host_browser_guide("ignis_browser_relay")
+
+
+@mcp.resource("fn-ignis://guide/ignis-tiktok-browser")
+def get_ignis_tiktok_browser_guide() -> str:
+    """TikTok specifics for host-browser search."""
+    return _host_browser_guide("ignis_tiktok_browser")
+
+
+@mcp.prompt(name="ignis_tiktok_browser")
+def prompt_ignis_tiktok_browser() -> str:
+    """Guide the agent through a TikTok host-browser search; collects nothing by itself."""
+    return _host_browser_guide("ignis_tiktok_browser")
+
+
+@mcp.resource("fn-ignis://guide/ignis-threads-browser")
+def get_ignis_threads_browser_guide() -> str:
+    """Threads specifics for host-browser search."""
+    return _host_browser_guide("ignis_threads_browser")
+
+
+@mcp.prompt(name="ignis_threads_browser")
+def prompt_ignis_threads_browser() -> str:
+    """Guide the agent through a Threads host-browser search; collects nothing by itself."""
+    return _host_browser_guide("ignis_threads_browser")
+
+
 @mcp.prompt(name="voice_of_customer_audit")
 def prompt_voice_of_customer_audit(keywords: str = "Chatbot AI") -> str:
     """Frame a bounded source-specific customer-voice probe."""
