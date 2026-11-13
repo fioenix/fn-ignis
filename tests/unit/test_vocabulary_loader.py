@@ -17,7 +17,6 @@ from ignis.infrastructure.config.vocabulary_loader import (
     load_market_vocabulary,
 )
 from ignis.domain.value_objects import GeoCode
-from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin
 from ignis.infrastructure.harness.language_detector import HeuristicLanguageDetector
 from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
 
@@ -128,27 +127,6 @@ async def test_the_retired_live_term_does_not_come_back_through_the_database(tmp
     vocabulary = await load_market_vocabulary(repo)
 
     assert "live" not in {term.strip() for term in vocabulary.tiktok_ui_noise}
-
-    plugin = TikTokPlugin()
-    plugin.register_ui_noise(vocabulary.tiktok_ui_noise)
-
-    assert plugin._is_private_or_notification("Studio 2.0 is live.") is False
-    assert plugin._is_private_or_notification("livestream review") is False
-
-
-@pytest.mark.asyncio
-async def test_the_tiktok_grid_guard_is_armed_by_a_fresh_database(tmp_path):
-    """Fail-closed only works if bootstrap actually arms it; otherwise ingress returns nothing."""
-    repo = SqliteTrendRepository(db_path=str(tmp_path / "tiktok.db"))
-    vocabulary = await load_market_vocabulary(repo)
-
-    plugin = TikTokPlugin()
-    plugin.register_ui_noise(vocabulary.tiktok_ui_noise)
-    plugin.register_suggest_templates(vocabulary.tiktok_suggest_templates)
-
-    assert plugin._is_private_or_notification("#congnghe2026 AI Agent sieu hot") is False
-    assert plugin._intent_probe_templates("VN")
-    assert plugin._intent_probe_templates("US") != plugin._intent_probe_templates("VN")
 
 
 @pytest.mark.asyncio

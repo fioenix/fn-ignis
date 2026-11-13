@@ -3,8 +3,6 @@
 import pytest
 from datetime import datetime, timezone
 from uuid import uuid4
-from types import SimpleNamespace
-from unittest.mock import AsyncMock
 
 from ignis.domain.entities import ResearchMission, TopicCluster, TrendSignal
 from ignis.domain.harness_models import QualityScorecard, TrendMaturityStage
@@ -12,46 +10,6 @@ from ignis.domain.research_workspace import MissionProbeOutcome, QualificationCo
 from ignis.domain.value_objects import GeoCode, PlatformType
 from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
 from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
-from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin
-
-
-@pytest.mark.parametrize("stats,known,expected", [
-    ({}, False, 0),
-    ({"diggCount": 400}, False, 0),
-    ({"playCount": 0, "diggCount": 400}, True, 0),
-    ({"play_count": "1200"}, True, 1200),
-    ({"playCount": "unknown"}, False, 0),
-])
-def test_native_json_view_measurements_do_not_fall_back_to_likes(stats, known, expected):
-    plugin = TikTokPlugin()
-    plugin.register_ui_noise(["notification"])
-    signal = plugin._parse_json_item({"id": "123", "desc": "Túi đi làm",
-        "author": {"uniqueId": "fixture"}, "stats": stats}, GeoCode.VN, "túi đi làm")
-    assert signal is not None
-    assert signal.metadata["metric_known"] is known
-    assert signal.metric_value == expected
-    assert QualityEvaluator().evaluate_quality([signal], GeoCode.VN, 30).data_freshness_score == 0
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("counter", [None, "0", "1.2K"])
-async def test_native_grid_preserves_missing_measurement_through_analysis(counter):
-    plugin = TikTokPlugin()
-    plugin.register_ui_noise(["notification"])
-    card = SimpleNamespace(query_selector=AsyncMock(side_effect=[None, SimpleNamespace(
-        get_attribute=AsyncMock(return_value="https://www.tiktok.com/@fixture/video/1234567890"),
-    )]), inner_text=AsyncMock(return_value=(counter + "\n" if counter is not None else "") + "Túi đi làm\nfixture"))
-    signal = await plugin._parse_dom_card(card, GeoCode.VN, "túi đi làm")
-    assert signal.metadata["metric_known"] is False
-    score = QualityEvaluator().evaluate_quality([signal], geo=GeoCode.VN, timeframe_days=30)
-    assert score.data_freshness_score == 0
-    assert any("Publication freshness unmeasured" in text for text in score.flaws_detected)
-    report = StrategicMarketReasoner().analyze_mission(
-        ResearchMission(title="Office bags", keywords=["túi đi làm"], surface=ResearchSurface.ATTENTION),
-        [signal], [TopicCluster(canonical_name="Túi đi làm", signals=[signal])], score,
-    )
-    assert report.verified_cross_platform_trends[0]["total_estimated_reach"] is None
-    assert report.maturity_stage is None
 
 
 @pytest.mark.parametrize("measured", [False, True])

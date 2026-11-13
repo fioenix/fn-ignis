@@ -23,8 +23,12 @@ Check `research.md` for file:line references before each task; line numbers are 
   - Dropped the Creative Center `SRC_NON_ASCII_ALLOWLIST` entry here so the stale-entry test stays green.
   - Kept the `TikTokCreativeCenterPlugin` and `GoogleTrendsRssPlugin` fixtures and `AUTHOR_FREE_CONNECTORS` in
     `integration/test_author_identity_conformance.py`: stored-row payload shapes, harmless to the class scan.
-- [ ] T005 Cut `TikTokPlugin` to the live members; `is_healthy` and `fetch_signals` refuse as `ThreadsPlugin` does;
+- [x] T005 Cut `TikTokPlugin` to the live members; `is_healthy` and `fetch_signals` refuse as `ThreadsPlugin` does;
   delete the whole-file tests and retired cases (FR-002, FR-006).
+  - Kept `name` ("TikTok Trending & Search Ingress") unchanged: it is an output label, and renaming it is not in scope.
+  - Added `test_retired_tiktok_collection_refuses_like_threads` for the new refusals.
+  - Kept the loader assertion of `test_the_retired_live_term_does_not_come_back_through_the_database`; only its plugin
+    half went.
 - [ ] T006 Remove orphans: `browser_support.py`, the Reels/Explore-only `meta_browser_ingress` helpers,
   `InstagramAuthManager` and `DEFAULT_INSTAGRAM_SCOPES`, unused auth managers, `fetch_suggestions_across_all` if it has
   no caller left (FR-003).

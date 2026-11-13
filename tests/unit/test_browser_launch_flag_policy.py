@@ -10,7 +10,7 @@ LAUNCHES = {
     "infrastructure/auth/meta_browser_auth.py": {"authenticate_interactive"},
     "infrastructure/auth/tiktok_auth.py": {"authenticate_interactive"},
     "infrastructure/connectors/meta_browser_ingress.py": {"collect_json_payloads"},
-    "infrastructure/connectors/tiktok/tiktok_plugin.py": {"fetch_suggestions", "fetch_video_comments", "_fetch_via_playwright"},
+    "infrastructure/connectors/tiktok/tiktok_plugin.py": {"fetch_video_comments"},
 }
 
 
@@ -61,10 +61,9 @@ def test_threads_suggestions_browser_launch_and_relay_projection_are_removed():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("site", ["meta_auth", "tiktok_auth", "meta_capture", "suggestions", "comments", "search"])
+@pytest.mark.parametrize("site", ["meta_auth", "tiktok_auth", "meta_capture", "comments"])
 async def test_retained_sites_pass_only_original_non_hiding_launch_arguments(monkeypatch, site):
     from unittest.mock import AsyncMock, MagicMock
-    from ignis.domain.value_objects import GeoCode
     from ignis.infrastructure.auth.meta_browser_auth import InstagramBrowserAuthManager
     from ignis.infrastructure.auth.tiktok_auth import TikTokAuthManager
     from ignis.infrastructure.connectors.meta_browser_ingress import collect_json_payloads
@@ -81,7 +80,6 @@ async def test_retained_sites_pass_only_original_non_hiding_launch_arguments(mon
     auth = AsyncMock()
     auth.get_storage_state.return_value = {"cookies": []}
     plugin = TikTokPlugin(auth_manager=auth)
-    plugin.register_ui_noise(["Synthetic UI label"])
     async def invoke():
         if site == "meta_auth":
             await InstagramBrowserAuthManager().authenticate_interactive()
@@ -89,12 +87,8 @@ async def test_retained_sites_pass_only_original_non_hiding_launch_arguments(mon
             await TikTokAuthManager().authenticate_interactive()
         elif site == "meta_capture":
             await collect_json_payloads("https://www.instagram.com/explore/tags/synthetic/", {}, ["/api/"])
-        elif site == "suggestions":
-            await plugin.fetch_suggestions(["synthetic"])
         elif site == "comments":
             await plugin.fetch_video_comments("https://www.tiktok.com/share/video/7417820067028536584")
-        elif site == "search":
-            await plugin._fetch_via_playwright("https://www.tiktok.com/search?q=synthetic", {}, GeoCode.VN, keyword="synthetic")
     try:
         await invoke()
     except Exception as exc:
