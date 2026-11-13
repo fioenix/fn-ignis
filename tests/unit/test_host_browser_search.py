@@ -335,3 +335,30 @@ def test_a_host_supplied_tiktok_publication_time_is_kept_over_the_id(service):
     service.stage(request["request_id"], payload)
     record = service.submit(request["request_id"], "task-1", "chrome-1")["observations"][0]
     assert record["published_at"] == "2024-09-24T00:00:00+00:00"
+
+
+@pytest.mark.parametrize("source", ["tiktok", "threads", "instagram"])
+def test_tab_script_is_compacted_because_agents_retype_it(service, source):
+    """The host agent copies tab_script verbatim, so indentation and comment lines cost wall time."""
+    from importlib.resources import files
+
+    script = prepare(service, source=source)["tab_script"]
+    packaged = files("ignis.infrastructure.connectors.host_browser")
+    raw = sum(len(packaged.joinpath(source + suffix).read_text()) for suffix in ("_search.js", "_handoff.js"))
+    lines = script.split("\n")
+    assert all(line == line.strip() for line in lines)
+    assert not any(line.startswith("//") for line in lines)
+    assert len(script) < raw
+
+
+def test_packaged_scripts_stay_safe_to_compact():
+    """Compaction strips each line, so a template literal or a line continuation would change meaning."""
+    from importlib.resources import files
+
+    for script in files("ignis.infrastructure.connectors.host_browser").iterdir():
+        if script.name.endswith(".js"):
+            text = script.read_text()
+            assert "`" not in text, script.name
+            assert not any(line.rstrip().endswith("\\") for line in text.splitlines()), script.name
+            assert "/*" not in text, script.name
+            assert not set(text) & set("\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029"), script.name

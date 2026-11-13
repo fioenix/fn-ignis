@@ -20,6 +20,17 @@ MAX_BODY_BYTES = 1024 * 1024
 _TEMPLATES = Path(__file__).resolve().parents[2] / "templates" / "html"
 
 
+
+def _compact(script: str) -> str:
+    """Drop indentation and whole-line comments: the host agent retypes the tab script verbatim.
+
+    Line breaks stay, so automatic semicolon insertion is unchanged; the packaged scripts hold no
+    template literals, line continuations, block comments or other line separators, which this
+    would otherwise alter.
+    """
+    lines = (line.strip() for line in script.strip().splitlines())
+    return "\n".join(line for line in lines if line and not line.startswith("//"))
+
 class LoopbackRelay:
     """Stage one bounded answer through a same-origin task form, then close."""
 
@@ -166,7 +177,7 @@ class LoopbackRelay:
         handoff = (Path(__file__).resolve().parent / (self._source + "_handoff.js")).read_text(encoding="utf-8")
         approved = [dict(query_id=query.get("query_id"), query=query.get("query"),
                          result_limit=query.get("result_limit")) for query in queries]
-        return (f"({handoff.strip()})({extractor.strip()}, "
+        return (f"({_compact(handoff)})({_compact(extractor)}, "
                 f"{json.dumps(approved, ensure_ascii=False)}, "
                 f"{json.dumps(self.url + 'receive' if self._descriptor.transport == 'fragment_receive' else self.origin)}"
                 + (f", {json.dumps(self._request_id)}, {json.dumps(self._fragment_key)}" if self._descriptor.transport == "fragment_receive" else "") + ")")
