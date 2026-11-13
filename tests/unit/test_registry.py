@@ -608,7 +608,6 @@ async def test_the_list_only_search_keeps_its_contract():
 
 # --- Review 0d70e9b: an empty answer is a measured zero only when the surface attests it ran ------
 
-from tests.unit.test_meta_browser_ingress import REELS_PAYLOAD  # noqa: E402
 from ignis.infrastructure.connectors.threads.threads_plugin import ThreadsPlugin  # noqa: E402
 
 BROWSER_STATE = {"cookies": [{"name": "sessionid", "value": "unit-test"}]}
@@ -635,8 +634,7 @@ async def test_a_browser_surface_that_captured_nothing_is_not_a_measured_empty(p
     from unittest.mock import patch
 
     registry = _registry(_session_plugin(plugin_class))
-    with patch(f"{module}.collect_json_payloads", AsyncMock(return_value=[]), create=True), \
-            patch(f"{module}.fetch_graphql_direct", AsyncMock(return_value=None), create=True):
+    with patch(f"{module}.fetch_graphql_direct", AsyncMock(return_value=None), create=True):
         result = await registry.search_with_outcomes(keywords=["ai cho cửa hàng"])
 
     [outcome] = result.outcomes
@@ -665,8 +663,7 @@ async def test_a_browser_surface_attests_the_keywords_it_actually_queried(plugin
 
     keywords = [f"topic{index}" for index in range(1, 23)]
     registry = _registry(_session_plugin(plugin_class))
-    with patch(f"{module}.collect_json_payloads", AsyncMock(return_value=[REELS_PAYLOAD]), create=True), \
-            patch(f"{module}.fetch_graphql_direct", AsyncMock(return_value=None), create=True):
+    with patch(f"{module}.fetch_graphql_direct", AsyncMock(return_value=None), create=True):
         result = await registry.search_with_outcomes(keywords=keywords)
 
     [outcome] = result.outcomes
@@ -749,8 +746,7 @@ async def test_a_browser_surface_attests_no_window_because_it_filters_by_none(pl
     from unittest.mock import patch
 
     registry = _registry(_session_plugin(plugin_class))
-    with patch(f"{module}.collect_json_payloads", AsyncMock(return_value=[REELS_PAYLOAD]), create=True), \
-            patch(f"{module}.fetch_graphql_direct", AsyncMock(return_value=None), create=True):
+    with patch(f"{module}.fetch_graphql_direct", AsyncMock(return_value=None), create=True):
         result = await registry.search_with_outcomes(keywords=["ai cho cửa hàng"], timeframe=Timeframe.LAST_7D)
 
     [outcome] = result.outcomes

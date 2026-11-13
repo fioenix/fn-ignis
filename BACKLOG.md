@@ -262,7 +262,7 @@ Bề mặt agent:
   gỡ Reels OAuth trong chat. Giữ `ThreadsPlugin`, `ThreadsAuthManager`, seed `sql/` và đường đọc dòng cũ.
 - [x] **ENG-11 — Dọn phần còn sót sau Spec 027** — đóng 13/11/2026: gỡ nhánh Instagram (`is_reels`, kiểm trang
   Reels và các mã `REELS_*`) khỏi `collect_json_payloads`; gỡ fake `fetch_suggestions` ở `test_registry.py`; đổi tên
-  hai test cho đúng việc chúng kiểm; sửa một lỗi ngữ pháp trong comment.
+  hai test cho đúng việc chúng kiểm; sửa một lỗi ngữ pháp trong comment. Sau đó gỡ hẳn `collect_json_payloads`, vì hàm không còn caller nào.
 - [ ] **ENG-3 — ADR `Proposed`: PostgreSQL có còn là backend của sản phẩm không** (S). Ba lựa chọn: (a) giữ cả
   hai và làm ENG-9; (b) đóng băng PostgreSQL, chỉ còn đọc và nâng cấp kiểm trong CI; (c) bỏ sau khi có đường
   export. Hiện mỗi story trả tiền persistence hai lần, cộng 4 service trong CI. Chủ sở hữu đặt trạng thái. Phụ thuộc ENG-4.
