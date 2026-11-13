@@ -263,7 +263,7 @@ async def test_no_retry_runs_past_the_daily_ceiling(store):
 
 
 class _RetryCrashPlugin(_FlakyPlugin):
-    """The retry's browser navigation fails, as collect_json_payloads can raise."""
+    """The retry's browser navigation fails, as a browser navigation can raise."""
 
     async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20,
                              attestation=None):

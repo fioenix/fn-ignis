@@ -608,7 +608,6 @@ async def test_the_list_only_search_keeps_its_contract():
 
 # --- Review 0d70e9b: an empty answer is a measured zero only when the surface attests it ran ------
 
-from tests.unit.test_meta_browser_ingress import REELS_PAYLOAD  # noqa: E402
 from ignis.infrastructure.connectors.threads.threads_plugin import ThreadsPlugin  # noqa: E402
 
 BROWSER_STATE = {"cookies": [{"name": "sessionid", "value": "unit-test"}]}
@@ -631,13 +630,9 @@ def _session_plugin(plugin_class):
 )
 @pytest.mark.asyncio
 async def test_a_browser_surface_that_captured_nothing_is_not_a_measured_empty(plugin_class, module):
-    """No Playwright, an unusable session and a failed capture all return [] from collect."""
-    from unittest.mock import patch
-
+    """Threads refuses its retired internal path, so nothing reads as a measured empty."""
     registry = _registry(_session_plugin(plugin_class))
-    with patch(f"{module}.collect_json_payloads", AsyncMock(return_value=[]), create=True), \
-            patch(f"{module}.fetch_graphql_direct", AsyncMock(return_value=None), create=True):
-        result = await registry.search_with_outcomes(keywords=["ai cho cửa hàng"])
+    result = await registry.search_with_outcomes(keywords=["ai cho cửa hàng"])
 
     [outcome] = result.outcomes
     assert outcome.status is not ChannelHealthStatus.EMPTY_NO_DATA
@@ -661,13 +656,9 @@ async def test_an_empty_answer_without_an_attestation_is_degraded_not_measured()
 @pytest.mark.asyncio
 async def test_a_browser_surface_attests_the_keywords_it_actually_queried(plugin_class, module):
     """Threads never dispatches the retired internal path."""
-    from unittest.mock import patch
-
     keywords = [f"topic{index}" for index in range(1, 23)]
     registry = _registry(_session_plugin(plugin_class))
-    with patch(f"{module}.collect_json_payloads", AsyncMock(return_value=[REELS_PAYLOAD]), create=True), \
-            patch(f"{module}.fetch_graphql_direct", AsyncMock(return_value=None), create=True):
-        result = await registry.search_with_outcomes(keywords=keywords)
+    result = await registry.search_with_outcomes(keywords=keywords)
 
     [outcome] = result.outcomes
     assert outcome.status is ChannelHealthStatus.DEGRADED and outcome.queried_keywords == ()
@@ -746,12 +737,8 @@ async def test_retired_threads_attests_no_query_or_window_and_never_uses_graph()
 )
 @pytest.mark.asyncio
 async def test_a_browser_surface_attests_no_window_because_it_filters_by_none(plugin_class, module):
-    from unittest.mock import patch
-
     registry = _registry(_session_plugin(plugin_class))
-    with patch(f"{module}.collect_json_payloads", AsyncMock(return_value=[REELS_PAYLOAD]), create=True), \
-            patch(f"{module}.fetch_graphql_direct", AsyncMock(return_value=None), create=True):
-        result = await registry.search_with_outcomes(keywords=["ai cho cửa hàng"], timeframe=Timeframe.LAST_7D)
+    result = await registry.search_with_outcomes(keywords=["ai cho cửa hàng"], timeframe=Timeframe.LAST_7D)
 
     [outcome] = result.outcomes
     assert outcome.queried_window is None

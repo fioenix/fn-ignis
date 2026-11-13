@@ -9,7 +9,6 @@ ROOT = Path(__file__).resolve().parents[2]
 LAUNCHES = {
     "infrastructure/auth/meta_browser_auth.py": {"authenticate_interactive"},
     "infrastructure/auth/tiktok_auth.py": {"authenticate_interactive"},
-    "infrastructure/connectors/meta_browser_ingress.py": {"collect_json_payloads"},
     "infrastructure/connectors/tiktok/tiktok_plugin.py": {"fetch_video_comments"},
 }
 
@@ -61,12 +60,11 @@ def test_threads_suggestions_browser_launch_and_relay_projection_are_removed():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("site", ["meta_auth", "tiktok_auth", "meta_capture", "comments"])
+@pytest.mark.parametrize("site", ["meta_auth", "tiktok_auth", "comments"])
 async def test_retained_sites_pass_only_original_non_hiding_launch_arguments(monkeypatch, site):
     from unittest.mock import AsyncMock, MagicMock
     from ignis.infrastructure.auth.meta_browser_auth import ThreadsBrowserAuthManager
     from ignis.infrastructure.auth.tiktok_auth import TikTokAuthManager
-    from ignis.infrastructure.connectors.meta_browser_ingress import collect_json_payloads
     from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin
     import playwright.async_api
     launches = []
@@ -85,8 +83,6 @@ async def test_retained_sites_pass_only_original_non_hiding_launch_arguments(mon
             await ThreadsBrowserAuthManager().authenticate_interactive()
         elif site == "tiktok_auth":
             await TikTokAuthManager().authenticate_interactive()
-        elif site == "meta_capture":
-            await collect_json_payloads("https://www.instagram.com/explore/tags/synthetic/", {}, ["/api/"])
         elif site == "comments":
             await plugin.fetch_video_comments("https://www.tiktok.com/share/video/7417820067028536584")
     try:
