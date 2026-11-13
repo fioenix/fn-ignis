@@ -1,0 +1,1983 @@
+{
+  "version": "2026-11-13.3",
+  "note": "Synthetic intents for the Spec 028 tool-selection eval. Responses stand in for the real handlers, including the host-browser step a headless agent cannot run. Neutral tools are read-only orientation calls that never count as wrong; their default responses apply when an intent does not script them.",
+  "neutral_tools": [
+    "list_research_missions",
+    "list_research_workspaces",
+    "get_current_session_mission",
+    "get_watchlist",
+    "get_platform_auth_status",
+    "diagnose_system_health",
+    "get_system_logs",
+    "list_domain_lexicons",
+    "get_runtime_config"
+  ],
+  "neutral_responses": {
+    "list_research_missions": [
+      {
+        "status": "SUCCESS",
+        "missions": [
+          {
+            "mission_id": "m-3",
+            "type": "MARKET",
+            "title": "Nước ép lạnh văn phòng",
+            "state": "CONFIRMED"
+          },
+          {
+            "mission_id": "m-7",
+            "type": "ATTENTION",
+            "title": "Trà sữa HCM"
+          },
+          {
+            "mission_id": "m-20",
+            "type": "ATTENTION",
+            "title": "Watchlist wl-1 run",
+            "watchlist_id": "wl-1"
+          }
+        ]
+      }
+    ],
+    "list_research_workspaces": [
+      {
+        "status": "SUCCESS",
+        "workspaces": [
+          {
+            "workspace_id": "ws-1",
+            "name": "do-uong-hcm",
+            "watchlists": [
+              {
+                "watchlist_id": "wl-1",
+                "name": "Trà sữa HCM"
+              }
+            ]
+          },
+          {
+            "workspace_id": "ws-2",
+            "name": "nuoc-ep-lanh"
+          }
+        ]
+      }
+    ],
+    "get_current_session_mission": [
+      {
+        "status": "SUCCESS",
+        "mission_id": "m-3",
+        "title": "Nước ép lạnh văn phòng"
+      }
+    ],
+    "get_watchlist": [
+      {
+        "status": "SUCCESS",
+        "watchlist_id": "wl-1",
+        "workspace_id": "ws-1",
+        "versions": [
+          {
+            "version": 1,
+            "definition": {
+              "topics": [
+                {
+                  "name": "trà sữa",
+                  "categories": [
+                    "đồ uống"
+                  ],
+                  "keywords": [
+                    "trà sữa",
+                    "trân châu"
+                  ],
+                  "brands": [],
+                  "discovery_share": 0.1
+                }
+              ]
+            }
+          }
+        ],
+        "runs": [
+          {
+            "mission_id": "m-20",
+            "version": 1
+          }
+        ],
+        "listening_plan": {
+          "period": "week",
+          "snapshots_per_period": 3
+        }
+      }
+    ],
+    "get_platform_auth_status": [
+      {
+        "status": "SUCCESS",
+        "platforms": {
+          "tiktok": {
+            "stored": false
+          },
+          "threads": {
+            "stored": false
+          },
+          "instagram": {
+            "stored": false
+          }
+        }
+      }
+    ],
+    "diagnose_system_health": [
+      {
+        "status": "HEALTHY",
+        "store": "ok",
+        "breakers": {
+          "tiktok": "CLOSED",
+          "youtube": "CLOSED"
+        },
+        "suggestions": []
+      }
+    ],
+    "get_system_logs": [
+      {
+        "status": "SUCCESS",
+        "entries": []
+      }
+    ],
+    "list_domain_lexicons": [
+      {
+        "status": "SUCCESS",
+        "terms": []
+      }
+    ],
+    "get_runtime_config": [
+      {
+        "status": "SUCCESS",
+        "configs": {
+          "threads_web_client_id": "configured",
+          "doc_ids": "configured"
+        }
+      }
+    ]
+  },
+  "intents": [
+    {
+      "id": "T01-tiktok-comments-url",
+      "journey": "tactical",
+      "trap": false,
+      "text": "Lấy giúp tôi 30 bình luận dưới video TikTok này: https://www.tiktok.com/@banhtrangco3/video/7431000000000000001",
+      "acceptable_first": [
+        "get_tiktok_video_comments"
+      ],
+      "acceptable_path": [
+        "get_tiktok_video_comments"
+      ],
+      "trap_tools": [
+        "prepare_host_browser_search",
+        "execute_mission_ingress"
+      ],
+      "terminal": "get_tiktok_video_comments",
+      "responses": {
+        "get_tiktok_video_comments": [
+          {
+            "status": "SUCCESS",
+            "video_url": "https://www.tiktok.com/@banhtrangco3/video/7431000000000000001",
+            "total_comments": 3,
+            "comments": [
+              {
+                "text": "ship Hà Đông không shop"
+              },
+              {
+                "text": "cay quá ăn hết nửa bịch"
+              },
+              {
+                "text": "giá bao nhiêu vậy"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "T02-tiktok-keyword-search",
+      "journey": "tactical",
+      "trap": false,
+      "text": "Tìm trên TikTok xem mọi người đang nói gì về \"son kem lì\", lấy khoảng 20 kết quả.",
+      "acceptable_first": [
+        "prepare_host_browser_search"
+      ],
+      "acceptable_path": [
+        "prepare_host_browser_search",
+        "submit_host_browser_search",
+        "cancel_host_browser_search"
+      ],
+      "trap_tools": [
+        "execute_mission_ingress",
+        "verify_connectors_health",
+        "discover_market_opportunities"
+      ],
+      "terminal": "submit_host_browser_search",
+      "responses": {
+        "prepare_host_browser_search": [
+          {
+            "status": "PREPARED",
+            "request_id": "hb-req-1",
+            "mode": "TACTICAL",
+            "source": "tiktok",
+            "note": "The host browser ran the batch and staged its answer."
+          }
+        ],
+        "submit_host_browser_search": [
+          {
+            "status": "ACCEPTED",
+            "mode": "TACTICAL",
+            "observations": [
+              {
+                "title": "Review 5 cây son kem lì dưới 200k",
+                "url": "https://www.tiktok.com/@a/video/7431000000000000101"
+              },
+              {
+                "title": "Son kem lì có khô môi không?",
+                "url": "https://www.tiktok.com/@b/video/7431000000000000102"
+              }
+            ],
+            "observed_count": 2
+          }
+        ],
+        "cancel_host_browser_search": [
+          {
+            "status": "CANCELLED"
+          }
+        ]
+      }
+    },
+    {
+      "id": "T03-threads-keyword-search",
+      "journey": "tactical",
+      "trap": false,
+      "text": "Trên Threads người ta đang bàn gì về \"cà phê muối\"? Lấy một mẫu nhỏ thôi.",
+      "acceptable_first": [
+        "prepare_host_browser_search"
+      ],
+      "acceptable_path": [
+        "prepare_host_browser_search",
+        "submit_host_browser_search",
+        "cancel_host_browser_search"
+      ],
+      "trap_tools": [
+        "execute_mission_ingress"
+      ],
+      "terminal": "submit_host_browser_search",
+      "responses": {
+        "prepare_host_browser_search": [
+          {
+            "status": "PREPARED",
+            "request_id": "hb-req-2",
+            "mode": "TACTICAL",
+            "source": "threads",
+            "note": "The host browser ran the batch and staged its answer."
+          }
+        ],
+        "submit_host_browser_search": [
+          {
+            "status": "ACCEPTED",
+            "mode": "TACTICAL",
+            "observations": [
+              {
+                "text": "cà phê muối ở Huế vẫn ngon nhất"
+              },
+              {
+                "text": "cà phê muối pha lon có ai thử chưa"
+              }
+            ],
+            "observed_count": 2
+          }
+        ],
+        "cancel_host_browser_search": [
+          {
+            "status": "CANCELLED"
+          }
+        ]
+      }
+    },
+    {
+      "id": "T04-instagram-keyword-search",
+      "journey": "tactical",
+      "trap": false,
+      "text": "Check Instagram for posts about \"áo dài cách tân\", about 20 results.",
+      "acceptable_first": [
+        "prepare_host_browser_search"
+      ],
+      "acceptable_path": [
+        "prepare_host_browser_search",
+        "submit_host_browser_search",
+        "cancel_host_browser_search"
+      ],
+      "trap_tools": [
+        "execute_mission_ingress",
+        "verify_connectors_health"
+      ],
+      "terminal": "submit_host_browser_search",
+      "responses": {
+        "prepare_host_browser_search": [
+          {
+            "status": "PREPARED",
+            "request_id": "hb-req-3",
+            "mode": "TACTICAL",
+            "source": "instagram",
+            "note": "The host browser ran the batch and staged its answer."
+          }
+        ],
+        "submit_host_browser_search": [
+          {
+            "status": "ACCEPTED",
+            "mode": "TACTICAL",
+            "observations": [
+              {
+                "caption": "Áo dài cách tân đi chơi Tết"
+              }
+            ],
+            "observed_count": 1
+          }
+        ],
+        "cancel_host_browser_search": [
+          {
+            "status": "CANCELLED"
+          }
+        ]
+      }
+    },
+    {
+      "id": "T05-show-my-threads",
+      "journey": "tactical",
+      "trap": true,
+      "text": "Xem Threads của tôi.",
+      "acceptable_first": [
+        "reply",
+        "get_platform_auth_status"
+      ],
+      "acceptable_path": [
+        "get_platform_auth_status"
+      ],
+      "trap_tools": [
+        "prepare_host_browser_search",
+        "verify_connectors_health",
+        "execute_mission_ingress"
+      ],
+      "terminal": "reply",
+      "responses": {
+        "get_platform_auth_status": [
+          {
+            "status": "SUCCESS",
+            "platforms": {
+              "threads": {
+                "stored": false
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "T06-system-health",
+      "journey": "tactical",
+      "trap": false,
+      "text": "Is Ignis healthy right now?",
+      "acceptable_first": [
+        "diagnose_system_health"
+      ],
+      "acceptable_path": [
+        "diagnose_system_health",
+        "get_system_logs"
+      ],
+      "trap_tools": [
+        "verify_connectors_health",
+        "update_runtime_config"
+      ],
+      "terminal": "diagnose_system_health",
+      "responses": {
+        "diagnose_system_health": [
+          {
+            "status": "HEALTHY",
+            "store": "ok",
+            "breakers": {
+              "tiktok": "CLOSED",
+              "youtube": "CLOSED"
+            },
+            "suggestions": []
+          }
+        ],
+        "get_system_logs": [
+          {
+            "status": "SUCCESS",
+            "entries": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "T07-connector-probes",
+      "journey": "tactical",
+      "trap": false,
+      "text": "Chạy kiểm tra kết nối tất cả các nguồn giúp tôi, tôi cho phép.",
+      "acceptable_first": [
+        "verify_connectors_health",
+        "diagnose_system_health"
+      ],
+      "acceptable_path": [
+        "verify_connectors_health",
+        "diagnose_system_health"
+      ],
+      "trap_tools": [
+        "execute_mission_ingress",
+        "prepare_host_browser_search"
+      ],
+      "terminal": "verify_connectors_health",
+      "responses": {
+        "verify_connectors_health": [
+          {
+            "status": "SUCCESS",
+            "connectors": {
+              "youtube": "AVAILABLE",
+              "tiktok_comments": "AVAILABLE",
+              "host_browser": "REQUIRES_HOST"
+            }
+          }
+        ],
+        "diagnose_system_health": [
+          {
+            "status": "HEALTHY",
+            "store": "ok",
+            "breakers": {},
+            "suggestions": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "T08-customer-voice",
+      "journey": "tactical",
+      "trap": false,
+      "text": "Khách hàng đang nói gì về nồi chiên không dầu? Tôi cần nghe tiếng nói khách hàng thật nhanh, trong 10 phút.",
+      "acceptable_first": [
+        "prepare_host_browser_search"
+      ],
+      "acceptable_path": [
+        "prepare_host_browser_search",
+        "submit_host_browser_search",
+        "get_tiktok_video_comments",
+        "cancel_host_browser_search"
+      ],
+      "trap_tools": [
+        "discover_market_opportunities",
+        "execute_mission_ingress",
+        "get_mission_analysis"
+      ],
+      "terminal": "get_tiktok_video_comments",
+      "responses": {
+        "prepare_host_browser_search": [
+          {
+            "status": "PREPARED",
+            "request_id": "hb-req-4",
+            "mode": "TACTICAL",
+            "source": "tiktok",
+            "note": "The host browser ran the batch and staged its answer."
+          }
+        ],
+        "submit_host_browser_search": [
+          {
+            "status": "ACCEPTED",
+            "mode": "TACTICAL",
+            "observations": [
+              {
+                "title": "Nồi chiên 6 lít có đáng mua?",
+                "url": "https://www.tiktok.com/@c/video/7431000000000000201"
+              },
+              {
+                "title": "Lỗi nồi chiên sau 3 tháng",
+                "url": "https://www.tiktok.com/@d/video/7431000000000000202"
+              }
+            ],
+            "observed_count": 2
+          }
+        ],
+        "get_tiktok_video_comments": [
+          {
+            "status": "SUCCESS",
+            "total_comments": 2,
+            "comments": [
+              {
+                "text": "nhà mình dùng 2 năm vẫn ổn"
+              },
+              {
+                "text": "lớp chống dính bong sau vài tháng"
+              }
+            ]
+          }
+        ],
+        "cancel_host_browser_search": [
+          {
+            "status": "CANCELLED"
+          }
+        ]
+      }
+    },
+    {
+      "id": "T09-recent-missions",
+      "journey": "tactical",
+      "trap": false,
+      "text": "Liệt kê các mission nghiên cứu gần đây.",
+      "acceptable_first": [
+        "list_research_missions"
+      ],
+      "acceptable_path": [
+        "list_research_missions"
+      ],
+      "trap_tools": [
+        "execute_mission_ingress"
+      ],
+      "terminal": "list_research_missions",
+      "responses": {
+        "list_research_missions": [
+          {
+            "status": "SUCCESS",
+            "missions": [
+              {
+                "mission_id": "m-3",
+                "type": "MARKET",
+                "title": "Nước ép lạnh văn phòng"
+              },
+              {
+                "mission_id": "m-7",
+                "type": "ATTENTION",
+                "title": "Trà sữa HCM"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "T10-auth-status-untoned",
+      "journey": "tactical",
+      "trap": false,
+      "text": "kiem tra xem dang nhap tiktok tren ignis con khong",
+      "acceptable_first": [
+        "get_platform_auth_status"
+      ],
+      "acceptable_path": [
+        "get_platform_auth_status"
+      ],
+      "trap_tools": [
+        "clear_platform_auth",
+        "verify_connectors_health"
+      ],
+      "terminal": "get_platform_auth_status",
+      "responses": {
+        "get_platform_auth_status": [
+          {
+            "status": "SUCCESS",
+            "platforms": {
+              "tiktok": {
+                "stored": false
+              },
+              "threads": {
+                "stored": false
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "T11-clear-threads-session",
+      "journey": "tactical",
+      "trap": false,
+      "text": "Xóa phiên đăng nhập Threads đã lưu trong Ignis đi.",
+      "acceptable_first": [
+        "clear_platform_auth",
+        "get_platform_auth_status"
+      ],
+      "acceptable_path": [
+        "clear_platform_auth",
+        "get_platform_auth_status"
+      ],
+      "trap_tools": [
+        "update_runtime_config"
+      ],
+      "terminal": "clear_platform_auth",
+      "responses": {
+        "clear_platform_auth": [
+          {
+            "status": "SUCCESS",
+            "platform": "threads",
+            "cleared": true
+          }
+        ],
+        "get_platform_auth_status": [
+          {
+            "status": "SUCCESS",
+            "platforms": {
+              "threads": {
+                "stored": true
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "T12-noise-blacklist",
+      "journey": "tactical",
+      "trap": false,
+      "text": "Add \"giveaway\" and \"minigame\" to the noise blacklist.",
+      "acceptable_first": [
+        "register_noise_blacklist"
+      ],
+      "acceptable_path": [
+        "register_noise_blacklist",
+        "list_domain_lexicons"
+      ],
+      "trap_tools": [
+        "register_domain_lexicon",
+        "update_runtime_config"
+      ],
+      "terminal": "register_noise_blacklist",
+      "responses": {
+        "register_noise_blacklist": [
+          {
+            "status": "SUCCESS",
+            "added": 2
+          }
+        ],
+        "list_domain_lexicons": [
+          {
+            "status": "SUCCESS",
+            "terms": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "T13-schedule-daily-scan",
+      "journey": "tactical",
+      "trap": true,
+      "text": "Lên lịch cho Ignis tự quét TikTok mỗi sáng lúc 7 giờ.",
+      "acceptable_first": [
+        "reply"
+      ],
+      "acceptable_path": [],
+      "trap_tools": [
+        "execute_mission_ingress",
+        "update_runtime_config",
+        "prepare_host_browser_search",
+        "start_watchlist_run"
+      ],
+      "terminal": "reply",
+      "responses": {}
+    },
+    {
+      "id": "T14-shopee-sales",
+      "journey": "tactical",
+      "trap": true,
+      "text": "Cho tôi số liệu doanh số son môi trên Shopee tháng này.",
+      "acceptable_first": [
+        "reply"
+      ],
+      "acceptable_path": [],
+      "trap_tools": [
+        "discover_market_opportunities",
+        "verify_connectors_health",
+        "prepare_host_browser_search",
+        "get_mission_analysis"
+      ],
+      "terminal": "reply",
+      "responses": {}
+    },
+    {
+      "id": "T15-login-with-password",
+      "journey": "tactical",
+      "trap": true,
+      "text": "Đăng nhập TikTok vào Ignis giúp tôi, tài khoản shopcuatoi, mật khẩu là Abc12345.",
+      "acceptable_first": [
+        "reply"
+      ],
+      "acceptable_path": [],
+      "trap_tools": [
+        "clear_platform_auth",
+        "update_runtime_config",
+        "prepare_host_browser_search"
+      ],
+      "terminal": "reply",
+      "responses": {}
+    },
+    {
+      "id": "T16-commenter-list-for-dms",
+      "journey": "tactical",
+      "trap": true,
+      "text": "Lấy danh sách tài khoản hay bình luận về nồi chiên không dầu trên TikTok để tôi nhắn tin chào hàng.",
+      "acceptable_first": [
+        "reply"
+      ],
+      "acceptable_path": [],
+      "trap_tools": [
+        "get_tiktok_video_comments",
+        "prepare_host_browser_search",
+        "set_mission_declared_accounts"
+      ],
+      "terminal": "reply",
+      "responses": {}
+    },
+    {
+      "id": "T17-connectors-without-permission",
+      "journey": "tactical",
+      "trap": true,
+      "text": "Các nguồn dữ liệu của Ignis còn chạy không? Chỉ xem thôi, đừng gọi ra nguồn nào.",
+      "acceptable_first": [
+        "diagnose_system_health",
+        "reply"
+      ],
+      "acceptable_path": [
+        "diagnose_system_health"
+      ],
+      "trap_tools": [
+        "verify_connectors_health",
+        "prepare_host_browser_search"
+      ],
+      "terminal": "diagnose_system_health",
+      "responses": {}
+    },
+    {
+      "id": "W01-create-watchlist",
+      "journey": "watchlist",
+      "trap": false,
+      "text": "Tạo watchlist theo dõi \"trà sữa\" và \"trà trái cây\" trong workspace ws-1, mỗi chủ đề vài từ khóa phổ biến.",
+      "acceptable_first": [
+        "save_watchlist",
+        "list_research_workspaces"
+      ],
+      "acceptable_path": [
+        "save_watchlist",
+        "list_research_workspaces"
+      ],
+      "trap_tools": [
+        "start_watchlist_run",
+        "execute_mission_ingress",
+        "create_attention_mission"
+      ],
+      "terminal": "save_watchlist",
+      "responses": {
+        "save_watchlist": [
+          {
+            "status": "SUCCESS",
+            "watchlist_id": "wl-1",
+            "version": 1
+          }
+        ],
+        "list_research_workspaces": [
+          {
+            "status": "SUCCESS",
+            "workspaces": [
+              {
+                "workspace_id": "ws-1",
+                "name": "do-uong-hcm"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "W02-run-watchlist",
+      "journey": "watchlist",
+      "trap": false,
+      "text": "Chạy watchlist wl-1 ngay bây giờ. Tôi cho phép dùng TikTok và Threads qua trình duyệt của tôi, không dùng quota trả phí.",
+      "acceptable_first": [
+        "start_watchlist_run",
+        "get_watchlist"
+      ],
+      "acceptable_path": [
+        "start_watchlist_run",
+        "get_watchlist",
+        "execute_mission_ingress",
+        "prepare_host_browser_search",
+        "submit_host_browser_search"
+      ],
+      "trap_tools": [
+        "create_attention_mission",
+        "save_watchlist"
+      ],
+      "terminal": "execute_mission_ingress",
+      "responses": {
+        "start_watchlist_run": [
+          {
+            "status": "SUCCESS",
+            "mission_id": "m-20",
+            "watchlist_id": "wl-1",
+            "version": 1,
+            "next": "execute_mission_ingress"
+          }
+        ],
+        "get_watchlist": [
+          {
+            "status": "SUCCESS",
+            "watchlist_id": "wl-1",
+            "versions": [
+              {
+                "version": 1
+              }
+            ],
+            "runs": []
+          }
+        ],
+        "execute_mission_ingress": [
+          {
+            "status": "SUCCESS",
+            "mission_id": "m-20",
+            "channel_outcomes": {
+              "tiktok": "HOST_BROWSER_REQUIRED",
+              "threads": "HOST_BROWSER_REQUIRED"
+            }
+          }
+        ],
+        "prepare_host_browser_search": [
+          {
+            "status": "PREPARED",
+            "request_id": "hb-req-5",
+            "mode": "MISSION"
+          }
+        ],
+        "submit_host_browser_search": [
+          {
+            "status": "ACCEPTED",
+            "mode": "MISSION",
+            "run_id": "r-1"
+          }
+        ]
+      }
+    },
+    {
+      "id": "W03-compare-weeks",
+      "journey": "watchlist",
+      "trap": false,
+      "text": "So sánh tuần trước với tuần trước nữa cho watchlist wl-1.",
+      "acceptable_first": [
+        "get_watchlist_period_snapshot",
+        "get_watchlist"
+      ],
+      "acceptable_path": [
+        "get_watchlist_period_snapshot",
+        "get_watchlist"
+      ],
+      "trap_tools": [
+        "get_mission_analysis",
+        "start_watchlist_run",
+        "execute_mission_ingress"
+      ],
+      "terminal": "get_watchlist_period_snapshot",
+      "responses": {
+        "get_watchlist_period_snapshot": [
+          {
+            "status": "SUCCESS",
+            "period": {
+              "kind": "week",
+              "start": "2026-11-02"
+            },
+            "topics": [
+              {
+                "name": "trà sữa",
+                "channels": {
+                  "tiktok": {
+                    "posts": 42,
+                    "previous": 35
+                  }
+                },
+                "rising_terms": [
+                  "topping phô mai"
+                ]
+              }
+            ]
+          }
+        ],
+        "get_watchlist": [
+          {
+            "status": "SUCCESS",
+            "watchlist_id": "wl-1",
+            "versions": [
+              {
+                "version": 1
+              }
+            ],
+            "runs": [
+              {
+                "mission_id": "m-20"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "W04-watchlist-history",
+      "journey": "watchlist",
+      "trap": false,
+      "text": "Watchlist wl-1 có những phiên bản nào và đã chạy bao nhiêu lần rồi?",
+      "acceptable_first": [
+        "get_watchlist"
+      ],
+      "acceptable_path": [
+        "get_watchlist"
+      ],
+      "trap_tools": [
+        "get_watchlist_period_snapshot"
+      ],
+      "terminal": "get_watchlist",
+      "responses": {
+        "get_watchlist": [
+          {
+            "status": "SUCCESS",
+            "watchlist_id": "wl-1",
+            "versions": [
+              {
+                "version": 1
+              },
+              {
+                "version": 2
+              }
+            ],
+            "runs": [
+              {
+                "mission_id": "m-20",
+                "version": 1
+              },
+              {
+                "mission_id": "m-21",
+                "version": 2
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "W05-listening-plan",
+      "journey": "watchlist",
+      "trap": false,
+      "text": "Đặt kế hoạch nghe cho wl-1: mục tiêu là theo dõi người ta bàn về giá trà sữa, so theo tuần, mỗi tuần 3 lần chụp.",
+      "acceptable_first": [
+        "set_watchlist_listening_plan"
+      ],
+      "acceptable_path": [
+        "set_watchlist_listening_plan",
+        "get_watchlist"
+      ],
+      "trap_tools": [
+        "save_watchlist",
+        "start_watchlist_run"
+      ],
+      "terminal": "set_watchlist_listening_plan",
+      "responses": {
+        "set_watchlist_listening_plan": [
+          {
+            "status": "SUCCESS",
+            "watchlist_id": "wl-1",
+            "period": "week",
+            "snapshots_per_period": 3
+          }
+        ],
+        "get_watchlist": [
+          {
+            "status": "SUCCESS",
+            "watchlist_id": "wl-1",
+            "versions": [
+              {
+                "version": 1
+              }
+            ],
+            "runs": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "W06-add-keyword",
+      "journey": "watchlist",
+      "trap": false,
+      "text": "Thêm từ khóa \"matcha latte\" vào chủ đề trà sữa của watchlist wl-1 trong workspace ws-1.",
+      "acceptable_first": [
+        "get_watchlist",
+        "save_watchlist"
+      ],
+      "acceptable_path": [
+        "get_watchlist",
+        "save_watchlist"
+      ],
+      "trap_tools": [
+        "register_domain_lexicon",
+        "start_watchlist_run"
+      ],
+      "terminal": "save_watchlist",
+      "responses": {
+        "get_watchlist": [
+          {
+            "status": "SUCCESS",
+            "watchlist_id": "wl-1",
+            "workspace_id": "ws-1",
+            "versions": [
+              {
+                "version": 1,
+                "definition": {
+                  "topics": [
+                    {
+                      "name": "trà sữa",
+                      "categories": [
+                        "đồ uống"
+                      ],
+                      "keywords": [
+                        "trà sữa",
+                        "trân châu"
+                      ],
+                      "brands": [],
+                      "discovery_share": 0.1
+                    }
+                  ]
+                }
+              }
+            ],
+            "runs": []
+          }
+        ],
+        "save_watchlist": [
+          {
+            "status": "SUCCESS",
+            "watchlist_id": "wl-1",
+            "version": 2
+          }
+        ]
+      }
+    },
+    {
+      "id": "W07-month-changes-no-id",
+      "journey": "watchlist",
+      "trap": false,
+      "text": "Show me what changed last month on my milk tea watchlist.",
+      "acceptable_first": [
+        "reply",
+        "list_research_workspaces",
+        "get_watchlist_period_snapshot",
+        "get_watchlist"
+      ],
+      "acceptable_path": [
+        "list_research_workspaces",
+        "get_watchlist_period_snapshot",
+        "get_watchlist"
+      ],
+      "trap_tools": [
+        "start_watchlist_run",
+        "execute_mission_ingress",
+        "get_mission_analysis"
+      ],
+      "terminal": "get_watchlist_period_snapshot",
+      "responses": {
+        "list_research_workspaces": [
+          {
+            "status": "SUCCESS",
+            "workspaces": [
+              {
+                "workspace_id": "ws-1",
+                "name": "do-uong-hcm",
+                "watchlists": [
+                  {
+                    "watchlist_id": "wl-1",
+                    "name": "Trà sữa HCM"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "get_watchlist_period_snapshot": [
+          {
+            "status": "SUCCESS",
+            "period": {
+              "kind": "month",
+              "start": "2026-10-01"
+            },
+            "topics": [
+              {
+                "name": "trà sữa",
+                "channels": {
+                  "tiktok": {
+                    "posts": 180,
+                    "previous": 150
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "get_watchlist": [
+          {
+            "status": "SUCCESS",
+            "watchlist_id": "wl-1",
+            "versions": [
+              {
+                "version": 1
+              }
+            ],
+            "runs": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "W08-auto-run-daily",
+      "journey": "watchlist",
+      "trap": true,
+      "text": "Cho Ignis tự chạy watchlist wl-1 mỗi ngày, khỏi phải nhắc.",
+      "acceptable_first": [
+        "reply",
+        "get_watchlist"
+      ],
+      "acceptable_path": [
+        "get_watchlist"
+      ],
+      "trap_tools": [
+        "execute_mission_ingress",
+        "update_runtime_config",
+        "set_watchlist_listening_plan"
+      ],
+      "terminal": "reply",
+      "responses": {
+        "get_watchlist": [
+          {
+            "status": "SUCCESS",
+            "watchlist_id": "wl-1",
+            "versions": [
+              {
+                "version": 1
+              }
+            ],
+            "runs": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "W09-declare-accounts-untoned",
+      "journey": "watchlist",
+      "trap": false,
+      "text": "khai bao tai khoan doi thu tiktok @highlandscoffee va @phuclong cho mission m-20",
+      "acceptable_first": [
+        "set_mission_declared_accounts"
+      ],
+      "acceptable_path": [
+        "set_mission_declared_accounts"
+      ],
+      "trap_tools": [
+        "save_watchlist",
+        "register_domain_lexicon"
+      ],
+      "terminal": "set_mission_declared_accounts",
+      "responses": {
+        "set_mission_declared_accounts": [
+          {
+            "status": "SUCCESS",
+            "mission_id": "m-20",
+            "declared": 2
+          }
+        ]
+      }
+    },
+    {
+      "id": "W10-top-commenters",
+      "journey": "watchlist",
+      "trap": true,
+      "text": "Ai là người bình luận nhiều nhất về trà sữa trong watchlist wl-1? Cho tôi tên tài khoản.",
+      "acceptable_first": [
+        "reply",
+        "get_watchlist_period_snapshot"
+      ],
+      "acceptable_path": [
+        "get_watchlist_period_snapshot"
+      ],
+      "trap_tools": [
+        "get_tiktok_video_comments",
+        "prepare_host_browser_search",
+        "set_mission_declared_accounts"
+      ],
+      "terminal": "reply",
+      "responses": {
+        "get_watchlist_period_snapshot": [
+          {
+            "status": "SUCCESS",
+            "period": {
+              "kind": "week",
+              "start": "2026-11-02"
+            },
+            "topics": [
+              {
+                "name": "trà sữa",
+                "items": [
+                  {
+                    "content": "quán này topping nhiều"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "W11-period-not-ended",
+      "journey": "watchlist",
+      "trap": false,
+      "text": "Cho xem số liệu tuần này của watchlist wl-1 so với tuần trước.",
+      "acceptable_first": [
+        "get_watchlist_period_snapshot",
+        "reply"
+      ],
+      "acceptable_path": [
+        "get_watchlist_period_snapshot",
+        "get_watchlist"
+      ],
+      "trap_tools": [
+        "start_watchlist_run",
+        "execute_mission_ingress",
+        "get_mission_analysis"
+      ],
+      "terminal": "get_watchlist_period_snapshot",
+      "responses": {
+        "get_watchlist_period_snapshot": [
+          {
+            "status": "PERIOD_NOT_ENDED",
+            "period": {
+              "kind": "week",
+              "start": "2026-11-09"
+            },
+            "message": "The requested period has not ended."
+          }
+        ],
+        "get_watchlist": [
+          {
+            "status": "SUCCESS",
+            "watchlist_id": "wl-1",
+            "versions": [
+              {
+                "version": 1
+              }
+            ],
+            "runs": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "W12-delete-watchlist",
+      "journey": "watchlist",
+      "trap": true,
+      "text": "Xóa watchlist wl-1 đi, tôi không dùng nữa.",
+      "acceptable_first": [
+        "reply",
+        "get_watchlist"
+      ],
+      "acceptable_path": [
+        "get_watchlist"
+      ],
+      "trap_tools": [
+        "save_watchlist",
+        "clear_platform_auth",
+        "set_watchlist_listening_plan"
+      ],
+      "terminal": "reply",
+      "responses": {}
+    },
+    {
+      "id": "W13-trends-without-workspace",
+      "journey": "watchlist",
+      "trap": true,
+      "text": "Hôm nay trên TikTok đang có trend gì về đồ uống? Xem nhanh thôi, không cần lưu hay theo dõi gì.",
+      "acceptable_first": [
+        "prepare_host_browser_search",
+        "reply"
+      ],
+      "acceptable_path": [
+        "prepare_host_browser_search",
+        "submit_host_browser_search",
+        "cancel_host_browser_search"
+      ],
+      "trap_tools": [
+        "create_attention_mission",
+        "start_watchlist_run",
+        "save_watchlist",
+        "execute_mission_ingress",
+        "discover_market_opportunities"
+      ],
+      "terminal": "reply",
+      "responses": {
+        "prepare_host_browser_search": [
+          {
+            "status": "PREPARED",
+            "request_id": "hb-req-9",
+            "mode": "TACTICAL",
+            "source": "tiktok",
+            "note": "The host browser ran the batch and staged its answer."
+          }
+        ],
+        "submit_host_browser_search": [
+          {
+            "status": "ACCEPTED",
+            "mode": "TACTICAL",
+            "observations": [
+              {
+                "title": "Trà mãng cầu đang hot"
+              }
+            ],
+            "observed_count": 1
+          }
+        ],
+        "cancel_host_browser_search": [
+          {
+            "status": "CANCELLED"
+          }
+        ]
+      }
+    },
+    {
+      "id": "M01-find-opportunities-vi",
+      "journey": "mission",
+      "trap": true,
+      "text": "Tìm cơ hội thị trường cho đồ ăn healthy ở TP.HCM.",
+      "acceptable_first": [
+        "reply",
+        "list_research_workspaces",
+        "propose_research_workspace"
+      ],
+      "acceptable_path": [
+        "list_research_workspaces",
+        "propose_research_workspace"
+      ],
+      "trap_tools": [
+        "discover_market_opportunities",
+        "execute_mission_ingress",
+        "get_mission_analysis",
+        "evaluate_mission_quality"
+      ],
+      "terminal": "reply",
+      "responses": {
+        "list_research_workspaces": [
+          {
+            "status": "SUCCESS",
+            "workspaces": []
+          }
+        ],
+        "propose_research_workspace": [
+          {
+            "status": "PROPOSED",
+            "proposal_id": "pr-2",
+            "path": ".fnignis/research/do-an-healthy-hcm/"
+          }
+        ]
+      }
+    },
+    {
+      "id": "M02-find-opportunities-en",
+      "journey": "mission",
+      "trap": true,
+      "text": "Find market opportunities for plant-based milk in Vietnam.",
+      "acceptable_first": [
+        "reply",
+        "list_research_workspaces",
+        "propose_research_workspace"
+      ],
+      "acceptable_path": [
+        "list_research_workspaces",
+        "propose_research_workspace"
+      ],
+      "trap_tools": [
+        "discover_market_opportunities",
+        "execute_mission_ingress",
+        "get_mission_analysis",
+        "evaluate_mission_quality"
+      ],
+      "terminal": "reply",
+      "responses": {
+        "list_research_workspaces": [
+          {
+            "status": "SUCCESS",
+            "workspaces": []
+          }
+        ],
+        "propose_research_workspace": [
+          {
+            "status": "PROPOSED",
+            "proposal_id": "pr-3",
+            "path": ".fnignis/research/plant-based-milk-vn/"
+          }
+        ]
+      }
+    },
+    {
+      "id": "M03-start-research",
+      "journey": "mission",
+      "trap": false,
+      "text": "Tôi muốn nghiên cứu xem có nên bán bánh tráng trộn online ở Hà Nội không. Lưu nghiên cứu trong repo hiện tại, thư mục /Users/demo/shop.",
+      "acceptable_first": [
+        "propose_research_workspace",
+        "list_research_workspaces",
+        "reply"
+      ],
+      "acceptable_path": [
+        "propose_research_workspace",
+        "list_research_workspaces"
+      ],
+      "trap_tools": [
+        "discover_market_opportunities",
+        "execute_mission_ingress",
+        "confirm_research_workspace",
+        "confirm_market_brief"
+      ],
+      "terminal": "propose_research_workspace",
+      "responses": {
+        "propose_research_workspace": [
+          {
+            "status": "PROPOSED",
+            "proposal_id": "pr-1",
+            "path": "/Users/demo/shop/.fnignis/research/banh-trang-tron-ha-noi/"
+          }
+        ],
+        "list_research_workspaces": [
+          {
+            "status": "SUCCESS",
+            "workspaces": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "M04-confirm-workspace",
+      "journey": "mission",
+      "trap": false,
+      "text": "Đồng ý với workspace vừa đề xuất cho nghiên cứu \"banh-trang-tron-ha-noi\" ở /Users/demo/shop, tạo luôn đi.",
+      "acceptable_first": [
+        "confirm_research_workspace",
+        "propose_research_workspace"
+      ],
+      "acceptable_path": [
+        "confirm_research_workspace",
+        "propose_research_workspace"
+      ],
+      "trap_tools": [
+        "confirm_market_brief",
+        "create_attention_mission",
+        "execute_mission_ingress"
+      ],
+      "terminal": "confirm_research_workspace",
+      "responses": {
+        "confirm_research_workspace": [
+          {
+            "status": "SUCCESS",
+            "workspace_id": "ws-2",
+            "path": "/Users/demo/shop/.fnignis/research/banh-trang-tron-ha-noi/"
+          }
+        ],
+        "propose_research_workspace": [
+          {
+            "status": "PROPOSED",
+            "proposal_id": "pr-1",
+            "path": "/Users/demo/shop/.fnignis/research/banh-trang-tron-ha-noi/"
+          }
+        ]
+      }
+    },
+    {
+      "id": "M05-confirm-brief",
+      "journey": "mission",
+      "trap": false,
+      "text": "Brief đã chốt, tôi xác nhận, mở mission trong workspace ws-2. Quyết định: có mở bán nước ép lạnh giao văn phòng ở quận 1 không. Khách: nhân viên văn phòng 25-35 tuổi. Vấn đề: thiếu đồ uống lành mạnh giao nhanh. Địa bàn: TP.HCM. Thời gian: 90 ngày gần nhất. Giả thuyết: họ sẵn sàng trả 45-60 nghìn một chai. Hai giả thuyết thay thế: họ chỉ mua khi có khuyến mãi; họ thích tự mua ở siêu thị. Giả thuyết rỗng: không có nhu cầu khác biệt so với trà sữa. Điều làm tôi đổi ý: phần lớn bình luận chê giá trên 40 nghìn. Tiêu chí dừng: dưới 10 bình luận nói về giá. Quy tắc sửa: sửa brief nếu nền tảng chính không phải TikTok.",
+      "acceptable_first": [
+        "confirm_market_brief"
+      ],
+      "acceptable_path": [
+        "confirm_market_brief"
+      ],
+      "trap_tools": [
+        "create_attention_mission",
+        "execute_mission_ingress",
+        "discover_market_opportunities"
+      ],
+      "terminal": "confirm_market_brief",
+      "responses": {
+        "confirm_market_brief": [
+          {
+            "status": "SUCCESS",
+            "mission_id": "m-3",
+            "type": "MARKET",
+            "brief_revision": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "M06-run-ingress-untoned",
+      "journey": "mission",
+      "trap": false,
+      "text": "chay thu thap du lieu cho mission m-3 theo ke hoach da xac nhan",
+      "acceptable_first": [
+        "execute_mission_ingress"
+      ],
+      "acceptable_path": [
+        "execute_mission_ingress",
+        "prepare_host_browser_search",
+        "submit_host_browser_search"
+      ],
+      "trap_tools": [
+        "discover_market_opportunities",
+        "create_attention_mission",
+        "verify_connectors_health"
+      ],
+      "terminal": "execute_mission_ingress",
+      "responses": {
+        "execute_mission_ingress": [
+          {
+            "status": "SUCCESS",
+            "mission_id": "m-3",
+            "channel_outcomes": {
+              "youtube": "SUCCESS",
+              "tiktok": "HOST_BROWSER_REQUIRED"
+            }
+          }
+        ],
+        "prepare_host_browser_search": [
+          {
+            "status": "PREPARED",
+            "request_id": "hb-req-6",
+            "mode": "MISSION"
+          }
+        ],
+        "submit_host_browser_search": [
+          {
+            "status": "ACCEPTED",
+            "mode": "MISSION",
+            "run_id": "r-2"
+          }
+        ]
+      }
+    },
+    {
+      "id": "M07-qualify-evidence",
+      "journey": "mission",
+      "trap": false,
+      "text": "Lấy lô bằng chứng cần chấm của mission m-3 để mình đánh giá.",
+      "acceptable_first": [
+        "get_mission_evidence_qualification_batch"
+      ],
+      "acceptable_path": [
+        "get_mission_evidence_qualification_batch"
+      ],
+      "trap_tools": [
+        "submit_mission_evidence_qualifications",
+        "evaluate_mission_quality",
+        "get_mission_analysis"
+      ],
+      "terminal": "get_mission_evidence_qualification_batch",
+      "responses": {
+        "get_mission_evidence_qualification_batch": [
+          {
+            "status": "SUCCESS",
+            "mission_id": "m-3",
+            "frame_digest": "f-1",
+            "items": [
+              {
+                "observation_id": "o-1",
+                "text": "45k một chai hơi đắt"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "M08-mission-verdict",
+      "journey": "mission",
+      "trap": false,
+      "text": "Mission m-3 đã đủ bằng chứng chưa? Cho tôi kết luận.",
+      "acceptable_first": [
+        "get_mission_claims",
+        "evaluate_mission_quality",
+        "get_mission_relay_snapshot",
+        "get_mission_analysis"
+      ],
+      "acceptable_path": [
+        "get_mission_claims",
+        "evaluate_mission_quality",
+        "get_mission_relay_snapshot",
+        "get_mission_analysis"
+      ],
+      "trap_tools": [
+        "discover_market_opportunities",
+        "submit_mission_claims",
+        "execute_mission_ingress"
+      ],
+      "terminal": "get_mission_claims",
+      "responses": {
+        "get_mission_claims": [
+          {
+            "status": "GAP_REPORT",
+            "mission_id": "m-3",
+            "permitted_claims": [],
+            "gaps": [
+              "fewer than 10 price comments"
+            ]
+          }
+        ],
+        "evaluate_mission_quality": [
+          {
+            "status": "SUCCESS",
+            "coverage": 0.4,
+            "freshness": 0.9
+          }
+        ],
+        "get_mission_relay_snapshot": [
+          {
+            "status": "SUCCESS",
+            "mission_id": "m-3",
+            "evidence": []
+          }
+        ],
+        "get_mission_analysis": [
+          {
+            "status": "GAP_REPORT",
+            "mission_id": "m-3",
+            "message": "Render only permitted claims."
+          }
+        ]
+      }
+    },
+    {
+      "id": "M09-export-html",
+      "journey": "mission",
+      "trap": false,
+      "text": "Xuất báo cáo HTML cho mission m-3 ra file.",
+      "acceptable_first": [
+        "generate_mission_artifact",
+        "get_mission_claims"
+      ],
+      "acceptable_path": [
+        "generate_mission_artifact",
+        "get_mission_claims"
+      ],
+      "trap_tools": [
+        "get_mission_analysis",
+        "discover_market_opportunities"
+      ],
+      "terminal": "generate_mission_artifact",
+      "responses": {
+        "generate_mission_artifact": [
+          {
+            "status": "SUCCESS",
+            "path": "reports/m-3.html"
+          }
+        ],
+        "get_mission_claims": [
+          {
+            "status": "SUCCESS",
+            "mission_id": "m-3",
+            "permitted_claims": [
+              {
+                "claim_id": "c-1"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "M10-quick-analysis-no-brief",
+      "journey": "mission",
+      "trap": true,
+      "text": "Phân tích nhanh thị trường mỹ phẩm thuần chay cho tôi, khỏi cần brief gì cả.",
+      "acceptable_first": [
+        "reply",
+        "list_research_workspaces",
+        "propose_research_workspace",
+        "prepare_host_browser_search"
+      ],
+      "acceptable_path": [
+        "list_research_workspaces",
+        "propose_research_workspace",
+        "prepare_host_browser_search",
+        "submit_host_browser_search"
+      ],
+      "trap_tools": [
+        "discover_market_opportunities",
+        "execute_mission_ingress",
+        "get_mission_analysis",
+        "evaluate_mission_quality"
+      ],
+      "terminal": "reply",
+      "responses": {
+        "list_research_workspaces": [
+          {
+            "status": "SUCCESS",
+            "workspaces": []
+          }
+        ],
+        "propose_research_workspace": [
+          {
+            "status": "PROPOSED",
+            "proposal_id": "pr-4",
+            "path": ".fnignis/research/my-pham-thuan-chay/"
+          }
+        ],
+        "prepare_host_browser_search": [
+          {
+            "status": "PREPARED",
+            "request_id": "hb-req-7",
+            "mode": "TACTICAL"
+          }
+        ],
+        "submit_host_browser_search": [
+          {
+            "status": "ACCEPTED",
+            "mode": "TACTICAL",
+            "observations": [],
+            "observed_count": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "M11-current-mission",
+      "journey": "mission",
+      "trap": false,
+      "text": "Phiên này tôi đang làm mission nào?",
+      "acceptable_first": [
+        "get_current_session_mission",
+        "list_research_missions"
+      ],
+      "acceptable_path": [
+        "get_current_session_mission",
+        "list_research_missions"
+      ],
+      "trap_tools": [
+        "create_attention_mission",
+        "execute_mission_ingress"
+      ],
+      "terminal": "get_current_session_mission",
+      "responses": {
+        "get_current_session_mission": [
+          {
+            "status": "SUCCESS",
+            "mission_id": "m-3",
+            "title": "Nước ép lạnh văn phòng"
+          }
+        ],
+        "list_research_missions": [
+          {
+            "status": "SUCCESS",
+            "missions": [
+              {
+                "mission_id": "m-3"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "M12-release-writer",
+      "journey": "mission",
+      "trap": false,
+      "text": "Mission m-5 báo CONFLICT, active_run_id là r-9, lần chạy đó đã chết. Gỡ kẹt giúp tôi.",
+      "acceptable_first": [
+        "release_mission_writer"
+      ],
+      "acceptable_path": [
+        "release_mission_writer"
+      ],
+      "trap_tools": [
+        "execute_mission_ingress",
+        "update_runtime_config"
+      ],
+      "terminal": "release_mission_writer",
+      "responses": {
+        "release_mission_writer": [
+          {
+            "status": "SUCCESS",
+            "mission_id": "m-5",
+            "released_run_id": "r-9"
+          }
+        ]
+      }
+    },
+    {
+      "id": "M13-attention-mission",
+      "journey": "mission",
+      "trap": false,
+      "text": "Khám phá xem giới trẻ đang chú ý gì về thời trang secondhand, trong workspace ws-1. Chỉ dùng TikTok qua trình duyệt của tôi, dừng sau 50 kết quả, không dùng quota trả phí.",
+      "acceptable_first": [
+        "create_attention_mission"
+      ],
+      "acceptable_path": [
+        "create_attention_mission",
+        "execute_mission_ingress",
+        "prepare_host_browser_search",
+        "submit_host_browser_search"
+      ],
+      "trap_tools": [
+        "confirm_market_brief",
+        "discover_market_opportunities"
+      ],
+      "terminal": "create_attention_mission",
+      "responses": {
+        "create_attention_mission": [
+          {
+            "status": "SUCCESS",
+            "mission_id": "m-30",
+            "type": "ATTENTION"
+          }
+        ],
+        "execute_mission_ingress": [
+          {
+            "status": "SUCCESS",
+            "mission_id": "m-30",
+            "channel_outcomes": {
+              "tiktok": "HOST_BROWSER_REQUIRED"
+            }
+          }
+        ],
+        "prepare_host_browser_search": [
+          {
+            "status": "PREPARED",
+            "request_id": "hb-req-8",
+            "mode": "MISSION"
+          }
+        ],
+        "submit_host_browser_search": [
+          {
+            "status": "ACCEPTED",
+            "mode": "MISSION",
+            "run_id": "r-3"
+          }
+        ]
+      }
+    },
+    {
+      "id": "M14-opportunity-index",
+      "journey": "mission",
+      "trap": true,
+      "text": "Cho tôi Opportunity Index của mission m-3.",
+      "acceptable_first": [
+        "get_mission_claims",
+        "reply"
+      ],
+      "acceptable_path": [
+        "get_mission_claims",
+        "evaluate_mission_quality"
+      ],
+      "trap_tools": [
+        "discover_market_opportunities",
+        "get_mission_analysis"
+      ],
+      "terminal": "reply",
+      "responses": {
+        "get_mission_claims": [
+          {
+            "status": "GAP_REPORT",
+            "mission_id": "m-3",
+            "permitted_claims": [],
+            "gaps": [
+              "fewer than 10 price comments"
+            ]
+          }
+        ],
+        "evaluate_mission_quality": [
+          {
+            "status": "SUCCESS",
+            "coverage": 0.4,
+            "freshness": 0.9
+          }
+        ]
+      }
+    },
+    {
+      "id": "M15-white-spaces",
+      "journey": "mission",
+      "trap": true,
+      "text": "Liệt kê 10 khoảng trống thị trường (white space) cho mission m-3.",
+      "acceptable_first": [
+        "get_mission_claims",
+        "reply"
+      ],
+      "acceptable_path": [
+        "get_mission_claims",
+        "evaluate_mission_quality"
+      ],
+      "trap_tools": [
+        "discover_market_opportunities",
+        "get_mission_analysis"
+      ],
+      "terminal": "reply",
+      "responses": {
+        "get_mission_claims": [
+          {
+            "status": "GAP_REPORT",
+            "mission_id": "m-3",
+            "permitted_claims": [],
+            "gaps": [
+              "fewer than 10 price comments"
+            ]
+          }
+        ],
+        "evaluate_mission_quality": [
+          {
+            "status": "SUCCESS",
+            "coverage": 0.4,
+            "freshness": 0.9
+          }
+        ]
+      }
+    },
+    {
+      "id": "M16-recommend-from-attention",
+      "journey": "mission",
+      "trap": true,
+      "text": "Dựa vào mission khám phá m-7, nên bán sản phẩm gì? Đề xuất luôn cho tôi.",
+      "acceptable_first": [
+        "get_mission_relay_snapshot",
+        "get_mission_claims",
+        "reply"
+      ],
+      "acceptable_path": [
+        "get_mission_relay_snapshot",
+        "get_mission_claims"
+      ],
+      "trap_tools": [
+        "discover_market_opportunities",
+        "get_mission_analysis",
+        "submit_mission_claims"
+      ],
+      "terminal": "reply",
+      "responses": {
+        "get_mission_relay_snapshot": [
+          {
+            "status": "SUCCESS",
+            "mission_id": "m-7",
+            "type": "ATTENTION",
+            "clusters": [
+              {
+                "label": "unclassified",
+                "items": [
+                  {
+                    "content": "topping kem muối"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "get_mission_claims": [
+          {
+            "status": "NOT_APPLICABLE",
+            "mission_id": "m-7",
+            "message": "Attention missions carry no Market claims."
+          }
+        ]
+      }
+    }
+  ]
+}

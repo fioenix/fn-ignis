@@ -155,6 +155,15 @@ Bề mặt agent:
   thị trường", "xem Threads của tôi"). Chấm độ chính xác của lượt gọi đầu, số lượt gọi sai, số lượt tới trạng
   thái cuối. Dùng `list_tools()` thật với handler giả lập. Hủy nếu kết quả dao động quá 10 điểm giữa các lần
   chạy lặp. Phụ thuộc OWN-5.
+  Cập nhật 13/11/2026: eval đã có ở Spec 028 (`python -m scripts.tool_selection_eval.run`), dùng Claude
+  Code headless. Bộ ý định giờ có 46 ý định, gồm 16 bẫy. Baseline nằm ở
+  `specs/028-tool-selection-eval/baseline.md`, mỗi model chạy 3 lần:
+  - Haiku: mọi chỉ số đều dao động dưới 10 điểm.
+  - Sonnet: lượt đầu dao động 10,9 điểm và lượt đầu trên bẫy dao động 25 điểm, nên vượt ngưỡng.
+  - Tỉ lệ gọi tool bẫy ổn định trên cả hai model (8,7–13%).
+  Cả hai model gần như lần nào cũng gọi `get_mission_analysis` và `discover_market_opportunities` khi
+  được hỏi về Opportunity Index hoặc white space. Đây là bằng chứng cho AGX-2. Chờ chủ sở hữu quyết:
+  có giữ AGX-1 không, và AGX-2 so bằng chỉ số nào.
 - [ ] **AGX-2 — Viết lại các mô tả lỗi thời** (S): `discover_market_opportunities`, `get_mission_analysis`,
   `execute_mission_ingress`, `get_current_session_mission`. Mỗi mô tả nêu điều kiện tiên quyết, các trường hợp
   từ chối và tool nên gọi tiếp. Làm sau baseline AGX-1. Đạt: số lượt gọi đầu sai trên các ý định bẫy giảm ít
