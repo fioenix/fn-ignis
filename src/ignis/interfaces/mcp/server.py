@@ -2827,7 +2827,7 @@ async def evaluate_mission_quality(mission_id: str) -> str:
     return await handle_evaluate_mission_quality(mission_id)
 
 
-@mcp.tool(name="discover_market_opportunities", description="Despite its name, this tool computes no Opportunity Index, white space or recommendation for a current mission: those exist only as permitted claims, which get_mission_claims returns. It reads one existing mission's evidence-gated view and collects nothing. A MARKET mission needs a confirmed Market Brief (otherwise BLOCKED: call confirm_market_brief) and returns only its permitted Claim Ledger claims, or a Gap Report that withholds any Opportunity Index, white space, demand gap and recommendation. An ATTENTION mission returns no opportunities. Missions created before mission surfaces existed still return scored topics. Not a starting point for a new market question: propose a research workspace and confirm a Market Brief first.")
+@mcp.tool(name="discover_market_opportunities", description="Despite its name, this tool computes no Opportunity Index, white space or recommendation for a current mission: those exist only as permitted claims, which get_mission_claims returns. It reads one existing mission's evidence-gated view and collects nothing. A MARKET mission needs a confirmed Market Brief (otherwise BLOCKED: call confirm_market_brief) and returns mission stats with its permitted Claim Ledger claims, or a Gap Report that withholds any Opportunity Index, white space, demand gap and recommendation. An ATTENTION mission returns no opportunities. Missions created before mission surfaces existed still return scored topics. Not a starting point for a new market question: propose a research workspace and confirm a Market Brief first.")
 async def discover_market_opportunities(mission_id: str) -> str:
     return await handle_discover_market_opportunities(mission_id)
 
@@ -2939,7 +2939,7 @@ async def confirm_market_brief(
     )
 
 
-@mcp.tool(name="execute_mission_ingress", description="Run one confirmed mission's recorded collection plan once: it calls the planned connectors, stores signals and clusters, and records a channel outcome per source. Requires the Mission Manifest's authority and, for a MARKET mission, a confirmed Market Brief. Returns BLOCKED with the missing authority or Brief, TERMINAL for a mission that already finished (open a new mission rather than re-running), and CONFLICT with active_run_id while another run holds the writer slot (see release_mission_writer). Host-browser sources are collected with prepare_host_browser_search in MISSION mode. Run it only on an explicit request; never schedule or repeat it.")
+@mcp.tool(name="execute_mission_ingress", description="Run one confirmed mission's recorded collection plan: it calls the planned connectors, stores signals and clusters, and records a channel outcome per source. Requires the Mission Manifest's authority and, for a MARKET mission, a confirmed Market Brief. Returns BLOCKED with the missing authority or Brief (the mission is then marked blocked, so open a new mission once it is fixed), TERMINAL for a mission that already finished, and CONFLICT with active_run_id while another run holds the writer slot (see release_mission_writer). Host-browser sources are collected with prepare_host_browser_search in MISSION mode. Call it only on an explicit request (a host-scheduled watchlist firing counts as one); Ignis never schedules it.")
 async def execute_mission_ingress(mission_id: str) -> str:
     return await handle_execute_mission_ingress(mission_id)
 
@@ -3091,7 +3091,7 @@ async def get_watchlist_period_snapshot(
     return await handle_get_watchlist_period_snapshot(watchlist_id, period_kind, period_start)
 
 
-@mcp.tool(name="get_mission_analysis", description="Not the place for an Opportunity Index, white spaces or product recommendations: those exist only as permitted claims, which get_mission_claims returns. Reads one existing mission's evidence for in-chat rendering: mission stats, top signals by engagement (limit 1-50, optional platform filter) and author concentration; collects nothing. A MARKET mission needs a confirmed Market Brief (otherwise BLOCKED) and adds only its permitted Claim Ledger claims or a Gap Report: render nothing beyond them, never an Opportunity Index, white space or action plan the ledger does not permit. An ATTENTION mission returns no opportunities. For an exported HTML file, call generate_mission_artifact.")
+@mcp.tool(name="get_mission_analysis", description="Not the place for an Opportunity Index, white spaces or product recommendations on a current mission: those exist only as permitted claims, which get_mission_claims returns. Reads one existing mission's evidence for in-chat rendering: mission stats, top signals by engagement (limit 1-50, optional platform filter) and author concentration; collects nothing. A MARKET mission needs a confirmed Market Brief (otherwise BLOCKED) and adds only its permitted Claim Ledger claims or a Gap Report: render nothing beyond them. An ATTENTION mission adds a quality scorecard, channel summaries and insights but no opportunities. Missions created before mission surfaces existed still return scored topics with recommendations. For an exported HTML file, call generate_mission_artifact.")
 async def get_mission_analysis(mission_id: str, limit: int = 25, platform: Optional[str] = None) -> str:
     return await handle_get_mission_analysis(mission_id=mission_id, limit=limit, platform=platform)
 
@@ -3159,7 +3159,7 @@ async def get_system_logs(level: Optional[str] = "ERROR", component: Optional[st
     return await handle_get_system_logs(level=level, component=component, limit=limit)
 
 
-@mcp.tool(name="get_current_session_mission", description="Look up one research mission by its mission id or shortcode, passed as session_id; it does not search by session or chat thread. Returns found with the mission's id, shortcode, title, keywords, agent and recorded session_id, or not_found. Read-only. To find a mission without its id, call list_research_missions.")
+@mcp.tool(name="get_current_session_mission", description="Look up one research mission by its mission id or shortcode, passed as session_id. On the default SQLite store it matches only those, not the current session or chat thread. Returns found with the mission's id, shortcode, title, keywords, agent and recorded session_id, or not_found. Read-only. To find a mission without its id, call list_research_missions.")
 async def get_current_session_mission(session_id: str) -> str:
     return await handle_get_current_session_mission(session_id=session_id)
 
@@ -3762,7 +3762,7 @@ async def handle_verify_connectors_health() -> str:
     return json.dumps(diagnostics, ensure_ascii=False, indent=2)
 
 
-@mcp.tool(name="verify_connectors_health", description="Probe every active connector with a live synthetic request, write a sentinel row to the store, and report connector, database and proxy health with alerts. It contacts the real sources and may spend their quota, so call it only when the requester asks to test the connections. For a read-only status check, call diagnose_system_health.")
+@mcp.tool(name="verify_connectors_health", description="Run each active connector's live health check, write a sentinel row to the store and audit alerts for failures, and report connector, database and proxy health. The checks contact real sources and may spend their quota (Threads is reported without a network probe), so call it only when the requester asks to test the connections. For a read-only status check, call diagnose_system_health.")
 async def verify_connectors_health() -> str:
     """Run synthetic diagnostic health checks across all multi-platform connectors, database, and proxy."""
     return await handle_verify_connectors_health()

@@ -31,15 +31,18 @@ Handler behaviour was mapped on 14/11/2026 and spot-checked by hand:
   returns no opportunities. Legacy missions without a surface still return indexed topics.
 - `get_mission_analysis`: read-only; same gates; returns stats, top signals (limit 1–50, optional
   platform) and author concentration; MARKET adds only the Claim Ledger or Gap Report; ATTENTION
-  returns no opportunities.
+  adds a quality scorecard, channel summaries and insights but no opportunities; legacy missions
+  without a surface still return scored topics with recommendations.
 - `execute_mission_ingress`: collects and writes; refuses a terminal mission (`TERMINAL`), missing
   manifest or authority (`BLOCKED`), a MARKET mission without a confirmed Brief (`BLOCKED`) and a held
   writer slot (`CONFLICT` with `active_run_id`, see `release_mission_writer`). Host-browser sources
   run through `prepare_host_browser_search` in MISSION mode.
 - `get_current_session_mission`: `repository.get_mission(session_id)` matches `id` or `shortcode`
-  only (`sqlite_repository.py`, `WHERE id = ? OR shortcode = ?`).
-- `verify_connectors_health`: writes a sentinel cluster to the store and runs each connector's
-  `synthetic_probe`, which contacts live sources.
+  only on SQLite (`WHERE id = ? OR shortcode = ?`); the PostgreSQL repository also matches
+  `session_id` and an id prefix.
+- `verify_connectors_health`: writes a sentinel cluster to the store, writes audit alerts, and calls
+  each connector's `is_healthy()`, which contacts live sources (YouTube reserves quota); Threads is
+  reported without a network probe.
 
 ## Constitution Check
 
