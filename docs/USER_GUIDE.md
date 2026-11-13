@@ -1,6 +1,6 @@
-# Ignis User Guide — v0.10.0
+# Ignis User Guide — v0.11.0
 
-This guide describes v0.10.0 with 41 tools. Published v0.9.0 retains its earlier catalog and
+This guide describes v0.11.0 with 41 tools. Published v0.9.0 retains its earlier catalog and
 source behavior.
 The v0.7.0 release is a historical Dual-Track artifact, not this mission-bound branch.
 
@@ -17,7 +17,7 @@ research task you authorize. Never place a secret in a prompt, command transcrip
 1. Run `./scripts/bootstrap.sh` and restart your MCP client so it loads `ignis-mcp`.
 2. Ask your agent to call `diagnose_system_health` and `verify_connectors_health`. A connector
    reported unavailable stays unavailable until you supply its credential or browser session.
-3. Run one tactical probe: ask for a TikTok or Threads search through your own signed-in Chrome. YouTube
+3. Run one tactical probe: ask for a TikTok, Threads or Instagram search through your own signed-in Chrome. YouTube
    has no tactical search tool; it is collected inside a confirmed mission (see §2). The agent calls
    `prepare_host_browser_search`, opens the local relay page, opens the approved search tab from it,
    runs the returned tab script once in that tab, and calls `submit_host_browser_search`. A tactical
@@ -163,7 +163,7 @@ day, and only after you confirm what will run. Each firing is one watchlist run 
 Create it from a session opened in the research workspace's repository folder, because a firing
 starts in that folder. Before creating it, the agent checks that each channel can collect for your
 workspace: YouTube needs its key in the workspace's own `.fnignis/.env`. This routine runs YouTube only;
-TikTok and Threads require a separately authorized host-browser flow. A routine never runs in a Bypass permission mode, and runs in Auto only if you accept
+TikTok, Threads and Instagram require a separately authorized host-browser flow. A routine never runs in a Bypass permission mode, and runs in Auto only if you accept
 that during setup. Each firing also judges which collected items are on your topics, because the
 period view counts only judged items. Setup ends with a first run you watch; in a mode that asks,
 you approve only `start_watchlist_run`, `execute_mission_ingress`,
@@ -285,7 +285,7 @@ signatures; removed daily-discovery and unguided-research tools are not part of 
 For an existing PostgreSQL database on `035`, apply `036`, `037` and `038` in order as the
 table owner. Without `038`, a MISSION TikTok host-browser search is refused before it starts.
 
-The release workflow builds `ghcr.io/fioenix/fn-ignis:0.10.0` when the `v0.10.0` tag is pushed.
+The release workflow builds `ghcr.io/fioenix/fn-ignis:0.11.0` when the `v0.11.0` tag is pushed.
 The v0.9.0 image still carries the removed tools and the retired sources.
 PyPI publication is not advertised. Run the checkout's
 `.venv/bin/pytest tests/` (the CI scope; PostgreSQL cases skip unless `IGNIS_TEST_POSTGRES_DSN`

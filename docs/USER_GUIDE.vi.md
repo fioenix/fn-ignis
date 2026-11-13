@@ -1,6 +1,6 @@
-# Hướng dẫn sử dụng Ignis — v0.10.0
+# Hướng dẫn sử dụng Ignis — v0.11.0
 
-Tài liệu mô tả bản v0.10.0 với 41 tools. Bản v0.9.0 đã công bố vẫn có danh mục và cách thu
+Tài liệu mô tả bản v0.11.0 với 41 tools. Bản v0.9.0 đã công bố vẫn có danh mục và cách thu
 thập trước thay đổi này.
 Bản v0.7.0 thuộc kiến trúc Dual-Track cũ, không mô tả nhánh theo nhiệm vụ này.
 
@@ -17,7 +17,7 @@ Không đặt bí mật trong prompt, transcript lệnh hay báo cáo.
 1. Chạy `./scripts/bootstrap.sh`, rồi khởi động lại MCP client để nó nạp `ignis-mcp`.
 2. Nhờ agent gọi `diagnose_system_health` và `verify_connectors_health`. Connector nào báo không khả
    dụng thì vẫn không khả dụng cho tới khi bạn cấp credential hoặc phiên browser cho nó.
-3. Chạy thử một probe tactical: nhờ agent tìm trên TikTok hoặc Threads qua chính Chrome đang đăng nhập của bạn.
+3. Chạy thử một probe tactical: nhờ agent tìm trên TikTok, Threads hoặc Instagram qua chính Chrome đang đăng nhập của bạn.
    YouTube không có tool tìm kiếm tactical; nó chỉ được thu trong một nhiệm vụ đã xác nhận (xem mục 2). Agent gọi
    `prepare_host_browser_search`, mở trang relay cục bộ, từ đó mở tab tìm kiếm đã duyệt, chạy một lần tab
    script mà bước prepare trả về trong tab đó, rồi gọi `submit_host_browser_search`. Probe tactical không tạo nhiệm
@@ -168,7 +168,7 @@ ngày, và chỉ được tạo sau khi bạn xác nhận những gì sẽ chạ
 watchlist. Hãy tạo task từ một phiên mở trong thư mục repository của research workspace, vì lần kích
 hoạt bắt đầu trong thư mục đó. Trước khi tạo, agent kiểm tra từng kênh có thu thập được cho
 workspace của bạn không: YouTube cần key trong `.fnignis/.env` riêng của workspace, routine này chỉ chạy YouTube.
-TikTok và Threads cần luồng trình duyệt host được cho phép riêng. Routine không bao giờ chạy ở chế độ quyền Bypass, và chỉ chạy ở
+TikTok, Threads và Instagram cần luồng trình duyệt host được cho phép riêng. Routine không bao giờ chạy ở chế độ quyền Bypass, và chỉ chạy ở
 chế độ Auto khi bạn đồng ý lúc cài đặt. Mỗi lần chạy, agent còn đánh giá xem item nào thu được thuộc
 đúng chủ đề của bạn, vì period view chỉ đếm những item đã được đánh giá. Bước cài đặt kết thúc bằng
 một lần chạy có bạn theo dõi; ở chế độ có hỏi quyền, bạn chỉ duyệt `start_watchlist_run`,
@@ -285,7 +285,7 @@ các tool khám phá hằng ngày và nghiên cứu không giới hạn đã b�
 Với PostgreSQL hiện có ở `035`, áp dụng lần lượt `036`, `037` và `038` bằng tài khoản sở hữu
 bảng. Nếu thiếu `038`, tìm kiếm TikTok qua trình duyệt host ở chế độ MISSION bị từ chối ngay từ đầu.
 
-Workflow phát hành tạo image `ghcr.io/fioenix/fn-ignis:0.10.0` khi tag `v0.10.0` được push.
+Workflow phát hành tạo image `ghcr.io/fioenix/fn-ignis:0.11.0` khi tag `v0.11.0` được push.
 Image v0.9.0 vẫn có các tool đã gỡ và các nguồn đã ngừng.
 Chưa công bố cách cài qua PyPI. Chạy `.venv/bin/pytest tests/` (đúng phạm vi CI; các ca kiểm thử PostgreSQL bị bỏ qua nếu
 `IGNIS_TEST_POSTGRES_DSN` không trỏ tới một database kiểm thử dùng một lần) và `uv lock --check`

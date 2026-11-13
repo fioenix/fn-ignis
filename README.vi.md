@@ -6,9 +6,10 @@ Ignis là bộ công cụ tự lưu trữ để nghiên cứu thị trường t�
 lập: thu thập có thể kết thúc bằng một khung chứng cứ; phân tích có thể kết thúc bằng báo cáo
 thiếu chứng cứ thay vì cố đưa ra kết luận.
 
-**Phạm vi phát hành:** v0.10.0 có 41 tools, ngừng các đường thu thập không còn dùng được, bỏ taxonomy
-ngành và từ vựng thị trường nạp sẵn, với migration tới `040`. Bản v0.9.0 vẫn có các tool đã gỡ; v0.7.0 thuộc
-kiến trúc Dual-Track cũ.
+**Phạm vi phát hành:** v0.11.0 giữ 41 tools, thêm chú thích từ lưới tìm kiếm Instagram vào tìm kiếm qua
+trình duyệt host, mỗi nguồn host có một agent skill riêng, với migration tới `041`. Bản v0.10.0 đã ngừng các
+đường thu thập không còn dùng được và bỏ taxonomy ngành cùng từ vựng thị trường nạp sẵn; v0.9.0 vẫn có các tool
+đã gỡ; v0.7.0 thuộc kiến trúc Dual-Track cũ.
 
 ## Hợp đồng sản phẩm
 
@@ -81,7 +82,7 @@ trước khi 026 chạy. Kiểm chứng chạy lại 026 không đồng nghĩa c
 Với PostgreSQL hiện có ở `035`, áp dụng lần lượt `036`, `037` và `038` bằng tài khoản sở hữu
 bảng. Nếu thiếu `038`, tìm kiếm TikTok qua trình duyệt host ở chế độ MISSION bị từ chối ngay từ đầu.
 
-Workflow phát hành tạo image `ghcr.io/fioenix/fn-ignis:0.10.0` khi tag `v0.10.0` được push.
+Workflow phát hành tạo image `ghcr.io/fioenix/fn-ignis:0.11.0` khi tag `v0.11.0` được push.
 Image v0.9.0 vẫn có các tool đã gỡ và các nguồn đã ngừng. Chưa công bố
 gói PyPI. Lệnh mission được chấp nhận ghi HTML vào `<root>/.fnignis/reports/`; phương án dự phòng
 trong source checkout là `reports/` không được commit. Mã template báo cáo chỉ nằm tại
@@ -115,9 +116,9 @@ chuẩn cho tham số. Một số thao tác đại diện:
   trong Claude Code Desktop để chạy một watchlist; bản thân Ignis vẫn không tự lên lịch việc gì.
 - Tool `get_tiktok_video_comments` có thể trả lời câu hỏi cụ thể mà không cần kết luận thị trường.
 - Ba tool `prepare_host_browser_search`, `submit_host_browser_search` và
-  `cancel_host_browser_search` thu thập lưới TikTok và kết quả Threads Top có giới hạn qua trình duyệt được
-  cho phép. Đây là đường chủ động chọn, không phải phương án tự động dự phòng;
-  xem [phạm vi và giới hạn](docs/USER_GUIDE.vi.md#tìm-kiếm-tiktok-qua-trình-duyệt-host-trên-nhánh-phát-triển).
+  `cancel_host_browser_search` thu thập lưới TikTok, kết quả Threads Top và chú thích từ lưới Instagram có
+  giới hạn qua trình duyệt được cho phép. Đây là đường chủ động chọn, không phải phương án tự động dự phòng;
+  xem [phạm vi và giới hạn](docs/USER_GUIDE.vi.md#tìm-kiếm-qua-trình-duyệt-host-tiktok-threads-instagram).
 - `get_mission_evidence_qualification_batch` và
   `submit_mission_evidence_qualifications` lưu đánh giá chứng cứ.
 - `submit_mission_claims`, `get_mission_claims` và `get_mission_analysis` kiểm soát

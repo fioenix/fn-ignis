@@ -18,7 +18,7 @@ Every step below was run live on 2026-11-11.
 ## Steps
 
 TACTICAL runs one source at a time, steps 1–9 each. A MISSION with several host sources in scope
-(TikTok and Threads) is one run: prepare a sibling ticket per source with the same mission, `host_task_ref`
+(TikTok, Threads, Instagram) is one run: prepare a sibling ticket per source with the same mission, `host_task_ref`
 and `session_ref`, stage every one of them (steps 2–7 per source), and only then submit once (step 8).
 Submitting before every required sibling is `STAGED` returns `BLOCKED` / `HOST_SEARCH_NOT_ACCEPTABLE`.
 
