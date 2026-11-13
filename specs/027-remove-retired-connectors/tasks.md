@@ -18,8 +18,11 @@ Check `research.md` for file:line references before each task; line numbers are 
     `test_public_distribution_contract.py`: those are stored-row or fake-diagnostic data, not plugin code.
 - [x] T003 Narrow SC-004: `.coveragerc.sc004`, `test_t022_coverage_gate.py`, the `ci.yml` comment, and a dated note
   on `specs/001-core-storage-stable-ingress/spec.md` SC-004 (FR-007).
-- [ ] T004 Delete `creative_center_plugin.py`, fix `connectors/tiktok/__init__.py`, delete its tests and cases; keep
+- [x] T004 Delete `creative_center_plugin.py`, fix `connectors/tiktok/__init__.py`, delete its tests and cases; keep
   the old-row read paths (FR-001, FR-005).
+  - Dropped the Creative Center `SRC_NON_ASCII_ALLOWLIST` entry here so the stale-entry test stays green.
+  - Kept the `TikTokCreativeCenterPlugin` and `GoogleTrendsRssPlugin` fixtures and `AUTHOR_FREE_CONNECTORS` in
+    `integration/test_author_identity_conformance.py`: stored-row payload shapes, harmless to the class scan.
 - [ ] T005 Cut `TikTokPlugin` to the live members; `is_healthy` and `fetch_signals` refuse as `ThreadsPlugin` does;
   delete the whole-file tests and retired cases (FR-002, FR-006).
 - [ ] T006 Remove orphans: `browser_support.py`, the Reels/Explore-only `meta_browser_ingress` helpers,

@@ -11,7 +11,6 @@ LAUNCHES = {
     "infrastructure/auth/tiktok_auth.py": {"authenticate_interactive"},
     "infrastructure/connectors/meta_browser_ingress.py": {"collect_json_payloads"},
     "infrastructure/connectors/tiktok/tiktok_plugin.py": {"fetch_suggestions", "fetch_video_comments", "_fetch_via_playwright"},
-    "infrastructure/connectors/tiktok/creative_center_plugin.py": {"fetch_macro_trends"},
 }
 
 
@@ -62,7 +61,7 @@ def test_threads_suggestions_browser_launch_and_relay_projection_are_removed():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("site", ["meta_auth", "tiktok_auth", "meta_capture", "suggestions", "comments", "search", "creative"])
+@pytest.mark.parametrize("site", ["meta_auth", "tiktok_auth", "meta_capture", "suggestions", "comments", "search"])
 async def test_retained_sites_pass_only_original_non_hiding_launch_arguments(monkeypatch, site):
     from unittest.mock import AsyncMock, MagicMock
     from ignis.domain.value_objects import GeoCode
@@ -70,7 +69,6 @@ async def test_retained_sites_pass_only_original_non_hiding_launch_arguments(mon
     from ignis.infrastructure.auth.tiktok_auth import TikTokAuthManager
     from ignis.infrastructure.connectors.meta_browser_ingress import collect_json_payloads
     from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin
-    from ignis.infrastructure.connectors.tiktok.creative_center_plugin import TikTokCreativeCenterPlugin
     import playwright.async_api
     launches = []
     async def launch(**kwargs):
@@ -97,8 +95,6 @@ async def test_retained_sites_pass_only_original_non_hiding_launch_arguments(mon
             await plugin.fetch_video_comments("https://www.tiktok.com/share/video/7417820067028536584")
         elif site == "search":
             await plugin._fetch_via_playwright("https://www.tiktok.com/search?q=synthetic", {}, GeoCode.VN, keyword="synthetic")
-        else:
-            await TikTokCreativeCenterPlugin(auth_manager=auth).fetch_macro_trends()
     try:
         await invoke()
     except Exception as exc:

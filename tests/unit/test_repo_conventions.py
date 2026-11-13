@@ -35,7 +35,6 @@ SRC_NON_ASCII_ALLOWLIST = {
     "ignis/infrastructure/clustering/semantic_clusterer.py",
     # Third-party UI selectors that must match TikTok's rendered text verbatim.
     "ignis/infrastructure/auth/tiktok_auth.py",
-    "ignis/infrastructure/connectors/tiktok/creative_center_plugin.py",
     "ignis/infrastructure/connectors/meta_browser_ingress.py",
 }
 

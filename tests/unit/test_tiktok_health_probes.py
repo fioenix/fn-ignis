@@ -1,6 +1,6 @@
-"""Both TikTok connectors report on what a pass actually needs, not a constant.
+"""The TikTok connector reports on what a pass actually needs, not a constant.
 
-TikTokPlugin.is_healthy and TikTokCreativeCenterPlugin.is_healthy both answered `return True`,
+TikTokPlugin.is_healthy and the retired Creative Center probe both answered `return True`,
 so verify_connectors_health reported them HEALTHY in every circumstance -- on a host with no
 browser installed, with no session, and with TikTok unreachable. Four of six connectors had a
 real probe; these two were a literal.
@@ -11,13 +11,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from ignis.infrastructure.connectors import browser_support
-from ignis.infrastructure.connectors.tiktok import (
-    creative_center_plugin as creative_center_module,
-    tiktok_plugin as tiktok_module,
-)
-from ignis.infrastructure.connectors.tiktok.creative_center_plugin import (
-    TikTokCreativeCenterPlugin,
-)
+from ignis.infrastructure.connectors.tiktok import tiktok_plugin as tiktok_module
 from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin
 
 
@@ -30,22 +24,21 @@ def reset_runtime_cache():
 
 @pytest.fixture
 def plugins():
-    return TikTokPlugin(), TikTokCreativeCenterPlugin()
+    return (TikTokPlugin(),)
 
 
 @pytest.fixture
 def probes(monkeypatch):
     """Replace the two probes in the namespaces that call them.
 
-    Both plugin modules import the helpers by name, so patching browser_support itself leaves
-    their references untouched -- the first version of these tests did that and the patches had
+    The plugin module imports the helpers by name, so patching browser_support itself leaves
+    its references untouched -- the first version of these tests did that and the patches had
     no effect at all.
     """
     launchable = AsyncMock(return_value=True)
     reachable = AsyncMock(return_value=True)
-    for module in (tiktok_module, creative_center_module):
-        monkeypatch.setattr(module, "browser_launch_available", launchable)
-        monkeypatch.setattr(module, "surface_reachable", reachable)
+    monkeypatch.setattr(tiktok_module, "browser_launch_available", launchable)
+    monkeypatch.setattr(tiktok_module, "surface_reachable", reachable)
     return launchable, reachable
 
 
@@ -138,33 +131,6 @@ async def test_the_launchable_answer_is_resolved_once(monkeypatch):
     await browser_support.browser_launch_available()
 
     assert len(calls) == 1
-
-
-@pytest.mark.asyncio
-async def test_the_creative_center_probe_follows_redirects():
-    """Its entry URL answers 301 and lands elsewhere, so refusing redirects would report broken.
-
-    Verified against the live surface on 10/09/2026: 301 to
-    ads.tiktok.com/creative/creativeCenter/trends, then 200.
-    """
-    import inspect
-
-    source = inspect.getsource(browser_support.surface_reachable)
-
-    assert "follow_redirects=True" in source
-
-
-def test_the_creative_center_url_is_the_one_tiktok_serves_directly():
-    """Pinned rather than probed: a network call here would make the suite depend on TikTok.
-
-    The old inspiration/popular/hashtag path answers 301 and lands on this one. Both were run
-    through fetch_macro_trends on 10/09/2026 and returned identical rows, so the redirect was
-    only costing a round trip. If TikTok moves it again this test is the reminder to re-verify.
-    """
-    assert (
-        TikTokCreativeCenterPlugin.BASE_URL
-        == "https://ads.tiktok.com/creative/creativeCenter/trends"
-    )
 
 
 @pytest.mark.asyncio
