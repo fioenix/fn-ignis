@@ -4,6 +4,8 @@ Use with the `ignis_browser_relay` guide, which holds the shared steps and failu
 
 - `source: "instagram"`. The search opens `https://www.instagram.com/explore/search/keyword/?q=<query>`, the
   signed-in keyword grid. This is the host-browser tier only; the retired `reels` surface stays refused.
+- Pre-check card selector (relay step 5): `a[href*="/p/"], a[href*="/reel/"]`; tiles without a
+  caption count too, so expect more cards than records.
 - Transport: as for Threads, the tab script encrypts the answer and, 100 ms later, navigates the same tab to the
   relay's `/receive` page (Instagram drops `window.opener`, checked 2026-11-12). The evaluator can return `{}`.
   Wait about two seconds and confirm the relay shows `STAGED` or the tab is on `/receive`. Never run it twice.
