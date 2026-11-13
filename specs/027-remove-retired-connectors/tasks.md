@@ -7,10 +7,16 @@ Check `research.md` for file:line references before each task; line numbers are 
   - Kept the `ReelsPlugin` fixture in `integration/test_author_identity_conformance.py`: it is a stored-row payload
     shape, and the conformance scan only requires a fixture per live class.
   - Dropped the Reels `KNOWN_VOCABULARY_CONSTANTS` entry here rather than in T008, so the stale-entry test stays green.
-- [ ] T002 Delete `connectors/google_trends/`, its whole-file tests and RSS cases; rewrite or delete
+- [x] T002 Delete `connectors/google_trends/`, its whole-file tests and RSS cases; rewrite or delete
   `test_source_retirement.py::test_setup_diagnostics_never_probe_rss`; drop the `google_rss` label in
   `setup_bundle.py` (FR-001, FR-006, FR-008).
-- [ ] T003 Narrow SC-004: `.coveragerc.sc004`, `test_t022_coverage_gate.py`, the `ci.yml` comment, and a dated note
+  - Rewrote `test_setup_diagnostics_never_probe_rss` without the plugin import: it now asserts the diagnostics
+    result and `setup_bundle.py` carry no `google_rss` key.
+  - `test_t022_coverage_gate.py` goes red at this commit alone (its RSS witness file is gone) and green again with
+    T003; the two commits stay separate to keep one task per commit.
+  - Kept the `google_rss` surface name in `test_data_provenance.py`, `test_surface_boundaries.py` and
+    `test_public_distribution_contract.py`: those are stored-row or fake-diagnostic data, not plugin code.
+- [x] T003 Narrow SC-004: `.coveragerc.sc004`, `test_t022_coverage_gate.py`, the `ci.yml` comment, and a dated note
   on `specs/001-core-storage-stable-ingress/spec.md` SC-004 (FR-007).
 - [ ] T004 Delete `creative_center_plugin.py`, fix `connectors/tiktok/__init__.py`, delete its tests and cases; keep
   the old-row read paths (FR-001, FR-005).

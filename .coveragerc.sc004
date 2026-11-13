@@ -4,6 +4,9 @@
 # Plugin và Registry đạt độ phủ (test coverage) >= 85%." -- coverage of at least 85% for the
 # Repository, the RSS Plugin, the YouTube Plugin and the Registry.
 #
+# Narrowed 2026-11-13 (Spec 027): the RSS Plugin was retired and its code deleted, so the scope is
+# the Repository, the YouTube Plugin and the Registry.
+#
 # This file is the one place that scope is written down. It is a `coverage report` profile, not a
 # measurement config: the test run measures the whole `ignis` package as before, and this reads the
 # same data restricted to what the criterion names. Keeping the two apart means the ordinary run
@@ -12,18 +15,17 @@
 # Usage, after a run that produced .coverage:
 #     coverage report --rcfile=.coveragerc.sc004
 #
-# The four entries below map one-to-one onto the four names in SC-004:
+# The three entries below map one-to-one onto the three names left in SC-004:
 #
 #   Repository    -> infrastructure/persistence/*  (the SQLite and PostgreSQL adapters behind
 #                    ITrendRepository, plus the identifier, migration-state and workspace modules
 #                    they are built from)
 #   Registry      -> infrastructure/connectors/registry.py
-#   RSS Plugin    -> infrastructure/connectors/google_trends/*
 #   YouTube Plugin-> infrastructure/connectors/youtube/*
 #
 # Everything else under src/ignis is outside SC-004 and is therefore absent rather than excluded:
 # the MCP interface layer, the use cases, the domain model, the other connectors (TikTok, Threads,
-# Reels, Meta browser ingress), clustering, security, auth and the harness. Those are covered by
+# Meta browser ingress), clustering, security, auth and the harness. Those are covered by
 # the suite and reported by the ordinary run; they are simply not what this criterion promised, and
 # folding them in would change the number the promise is judged by.
 #
@@ -38,7 +40,6 @@
 include =
     */ignis/infrastructure/persistence/*
     */ignis/infrastructure/connectors/registry.py
-    */ignis/infrastructure/connectors/google_trends/*
     */ignis/infrastructure/connectors/youtube/*
 fail_under = 85
 show_missing = True

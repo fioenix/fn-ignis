@@ -133,6 +133,7 @@ Là hệ thống lắng nghe xu hướng đa kênh, tôi cần một Ingress Plu
 - **SC-002**: 100% Ingress Plugin hoạt động hoàn toàn ở chế độ Deterministic / 0 LLM Token.
 - **SC-003**: Khi một plugin gặp sự cố mạng hoặc lỗi API, tiến trình Ingest tổng thể vẫn thu thập thành công 100% dữ liệu từ các plugin khỏe mạnh còn lại.
 - **SC-004**: Toàn bộ unit tests & integration tests cho Repository, RSS Plugin, YouTube Plugin và Registry đạt độ phủ (test coverage) >= 85%.
+  - Note (2026-11-13, Spec 027): the RSS Plugin was retired and its code deleted; the SC-004 scope is now the Repository, the YouTube Plugin and the Registry.
 
 ---
 
