@@ -33,14 +33,15 @@ outputs disclosed in `get_mission_analysis`, wording fixes in the other four).
   (M14, M15): the tool's name kept pulling them in.
 - Round 2 opened the `discover_market_opportunities` and `get_mission_analysis` descriptions with
   where those outputs actually live (`get_mission_claims`). M14 and M15 dropped to one call
-  between the two models. Disclosing the legacy scored topics in the final round brought M14 back on
-  Sonnet (3/3).
+  between the two models. In the final round Sonnet answers M14 with the correct first call
+  (`get_mission_claims`) in all 3 runs, then calls `discover_market_opportunities` as a follow-up.
 
 ## Still open
 
 - **M16** ("recommend a product from Attention mission m-7"): both models call
   `get_mission_analysis` in every run of rounds 2 and final.
-- **M14** on Sonnet: `discover_market_opportunities` for an Opportunity Index, 3/3 in the final round.
+- **M14** on Sonnet: after a correct first call, a follow-up `discover_market_opportunities` call
+  in all 3 final runs (counted in trap-call runs, not in wrong first calls).
 - **W10** (top commenters): both models call `get_mission_analysis`. That tool is not a trap there,
   but it is not an acceptable path either.
 - The remaining pull looks name-driven. Renaming or hiding `discover_market_opportunities` is a
