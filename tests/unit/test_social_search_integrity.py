@@ -9,7 +9,6 @@ from ignis.application.ports.connector_port import SearchAttestation
 from ignis.application.use_cases.get_evidence_qualification_batch import GetEvidenceQualificationBatchUseCase
 from ignis.domain.value_objects import GeoCode
 from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin
-from ignis.infrastructure.connectors.reels.reels_plugin import ReelsPlugin
 from ignis.infrastructure.connectors.threads.threads_plugin import ThreadsPlugin
 
 
@@ -153,44 +152,6 @@ async def test_tiktok_query_union_stays_complete_and_threads_never_collects_inte
         assert attestation.queried == []
         return
     assert attestation.queried == queries
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("path", ["browser", "graph"])
-async def test_reels_records_the_keywords_beyond_its_search_limit_as_not_queried(path):
-    """G3 run on 25/10/2026: reels read 10 of 20 keywords (its Spec 016 limit) and said nothing
-    about the other ten, so the outcome looked like full coverage."""
-    queries = [f"retail-query-{index}" for index in range(22)]
-    attestation = SearchAttestation()
-    plugin = ReelsPlugin()
-    async def fetch(**kwargs):
-        kwargs["attestation"].executed(kwargs["keyword"])
-        return []
-    if path == "browser":
-        with patch.object(plugin, "_fetch_via_browser_session", side_effect=fetch):
-            await plugin._search_via_browser_session(queries, {}, GeoCode.VN, 20, attestation)
-    else:
-        plugin._ig_user_id = "synthetic-ig-user"
-        with patch.object(plugin, "resolve_auth_tier", AsyncMock(return_value=("oauth_token", None))), \
-                patch.object(plugin, "_require_token", AsyncMock(return_value="synthetic-token")), \
-                patch.object(plugin, "_resolve_hashtag_id", AsyncMock(return_value="17840000000000000")), \
-                patch.object(plugin, "_graph_get", AsyncMock(return_value={"data": []})):
-            await plugin.search_signals(queries, attestation=attestation)
-    # Owner decision 26/10/2026: Reels reads every keyword of a 20-keyword watchlist.
-    assert attestation.queried == queries[:20]
-    assert attestation.failures == [
-        f"{query}: not queried, Reels reads at most 20 keywords per search" for query in queries[20:]
-    ]
-
-
-@pytest.mark.asyncio
-async def test_reels_records_a_keyword_without_hashtag_characters_as_failed():
-    attestation = SearchAttestation()
-    plugin = ReelsPlugin()
-    with patch.object(plugin, "_fetch_via_browser_session", AsyncMock(return_value=[])):
-        await plugin._search_via_browser_session(["!!!"], {}, GeoCode.VN, 20, attestation)
-    assert attestation.queried == []
-    assert attestation.failures == ["!!!: the keyword has no hashtag characters"]
 
 
 @pytest.mark.parametrize("publication,expected", [("exact", 100.0), ("missing", 0.0), ("future", 0.0)])

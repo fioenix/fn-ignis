@@ -149,13 +149,11 @@ def test_pii_two_column_matrix_guardrails():
         assert res == raw_input, f"Content altered incorrectly: {raw_input} -> {res}"
 
 
-def test_threads_and_reels_pii_sanitization():
+def test_threads_pii_sanitization():
     from ignis.infrastructure.connectors.threads.threads_plugin import ThreadsPlugin
-    from ignis.infrastructure.connectors.reels.reels_plugin import ReelsPlugin
     from ignis.domain.value_objects import GeoCode
 
     threads_plugin = ThreadsPlugin()
-    reels_plugin = ReelsPlugin()
 
     # Simulate GraphQL raw node with phone in caption/text
     raw_threads_node = {
@@ -170,23 +168,6 @@ def test_threads_and_reels_pii_sanitization():
     assert threads_sig is not None
     assert "0931405002" not in threads_sig.raw_title
     assert "[REDACTED_PHONE]" in threads_sig.raw_title
-
-    # Simulate Reels DOM / graph node with phone in caption
-    raw_reels_node = {
-        "id": "789012",
-        "code": "RyZ789",
-        "caption": {"text": "Tư vấn thiết kế hotline (+84) 931 405 002 email ceo@startup.vn"},
-        "user": {"username": "fashion_brand"},
-        "play_count": 5000,
-        "like_count": 300,
-        "comment_count": 20,
-    }
-    reels_sig = reels_plugin._map_browser_reel(raw_reels_node, geo=GeoCode.VN, keyword="fashion")
-    assert reels_sig is not None
-    assert "0931405002" not in reels_sig.raw_title
-    assert "ceo@startup.vn" not in reels_sig.raw_title
-    assert "[REDACTED_PHONE]" in reels_sig.raw_title
-    assert "[REDACTED_EMAIL]" in reels_sig.raw_title
 
 
 def test_html_builder_defense_in_depth_sanitizes_pii():

@@ -2,7 +2,11 @@
 
 Check `research.md` for file:line references before each task; line numbers are at `b2b6f35`.
 
-- [ ] T001 Delete `connectors/reels/`, its whole-file tests, and the Reels cases in mixed test files (FR-001, FR-006).
+- [x] T001 Delete `connectors/reels/`, its whole-file tests, and the Reels cases in mixed test files (FR-001, FR-006).
+  - Kept `REELS_PAYLOAD` in `test_meta_browser_ingress.py`: the kept Threads cases in `test_registry.py` still feed it.
+  - Kept the `ReelsPlugin` fixture in `integration/test_author_identity_conformance.py`: it is a stored-row payload
+    shape, and the conformance scan only requires a fixture per live class.
+  - Dropped the Reels `KNOWN_VOCABULARY_CONSTANTS` entry here rather than in T008, so the stale-entry test stays green.
 - [ ] T002 Delete `connectors/google_trends/`, its whole-file tests and RSS cases; rewrite or delete
   `test_source_retirement.py::test_setup_diagnostics_never_probe_rss`; drop the `google_rss` label in
   `setup_bundle.py` (FR-001, FR-006, FR-008).

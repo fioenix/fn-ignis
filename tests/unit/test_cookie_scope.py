@@ -6,7 +6,6 @@ import httpx
 import pytest
 
 from ignis.infrastructure.connectors import browser_support, meta_browser_ingress
-from ignis.infrastructure.connectors.reels.reels_plugin import ReelsPlugin
 from ignis.infrastructure.connectors.threads.threads_plugin import ThreadsPlugin
 from ignis.infrastructure.connectors.tiktok import tiktok_plugin
 
@@ -84,7 +83,7 @@ def test_csrf_uses_longest_eligible_path_and_ignores_foreign_tokens():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("platform", ["tiktok", "threads", "instagram"])
+@pytest.mark.parametrize("platform", ["tiktok", "threads"])
 async def test_health_scopes_cookies_or_refuses_retired_threads(platform, requests, monkeypatch):
     domain = f".{platform}.com"
     state = {"cookies": [
@@ -99,7 +98,7 @@ async def test_health_scopes_cookies_or_refuses_retired_threads(platform, reques
         plugin = tiktok_plugin.TikTokPlugin(auth_manager=AsyncMock())
         plugin._auth_manager.get_storage_state.return_value = state
     else:
-        plugin = ThreadsPlugin() if platform == "threads" else ReelsPlugin()
+        plugin = ThreadsPlugin()
         plugin._browser_auth_manager = AsyncMock()
         plugin._browser_storage_state = AsyncMock(return_value=state)
     if platform == "threads":
