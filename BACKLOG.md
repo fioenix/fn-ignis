@@ -243,7 +243,7 @@ Bề mặt agent:
   (`_assess_maturity` dùng `len(clusters)` của `top_clusters_use_case`) — merge 12/11/2026 (PR #141): đếm cụm
   riêng trong tín hiệu của mission; mission thật giờ ghi 8 cụm thay vì 16.
 - [~] **SPEC-025 — Bộ skill host-browser và Instagram qua host browser** — chủ sở hữu yêu cầu ngày 11/11/2026.
-  Đã merge 12/11/2026 (PR #139–#154): mỗi nền tảng một skill (`ignis-tiktok-browser`, `ignis-threads-browser`,
+  Đã merge 12–13/11/2026 (PR #139, #143, #144, #146–#155): mỗi nền tảng một skill (`ignis-tiktok-browser`, `ignis-threads-browser`,
   `ignis-instagram-browser`) với guide relay dùng chung; ngày đăng TikTok lấy từ video id; Instagram thu chú
   thích từ lưới tìm kiếm theo từ khóa, cả TACTICAL lẫn MISSION, chỉ nhận bản ghi khi locale trang là `en`.
   Lượt chạy thật T029: 12 quan sát Instagram trong khoảng 65 giây.

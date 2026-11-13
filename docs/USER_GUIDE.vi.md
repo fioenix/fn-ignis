@@ -303,7 +303,8 @@ Mỗi nguồn có một agent skill hướng dẫn từng bước của một l�
 `ignis_browser_relay`. MCP server cũng cung cấp các bước này dưới dạng prompt
 (`ignis_tiktok_browser`, `ignis_threads_browser`, `ignis_instagram_browser`) và resource trong `fn-ignis://guide/`. Instagram chỉ nhận bản ghi
 khi ngôn ngữ của trang đã có mẫu câu ghi công trong seed (hiện chỉ có `en`); ngôn ngữ khác trả `DEGRADED`
-và không có quan sát nào.
+và không có quan sát nào. Lưới không ghi tên tài khoản, nên không loại được bài Instagram của chính người
+yêu cầu ra khỏi lượt chạy; các bài đó được lưu không kèm danh tính như mọi bài khác.
 
 Ba tool `prepare_host_browser_search`, `submit_host_browser_search` và
 `cancel_host_browser_search` cung cấp đường thu thập chủ động chọn, chỉ trong nhiệm vụ được duyệt.
