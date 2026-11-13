@@ -457,7 +457,7 @@ hoặc cách dùng đủ rõ với người dùng; PATCH dành cho các thay đ�
 kể trải nghiệm sản phẩm. Chốt mục tiêu không đồng nghĩa đã bump metadata, merge hay phát hành;
 các cổng pilot và release vẫn giữ nguyên.
 
-`v0.10.0` có **41 tools**. Mốc lịch sử ngày 26/10/2026
+`v0.11.0` (như `v0.10.0`) có **41 tools**. Mốc lịch sử ngày 26/10/2026
 đã thêm tool thứ 53 khi PR #88 (Spec 018 phần A) được merge tại
 `25d10c3`. PR này thêm `set_watchlist_listening_plan` để lưu mục tiêu, kỳ so sánh và nhịp lấy mẫu
 do người dùng chọn; khi không truyền `period_kind`, `get_watchlist_period_snapshot` dùng kỳ so sánh

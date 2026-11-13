@@ -17,7 +17,7 @@ Không đặt bí mật trong prompt, transcript lệnh hay báo cáo.
 1. Chạy `./scripts/bootstrap.sh`, rồi khởi động lại MCP client để nó nạp `ignis-mcp`.
 2. Nhờ agent gọi `diagnose_system_health` và `verify_connectors_health`. Connector nào báo không khả
    dụng thì vẫn không khả dụng cho tới khi bạn cấp credential hoặc phiên browser cho nó.
-3. Chạy thử một probe tactical: nhờ agent tìm trên TikTok hoặc Threads qua chính Chrome đang đăng nhập của bạn.
+3. Chạy thử một probe tactical: nhờ agent tìm trên TikTok, Threads hoặc Instagram qua chính Chrome đang đăng nhập của bạn.
    YouTube không có tool tìm kiếm tactical; nó chỉ được thu trong một nhiệm vụ đã xác nhận (xem mục 2). Agent gọi
    `prepare_host_browser_search`, mở trang relay cục bộ, từ đó mở tab tìm kiếm đã duyệt, chạy một lần tab
    script mà bước prepare trả về trong tab đó, rồi gọi `submit_host_browser_search`. Probe tactical không tạo nhiệm
