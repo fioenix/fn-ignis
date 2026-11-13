@@ -92,3 +92,4 @@ backup_*.json
 *session*.json
 scratch/
 
+/.fnignis/

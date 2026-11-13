@@ -1,6 +1,6 @@
 # Pull-request CI uses SQLite only
 
-Status: Proposed
+Status: Accepted (owner, chat 2026-11-13)
 
 ## Decision
 
