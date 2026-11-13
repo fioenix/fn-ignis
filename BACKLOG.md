@@ -164,7 +164,10 @@ Bề mặt agent:
 
 **Nhánh A — nếu VAL-1 cho thấy người dùng cần "vì sao người ta mua":**
 
-- [ ] **PRD-1 — "Tiếng nói khách hàng trong 10 phút"** (S–M). Một skill hoặc guide, **không thêm tool**: một từ
+- [ ] **PRD-1 — "Tiếng nói khách hàng trong 10 phút"** (S–M). Guide `ignis_customer_voice` xong ở Spec 026
+  (13/11/2026); một lượt chạy thật tới file mất 3 phút 11 giây với 39 item giữ lại. Còn mở: pilot với người dùng
+  (trung vị thời gian và câu "sẽ dùng lại"). Chủ sở hữu bỏ YouTube khỏi lượt này vì YouTube không có tìm kiếm
+  tactical. Mô tả gốc giữ nguyên để đối chiếu: một skill hoặc guide, **không thêm tool**: một từ
   khóa, probe TACTICAL trên YouTube, TikTok và Threads, lấy bình luận của N video TikTok đầu, rồi trả về một bản
   tổng hợp có trích dẫn.
   - Bản tổng hợp là bối cảnh attention, không phải bằng chứng nhu cầu hay verdict (AGENTS.md §1–2). Nếu người
@@ -232,8 +235,8 @@ Bề mặt agent:
 
 - [x] **ENG-1 — Sửa dòng nợ đã lỗi thời** — làm cùng lần ghi backlog này, ngày 11/11/2026: `ingest_use_case` đã gỡ
   trong Spec 024; dòng tương ứng trong mục "Đóng sau khi kiểm code 09/11/2026" đã cập nhật.
-- [x] **ENG-0 — Phát hành các bản sửa của Spec 024** — đóng 13/11/2026: gỡ `fetch_from_all` và sửa việc đăng ký
-  lại từ trong lexicon đã ra trong `v0.11.0`.
+- [x] **ENG-0 — Phát hành các bản sửa của Spec 024** — đóng 13/11/2026: gỡ `fetch_from_all` và cho PostgreSQL cập nhật
+  `category`/`created_by` khi đăng ký lại một từ, như SQLite; cả hai đã ra trong `v0.11.0`.
 - [ ] **ENG-10 — `_contiguous_phrase` chỉ đọc `canonical_name`** — nợ nhỏ giữ nguyên từ 09/11, sửa khi chạm tới.
 - [x] **BUG-1 — Phân tích ATTENTION dùng cả bằng chứng đã bị loại** (một session khác báo ngày 11/11/2026, khi chạy
   một mission ATTENTION thật) — merge 12/11/2026 (PR #136), sau hai vòng review bắt thêm lỗi ở cụm chủ đề và
@@ -261,8 +264,8 @@ Bề mặt agent:
 - [ ] **ENG-3 — ADR `Proposed`: PostgreSQL có còn là backend của sản phẩm không** (S). Ba lựa chọn: (a) giữ cả
   hai và làm ENG-9; (b) đóng băng PostgreSQL, chỉ còn đọc và nâng cấp kiểm trong CI; (c) bỏ sau khi có đường
   export. Hiện mỗi story trả tiền persistence hai lần, cộng 4 service trong CI. Chủ sở hữu đặt trạng thái. Phụ thuộc ENG-4.
-- [ ] **ENG-4 — Kiểm nâng cấp PostgreSQL tới `040` trên bản sao của một store cũ** (S–M), hoặc ghi rõ "không hỗ
-  trợ nâng cấp". `v0.10.0` đã phát hành mà chưa kiểm việc này. Chạy qua heavy-job lock; không đụng store thật.
+- [ ] **ENG-4 — Kiểm nâng cấp PostgreSQL tới `041` trên bản sao của một store cũ** (S–M), hoặc ghi rõ "không hỗ
+  trợ nâng cấp". `v0.10.0` và `v0.11.0` đã phát hành mà chưa kiểm việc này. Chạy qua heavy-job lock; không đụng store thật.
 - [ ] **ENG-5 — Tách `server.py`** thành composition, handler theo nhóm và wrapper (M). Trước khi tách, thêm test
   snapshot cho schema của 41 tool, và re-export tên cũ cho 192 chỗ test đang tham chiếu. Dừng nếu snapshot có diff.
 - [ ] **ENG-6 — Độ bền của host-browser** (S–M):

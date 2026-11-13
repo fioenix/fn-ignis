@@ -119,6 +119,10 @@ chuẩn cho tham số. Một số thao tác đại diện:
   `cancel_host_browser_search` thu thập lưới TikTok, kết quả Threads Top và chú thích từ lưới Instagram có
   giới hạn qua trình duyệt được cho phép. Đây là đường chủ động chọn, không phải phương án tự động dự phòng;
   xem [phạm vi và giới hạn](docs/USER_GUIDE.vi.md#tìm-kiếm-qua-trình-duyệt-host-tiktok-threads-instagram).
+- Với một từ khóa, guide `ignis-customer-voice` (prompt MCP `voice_of_customer_audit`, resource
+  `fn-ignis://guide/ignis-customer-voice`) nối một lượt tìm TikTok, một lượt tìm Threads và bình luận dưới năm
+  video TikTok đầu, rồi ghi một file Markdown local gồm các trích dẫn có link, mất khoảng mười phút. Đây là
+  bối cảnh attention, không phải kết luận.
 - `get_mission_evidence_qualification_batch` và
   `submit_mission_evidence_qualifications` lưu đánh giá chứng cứ.
 - `submit_mission_claims`, `get_mission_claims` và `get_mission_analysis` kiểm soát

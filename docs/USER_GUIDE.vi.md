@@ -306,6 +306,14 @@ khi ngôn ngữ của trang đã có mẫu câu ghi công trong seed (hiện ch�
 và không có quan sát nào. Lưới không ghi tên tài khoản, nên không loại được bài Instagram của chính người
 yêu cầu ra khỏi lượt chạy; các bài đó được lưu không kèm danh tính như mọi bài khác.
 
+**Tiếng nói khách hàng trong mười phút.** Đưa agent một từ khóa và hỏi người ta đang nói gì về nó. Guide
+`ignis-customer-voice` (prompt `voice_of_customer_audit`, resource `fn-ignis://guide/ignis-customer-voice`)
+chạy một lượt tìm TikTok và một lượt tìm Threads, đọc tối đa 20 bình luận dưới mỗi video trong năm video TikTok đầu,
+rồi ghi file `reports/customer-voice-<từ-khóa>-<thời-điểm>.md`. File gom trích dẫn theo điều chúng nói tới, mỗi
+trích dẫn kèm link, và ghi số item đã đọc và đã giữ của từng nguồn. File không thêm tác giả, không gắn nhãn cảm
+xúc, ý định hay nỗi đau. YouTube không nằm trong lượt này vì YouTube không có tìm kiếm tactical. File là bối
+cảnh attention, không phải kết luận; muốn ra quyết định thì cần một mission có Market Brief đã xác nhận.
+
 Ba tool `prepare_host_browser_search`, `submit_host_browser_search` và
 `cancel_host_browser_search` cung cấp đường thu thập chủ động chọn, chỉ trong nhiệm vụ được duyệt.
 Host dùng phiên trình duyệt được cho phép và mở trang relay localhost. Nút "Open search" trên relay

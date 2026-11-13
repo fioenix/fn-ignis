@@ -3935,16 +3935,21 @@ def prompt_ignis_instagram_browser() -> str:
     return _host_browser_guide("ignis_instagram_browser")
 
 
+@mcp.resource("fn-ignis://guide/ignis-customer-voice")
+def get_ignis_customer_voice_guide() -> str:
+    """Ten-minute customer-voice run over TikTok and Threads host-browser search and TikTok comments (Spec 026)."""
+    return _host_browser_guide("ignis_customer_voice")
+
+
 @mcp.prompt(name="voice_of_customer_audit")
-def prompt_voice_of_customer_audit(keywords: str = "Chatbot AI") -> str:
-    """Frame a bounded source-specific customer-voice probe."""
-    return f"""
-The requester wants customer-voice evidence about '{keywords}'. Confirm the source surface,
-geography, time window, sampling cap, and stop condition. Use get_tiktok_video_comments only
-with a known video URL and explicit task authority. Report provenance and unavailable states,
-and distinguish observations
-from inference. Do not claim market prevalence or a strategic verdict from this probe alone.
-"""
+def prompt_voice_of_customer_audit(keywords: Optional[str] = None) -> str:
+    """Guide the agent through one ten-minute customer-voice run; collects nothing by itself."""
+    guide = _host_browser_guide("ignis_customer_voice")
+    if keywords is None or not keywords.strip():
+        return guide
+    # Requester text on one line, with backticks replaced so it cannot close its code span.
+    selected = " ".join(keywords.split()).replace("`", "'")
+    return f"Keyword: `{selected}`\n\n{guide}"
 
 
 def _register_shutdown_handlers():
