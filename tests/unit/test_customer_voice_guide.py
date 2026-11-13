@@ -73,3 +73,11 @@ def test_guide_keeps_the_result_attention_context_without_labels():
         "YouTube",
     ):
         assert rule in text, rule
+
+
+def test_quotations_always_sit_in_a_code_span_longer_than_their_backticks():
+    """PR 164 review: escaping left bare URLs autolinked, and a backtick closed a one-backtick span early."""
+    text = _flat()
+    assert "Put every quotation in a code span" in text
+    assert "longer than the longest run of backticks inside it" in text
+    assert "or escape `[ ] ! < >`" not in text
