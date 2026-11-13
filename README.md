@@ -114,6 +114,10 @@ signature authority. Representative operations:
 - Opt-in `prepare_host_browser_search`, `submit_host_browser_search` and
   `cancel_host_browser_search` collect bounded public TikTok grids, Threads Top results and Instagram keyword-grid captions through an
   authorized host browser. See [host-browser scope and limits](docs/USER_GUIDE.md#explicit-host-browser-search-tiktok-threads-instagram).
+- For one keyword, the `ignis-customer-voice` guide (MCP prompt `voice_of_customer_audit`, resource
+  `fn-ignis://guide/ignis-customer-voice`) chains a TikTok and a Threads search with the comments under the
+  first five TikTok videos and writes a local Markdown file of linked quotations in about ten minutes. It is
+  attention context, not a verdict.
 - `get_mission_evidence_qualification_batch` and
   `submit_mission_evidence_qualifications` record evidence judgments.
 - `submit_mission_claims`, `get_mission_claims`, and `get_mission_analysis` control
