@@ -89,3 +89,9 @@ def test_tiktok_guide_pre_check_selector_matches_the_extractor():
     script = resources.files("ignis.infrastructure.connectors.host_browser").joinpath("tiktok_search.js")
     card = script.read_text(encoding="utf-8").split("const CARD = '", 1)[1].split("'", 1)[0]
     assert f"`{card}`" in _packaged("ignis_tiktok_browser")
+
+
+def test_relay_prepare_step_names_the_required_task_refs():
+    """Spec 026 live run: prepare refused a call without them because step 1 did not name them."""
+    step_one = " ".join(_packaged("ignis_browser_relay").split("2. Open `relay_url`")[0].split())
+    assert "`host_task_ref`, `session_ref`" in step_one
