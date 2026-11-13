@@ -8,9 +8,8 @@
 > - **Thu thập:** YouTube Data API; TikTok, Threads và Instagram qua trình duyệt host; bình luận TikTok theo URL.
 >   Đã ngừng RSS, Creative Center, tìm kiếm TikTok headless và Reels; bỏ taxonomy ngành và từ vựng
 >   thị trường nạp sẵn. Ignis không có worker hay lịch khám phá hằng ngày.
-> - **Trạng thái:** `v0.11.0` chưa tag và chưa publish: đang chuẩn bị phát hành (13/11/2026) qua mã nguồn,
->   GitHub Release và GHCR (`ghcr.io/fioenix/fn-ignis:0.11.0`); chỉ ghi đã phát hành sau khi thấy tag, Release
->   và image. Bản trước là `v0.10.0` (11/11/2026). PyPI tiếp tục được hoãn. Kiểm tra trạng thái thật bằng `python scripts/check_release_state.py`.
+> - **Trạng thái:** `v0.11.0` đã tag và publish ngày 13/11/2026 qua mã nguồn, GitHub Release và GHCR
+>   (`ghcr.io/fioenix/fn-ignis:0.11.0`); đã thấy tag, Release và image. Bản trước là `v0.10.0` (11/11/2026). PyPI tiếp tục được hoãn. Kiểm tra trạng thái thật bằng `python scripts/check_release_state.py`.
 
 ---
 
@@ -233,8 +232,8 @@ Bề mặt agent:
 
 - [x] **ENG-1 — Sửa dòng nợ đã lỗi thời** — làm cùng lần ghi backlog này, ngày 11/11/2026: `ingest_use_case` đã gỡ
   trong Spec 024; dòng tương ứng trong mục "Đóng sau khi kiểm code 09/11/2026" đã cập nhật.
-- [ ] **ENG-0 — Phát hành các bản sửa của Spec 024** (đã merge, chưa phát hành): gỡ `fetch_from_all` và sửa việc
-  đăng ký lại từ trong lexicon. Gom vào bản phát hành kế tiếp; bump và tag cần chủ sở hữu duyệt (AGENTS.md §4).
+- [x] **ENG-0 — Phát hành các bản sửa của Spec 024** — đóng 13/11/2026: gỡ `fetch_from_all` và sửa việc đăng ký
+  lại từ trong lexicon đã ra trong `v0.11.0`.
 - [ ] **ENG-10 — `_contiguous_phrase` chỉ đọc `canonical_name`** — nợ nhỏ giữ nguyên từ 09/11, sửa khi chạm tới.
 - [x] **BUG-1 — Phân tích ATTENTION dùng cả bằng chứng đã bị loại** (một session khác báo ngày 11/11/2026, khi chạy
   một mission ATTENTION thật) — merge 12/11/2026 (PR #136), sau hai vòng review bắt thêm lỗi ở cụm chủ đề và
@@ -318,6 +317,7 @@ xóa và chưa đọc lại kho đó.
   đã gỡ 12 tool và chặn các nguồn đã nghỉ trước thu thập, giữ nguyên đường đọc dữ liệu cũ.
   Review code và security độc lập: vòng đầu REWORK, vòng hai APPROVE ở `abd3323`. Kiểm thử chạy trên SQLite;
   kiểm tra riêng cho PostgreSQL chưa chạy và không còn chặn, vì store dev đã chuyển sang SQLite từ 10/11/2026.
+- [x] **Phát hành `v0.11.0`** — đóng 13/11/2026: gộp Spec 025 (Instagram qua trình duyệt host, một skill cho mỗi nguồn) và các bản sửa của Spec 024 (migration tới `041`); đã thấy tag, GitHub Release và image GHCR. Kho PostgreSQL hiện hữu nâng cấp qua `040`/`041` vẫn chưa kiểm (ENG-4).
 - [x] **Phát hành `v0.10.0`** — đóng 11/11/2026: gộp Spec 021, 022 và 023 (migration tới `040`); đã thấy tag, GitHub Release và image GHCR. Kho PostgreSQL hiện hữu nâng cấp qua `040` vẫn chưa kiểm.
 
 - [x] **TikTok trên profile Finos bị fail-closed** — đóng 09/11/2026. Đo trực tiếp: trang có `lang=en` trong khi
