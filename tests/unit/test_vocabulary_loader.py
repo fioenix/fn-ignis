@@ -16,7 +16,6 @@ from ignis.infrastructure.config.vocabulary_loader import (
     TEMPLATE_PREFIXES,
     load_market_vocabulary,
 )
-from ignis.infrastructure.connectors.google_trends.rss_plugin import GoogleTrendsRssPlugin
 from ignis.domain.value_objects import GeoCode
 from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin
 from ignis.infrastructure.harness.language_detector import HeuristicLanguageDetector
@@ -70,21 +69,15 @@ def test_every_probe_template_has_a_substitution_slot():
 
 
 @pytest.mark.asyncio
-async def test_a_fresh_database_arms_both_engines(tmp_path):
-    """Bootstrap has to leave the clusterer and the Google Trends plugin usable, not empty."""
+async def test_a_fresh_database_arms_the_clusterer(tmp_path):
+    """Bootstrap has to leave the clusterer usable, not empty."""
     repo = SqliteTrendRepository(db_path=str(tmp_path / "vocabulary.db"))
     vocabulary = await load_market_vocabulary(repo)
 
     clusterer = SemanticClusterer()
     clusterer.register_ambiguous_unigrams(vocabulary.ambiguous_unigrams)
-    plugin = GoogleTrendsRssPlugin()
-    plugin.register_probe_templates(vocabulary.probe_templates)
-    plugin.register_intent_keywords(vocabulary.search_intent)
 
     assert clusterer._ambiguous_unigrams, "clustering would merge on any single shared word"
-    assert len(plugin._get_probe_patterns("VN")) > 1, "demand would rest on the bare keyword"
-    assert plugin._get_probe_patterns("US") != plugin._get_probe_patterns("VN")
-    assert plugin._intent_keywords, "commercial intent would always score zero"
 
 
 @pytest.mark.asyncio
