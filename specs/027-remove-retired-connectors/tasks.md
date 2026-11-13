@@ -49,4 +49,26 @@ Check `research.md` for file:line references before each task; line numbers are 
   - The allowlist entries were removed in T001 and T004. `PROJECT_REVIEW_CONTEXT.md` item 3 now lists five constants.
   - README, USER_GUIDE (both languages) and AGENTS.md only state that Spec 022 retired the sources, which stays true;
     no edit needed.
-- [ ] T009 Verify SC-001–SC-004 with the plan's targeted commands; record results here.
+- [x] T009 Verify SC-001–SC-004 with the plan's targeted commands; record results here.
+  Run 2026-11-13 at the T008 commit, from the worktree root, each after a separate `uptime` (1-minute load < 15):
+  - `PYTHONPATH=src /Users/fioenix/Projects/fn-ignis/.venv/bin/pytest -q tests/unit/test_public_mcp_contract.py tests/unit/test_tiktok_comments.py` → 31 passed
+  - `PYTHONPATH=src /Users/fioenix/Projects/fn-ignis/.venv/bin/pytest -q tests/unit/test_t022_coverage_gate.py tests/unit/test_source_retirement.py` → 45 passed
+  - `PYTHONPATH=src /Users/fioenix/Projects/fn-ignis/.venv/bin/pytest -q tests/unit/test_identity_free_mcp_responses.py tests/unit/test_repo_conventions.py` → 23 passed
+  - `PYTHONPATH=src /Users/fioenix/Projects/fn-ignis/.venv/bin/pytest -q tests/unit/test_registry.py tests/unit/test_threads_plugin.py` → 63 passed
+  - `PYTHONPATH=src /Users/fioenix/Projects/fn-ignis/.venv/bin/pytest -q tests/unit/test_caller_platform_sessions.py tests/unit/test_env_example_matches_settings.py` → 28 passed
+  - `PYTHONPATH=src /Users/fioenix/Projects/fn-ignis/.venv/bin/pytest -q tests/unit/test_meta_browser_ingress.py tests/unit/test_social_search_integrity.py` → 15 passed
+  - `PYTHONPATH=src /Users/fioenix/Projects/fn-ignis/.venv/bin/pytest -q tests/unit/test_cookie_scope.py tests/unit/test_insights_ttl_cache.py` → 38 passed
+  - `PYTHONPATH=src /Users/fioenix/Projects/fn-ignis/.venv/bin/pytest -q tests/unit/test_pii_sanitization.py tests/unit/test_generalization.py` → 19 passed
+  - `PYTHONPATH=src /Users/fioenix/Projects/fn-ignis/.venv/bin/pytest -q tests/unit/test_vocabulary_loader.py tests/unit/test_tiktok_health_probes.py` → 27 passed
+  - `PYTHONPATH=src /Users/fioenix/Projects/fn-ignis/.venv/bin/pytest -q tests/unit/test_browser_launch_flag_policy.py tests/unit/test_host_metric_missingness.py` → 20 passed
+  - `PYTHONPATH=src /Users/fioenix/Projects/fn-ignis/.venv/bin/pytest -q tests/unit/test_tiktok_plugin.py tests/unit/test_threads_oauth.py` → 19 passed
+  - `PYTHONPATH=src /Users/fioenix/Projects/fn-ignis/.venv/bin/pytest -q tests/unit/test_meta_browser_auth.py tests/unit/test_settings_do_not_leak_secrets.py` → 30 passed
+  - `PYTHONPATH=src /Users/fioenix/Projects/fn-ignis/.venv/bin/pytest -q tests/integration/test_follow_up_sqlite_admission.py tests/integration/test_tiktok_ui_noise_retirement.py` → 43 passed, 3 skipped (PostgreSQL)
+  - `PYTHONPATH=src /Users/fioenix/Projects/fn-ignis/.venv/bin/pytest -q tests/integration/test_follow_up_settlement.py tests/integration/test_author_identity_conformance.py` → 30 passed, 23 skipped (PostgreSQL)
+  - `/Users/fioenix/Projects/fn-ignis/.venv/bin/ruff check src/ tests/` → All checks passed.
+  - Tool count: `PYTHONPATH=src …/.venv/bin/python -c "…len(asyncio.run(mcp.list_tools()))"` → 41.
+  - SC-002: every tool name and `parameters` schema, dumped from `git archive main src` and from this branch → byte-identical (41 = 41).
+  - SC-001: `grep -rnE "ReelsPlugin|GoogleTrendsRssPlugin|TikTokCreativeCenterPlugin|InstagramAuthManager|browser_support|INSTAGRAM_" src`
+    → no match apart from `_INSTAGRAM_CONTENT_SEGMENTS` (domain URL parsing for stored rows, kept).
+  - SC-004 coverage percentage itself was not measured: it needs the whole suite with PostgreSQL, which is CI-only.
+    The gate test (`test_t022_coverage_gate.py`) passes on the narrowed scope.
