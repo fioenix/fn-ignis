@@ -131,9 +131,10 @@ fresh session received only quickstart step 1's request and the environment. One
 | Threads | 10:02:07 | 10:03:16 | 69 s | HEALTHY, English UI | 5 of 5 cards |
 | Instagram | 10:03:25 | 10:04:23 | 58 s | HEALTHY, English UI | 9 of 24 tiles (captioned tiles only) |
 
-Steps outside the skill: none in the procedure. The session ran the packaged pre-check (`signIn: false` on all
-three) and reused one relay tab after each `STAGED`, both now in the relay guide; it ran `date` for timestamps
-and read the earlier run's note in the shared notes folder as data. No click, typing or scrolling on platform
+Steps outside the skill: none in the search procedure. The session ran the packaged pre-check (`signIn: false`
+on all three) and reused one relay tab after each `STAGED`, both now in the relay guide. Counted as in T014, two
+steps were outside the skill: it ran `date` for timestamps, and it read the earlier run's note in the shared
+notes folder as data, so it was not fully fresh. No click, typing or scrolling on platform
 pages; each `tab_script` ran once.
 
 Quickstart steps 5 and 6:
@@ -143,10 +144,10 @@ Quickstart steps 5 and 6:
   locally); a mission naming `reels` raises `RetiredSurfaceError`. Not rerun live.
 
 Success criteria across the three runs per source (T014 coordinator or T029, T014 fresh, T032):
-- SC-001: met on the final wheel; the two gaps the first fresh run exposed are closed by PR 157.
-- SC-002: T029 (12) and T014 (13) meet the count; this run returned 9, below 10, because only 9 of the 24
-  tiles carried a caption. One run can fall short when fewer tiles have captions. The excerpt identity check
-  rests on T029; this session did not report one.
+- SC-001: met for the search procedure on the final wheel (the two gaps T014 exposed are closed by PR 157);
+  strictly not met: two steps outside the skill (`date`, reading the prior run's note).
+- SC-002 (reworded 2026-11-13: every visible captioned tile): T029 accepted 12, T014 13 and this run 9 of the
+  9 captioned tiles among 24. The excerpt identity check exists only for T029; neither fresh session reported one.
 - SC-003 medians: TikTok 58 s (69, 51, 58) and Instagram 59 s (about 65, 59, 58) are within 60 s; Threads
   79 s (79, 79, 69) is not.
 
