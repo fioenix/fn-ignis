@@ -45,7 +45,7 @@ The T001 installed-asset check and its limit are recorded in `quickstart.md`.
 - [x] T011 [US1] Write failing tests that the four guide prompts and resources are registered and packaged in the wheel in `tests/unit/test_host_browser_guides.py`
 - [x] T012 [US1] Register `ignis_browser_relay`, `ignis_tiktok_browser`, `ignis_threads_browser` prompts and `fn-ignis://guide/...` resources in `src/ignis/interfaces/mcp/server.py`
 - [x] T013 [P] [US1] Add thin skills pointing at the packaged guides in `.agents/skills/ignis-tiktok-browser/SKILL.md` and `.agents/skills/ignis-threads-browser/SKILL.md`. Deviation (2026-11-12): the host-browser section of `.agents/skills/ignis-collect/SKILL.md` stays, because `tests/unit/test_ignis_skills.py` pins it; `tests/unit/test_host_browser_guides.py` instead checks that the packaged relay guide keeps the same safety rules
-- [ ] T014 [US1] Live acceptance: fresh session, TikTok and Threads per quickstart steps 1–3; record wall time and any step outside the skill in `specs/025-host-browser-skill-pack/research.md` (2026-11-12: coordinator run recorded, both ACCEPTED; the fresh-session run is still open)
+- [x] T014 [US1] Live acceptance: fresh session, TikTok and Threads per quickstart steps 1–3; record wall time and any step outside the skill in `specs/025-host-browser-skill-pack/research.md` (2026-11-12: coordinator run recorded, both ACCEPTED; 2026-11-13: fresh-session run recorded, four minor steps outside the skill, so SC-001 is not met strictly)
 
 **Checkpoint**: Story 1 PR (guides, skills, registration) with both reviews.
 

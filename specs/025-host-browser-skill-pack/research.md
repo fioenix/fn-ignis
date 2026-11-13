@@ -92,6 +92,34 @@ nắng`, `TACTICAL`, `result_limit` 20, one source at a time, steps exactly as t
   proves the shipped wheel serves the guides and both sources accept, but not SC-001's "fresh agent
   needs zero steps outside the skill". T014 stays open for that run.
 
+## T014 fresh-session acceptance (2026-11-13)
+
+A fresh Claude Code session received only quickstart step 1's request and the environment (Finos profile,
+no credentials, no repository edits). Server: wheel built from main `c432630`; the session's MCP server
+started on it. One `TACTICAL` search per source, one after another.
+
+| Source | Prepare | Accepted | Wall time | Outcome | Accepted |
+|---|---|---|---|---|---|
+| TikTok | 00:26:42 | 00:27:33 | 51 s | HEALTHY | 12 of 12 visible videos |
+| Threads | 00:27:40 | 00:28:59 | 79 s | HEALTHY, English UI | 4 (the page showed 4 posts) |
+| Instagram | 00:28:59 | 00:29:58 | 59 s | HEALTHY, English UI | 13 of 24 tiles (captioned tiles only) |
+
+Steps outside the skill (SC-001 expects zero); none touched a platform page:
+1. A read-only pre-check script of its own in the search tab (page locale, card count, password field). The
+   guide allows an optional check but supplies no script.
+2. On Threads, a further 5-second wait and recount (still 4 posts).
+3. One relay tab reused for all three sources, navigated to each new `relay_url`.
+4. `date` on the host for timestamps.
+
+There was no click, typing or scrolling on platform pages; each `tab_script` ran once and task tabs were closed.
+
+- SC-001 is not met strictly. Two of the four steps point at the skill: ship the optional pre-check as a
+  script, and say whether one relay tab may serve several sources.
+- SC-002 count is met (13 ≥ 10); the session did not report an excerpt identity check, so that half rests
+  on T029.
+- SC-003: TikTok 51 s and Instagram 59 s are within 60 s; Threads 79 s is over. Two runs per source
+  (TikTok 69/51 s, Threads 79/79 s, Instagram about 65/59 s) are not enough for a median.
+
 ## T016 TikTok rendered date versus video id (2026-11-12)
 
 Three videos accepted in the T014 run, opened by URL on the Finos profile (navigation only). The rendered
