@@ -260,10 +260,9 @@ Bề mặt agent:
   (`browser_support.py`, `InstagramAuthManager`, `InstagramBrowserAuthManager`, `fetch_suggestions_across_all`, năm
   biến `INSTAGRAM_*`); thu hẹp SC-004. `src` bớt 2.230 dòng; vẫn 41 tool, schema giống hệt `main`. Chủ sở hữu duyệt
   gỡ Reels OAuth trong chat. Giữ `ThreadsPlugin`, `ThreadsAuthManager`, seed `sql/` và đường đọc dòng cũ.
-- [ ] **ENG-11 — Dọn phần còn sót sau Spec 027** (S, nợ nhỏ, sửa khi chạm tới): nhánh `is_reels` trong
-  `collect_json_payloads` (`meta_browser_ingress.py`) không còn caller sống; trong test, fake `fetch_suggestions` và
-  `suggestion_calls` ở `test_registry.py`, tên test `test_cookie_scope` chỉ còn một tham số, tên "eight sites" ở
-  `test_browser_launch_flag_policy.py`, một lỗi ngữ pháp trong comment `test_settings_do_not_leak_secrets.py`.
+- [x] **ENG-11 — Dọn phần còn sót sau Spec 027** — đóng 13/11/2026: gỡ nhánh Instagram (`is_reels`, kiểm trang
+  Reels và các mã `REELS_*`) khỏi `collect_json_payloads`; gỡ fake `fetch_suggestions` ở `test_registry.py`; đổi tên
+  hai test cho đúng việc chúng kiểm; sửa một lỗi ngữ pháp trong comment.
 - [ ] **ENG-3 — ADR `Proposed`: PostgreSQL có còn là backend của sản phẩm không** (S). Ba lựa chọn: (a) giữ cả
   hai và làm ENG-9; (b) đóng băng PostgreSQL, chỉ còn đọc và nâng cấp kiểm trong CI; (c) bỏ sau khi có đường
   export. Hiện mỗi story trả tiền persistence hai lần, cộng 4 service trong CI. Chủ sở hữu đặt trạng thái. Phụ thuộc ENG-4.

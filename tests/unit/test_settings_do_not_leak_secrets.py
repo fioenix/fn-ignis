@@ -13,7 +13,7 @@ from pydantic import SecretStr
 from ignis.config import Settings, reveal_secret
 
 # Every setting whose value is credential material. THREADS_APP_ID is an OAuth
-# client_id, which are public by design, and the redirect URIs and API versions are not secrets.
+# client_id, which is public by design, and the redirect URIs and API versions are not secrets.
 SECRET_SETTINGS = [
     "DATABASE_URL",
     "YOUTUBE_API_KEY",

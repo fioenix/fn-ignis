@@ -39,7 +39,7 @@ def test_no_automation_hiding_flags_or_webdriver_override_under_src():
 
 
 @pytest.mark.parametrize("path,expected", LAUNCHES.items())
-def test_original_eight_sites_leave_seven_retained_flag_free_launches(path, expected):
+def test_retained_launch_sites_pass_no_concealment_flags(path, expected):
     tree = ast.parse((ROOT / "src/ignis" / path).read_text())
     found = set()
     for function in ast.walk(tree):

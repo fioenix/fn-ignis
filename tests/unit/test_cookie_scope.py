@@ -82,9 +82,8 @@ def test_csrf_uses_longest_eligible_path_and_ignores_foreign_tokens():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("platform", ["threads"])
-async def test_health_scopes_cookies_or_refuses_retired_threads(platform, requests, monkeypatch):
-    domain = f".{platform}.com"
+async def test_threads_health_refuses_without_sending_cookies(requests, monkeypatch):
+    domain = ".threads.com"
     state = {"cookies": [
         cookie("sessionid", "allowed", domain),
         cookie("SID", "foreign", ".google.com"),

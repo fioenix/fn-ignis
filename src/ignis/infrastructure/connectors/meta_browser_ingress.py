@@ -243,7 +243,6 @@ async def collect_json_payloads(
         return []
 
     payloads: List[Dict[str, Any]] = []
-    blocked_response_reason: Optional[str] = None
 
     try:
         async with async_playwright() as p:
@@ -260,21 +259,16 @@ async def collect_json_payloads(
             response_listener = None
 
             async def settle_response_reads():
-                nonlocal accepting_responses, blocked_response_reason
+                nonlocal accepting_responses
                 accepting_responses = False
                 if page is not None and response_listener is not None:
                     page.remove_listener("response", response_listener)
-                pending = [task for task in response_tasks if not task.done()]
-                if pending:
-                    # The finite capture ended before these responses settled. Never bless
-                    # provisional cards or wait/retry another collection to fill that gap.
-                    blocked_response_reason = blocked_response_reason or "REELS_PAGE_UNUSABLE"
-                    for task in pending:
+                # The finite capture ended; never wait or retry to fill a gap.
+                for task in response_tasks:
+                    if not task.done():
                         task.cancel()
                 if response_tasks:
-                    results = await asyncio.gather(*response_tasks, return_exceptions=True)
-                    if any(isinstance(result, BaseException) for result in results):
-                        blocked_response_reason = blocked_response_reason or "REELS_PAGE_UNUSABLE"
+                    await asyncio.gather(*response_tasks, return_exceptions=True)
 
             try:
                 context_kwargs: Dict[str, Any] = {
@@ -320,66 +314,30 @@ async def collect_json_payloads(
                 page.on("request", handle_request)
 
                 async def handle_response(response: Any) -> None:
-                    nonlocal blocked_response_reason
                     if not any(marker in response.url for marker in url_markers):
                         return
-                    is_reels = hostname in {"instagram.com", "www.instagram.com"}
-                    if is_reels and urllib.parse.urlsplit(response.url).hostname not in {"instagram.com", "www.instagram.com"}:
-                        return
-                    if is_reels and response.status != 200:
-                        blocked_response_reason = ("REELS_LOGIN_REQUIRED" if response.status in (401, 403)
-                                                   else "REELS_PAGE_UNUSABLE")
                     try:
                         if "json" not in response.headers.get("content-type", ""):
-                            if is_reels:
-                                blocked_response_reason = "REELS_PAGE_UNUSABLE"
                             return
                         params: Dict[str, List[str]] = {}
                         if expected_query is not None:
                             if response.status != 200:
                                 return
-                            if is_reels:
-                                # Admit only the hashtag endpoint with exact request provenance.
-                                response_url = urllib.parse.urlsplit(response.url)
-                                request_url = urllib.parse.urlsplit(response.request.url)
-                                if (response.request.method != "GET" or response_url.scheme != "https"
-                                        or response_url.netloc != "www.instagram.com"
-                                        or response_url.path != "/api/v1/tags/web_info/"
-                                        or request_url != response_url
-                                        or urllib.parse.parse_qs(response_url.query, keep_blank_values=True).get("tag_name") != [expected_query]):
-                                    return
-                            else:
-                                if response.request.method != "POST":
-                                    return
-                                params = urllib.parse.parse_qs(response.request.post_data or "")
-                                variables = json.loads(params.get("variables", ["{}"])[0])
-                                if not isinstance(variables, dict):
-                                    return
-                                queries = [variables[key] for key in ("query", "search_query") if key in variables]
-                                if not queries or any(query != expected_query for query in queries):
-                                    return
+                            if response.request.method != "POST":
+                                return
+                            params = urllib.parse.parse_qs(response.request.post_data or "")
+                            variables = json.loads(params.get("variables", ["{}"])[0])
+                            if not isinstance(variables, dict):
+                                return
+                            queries = [variables[key] for key in ("query", "search_query") if key in variables]
+                            if not queries or any(query != expected_query for query in queries):
+                                return
                         body = await response.json()
                     except Exception:
-                        if is_reels:
-                            blocked_response_reason = "REELS_PAGE_UNUSABLE"
                         return
                     if isinstance(body, dict):
-                        if is_reels:
-                            message = body.get("message")
-                            if message == "login_required":
-                                blocked_response_reason = "REELS_LOGIN_REQUIRED"
-                            elif message == "challenge_required" or body.get("challenge"):
-                                blocked_response_reason = "REELS_CHALLENGE"
-                            elif message == "checkpoint_required" or body.get("checkpoint_url"):
-                                blocked_response_reason = "REELS_CHECKPOINT"
-                            elif body.get("status") == "fail" or body.get("errors") or body.get("error"):
-                                blocked_response_reason = "REELS_PAGE_UNUSABLE"
-                            if blocked_response_reason:
-                                return
                         if expected_query is not None:
                             if body.get("errors") or payload_validator is None or payload_validator(body) is None:
-                                if is_reels:
-                                    blocked_response_reason = "REELS_PAGE_UNUSABLE"
                                 return
                             doc_ids = params.get("doc_id")
                             if doc_ids:
@@ -396,47 +354,13 @@ async def collect_json_payloads(
                 response_listener = on_response
                 page.on("response", response_listener)
 
-                navigation = await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                await page.goto(url, wait_until="domcontentloaded", timeout=30000)
                 await page.wait_for_timeout(settle_ms)
-                async def require_available_page():
-                    if hostname in {"instagram.com", "www.instagram.com"}:
-                        landed = urllib.parse.urlsplit(page.url)
-                        path = landed.path.lower()
-                        reason = blocked_response_reason
-                        if "/accounts/login" in path:
-                            reason = "REELS_LOGIN_REQUIRED"
-                        elif "/checkpoint" in path:
-                            reason = "REELS_CHECKPOINT"
-                        elif "/challenge" in path:
-                            reason = "REELS_CHALLENGE"
-                        elif landed.hostname not in {"instagram.com", "www.instagram.com"} or navigation is None:
-                            reason = "REELS_PAGE_UNUSABLE"
-                        elif expected_query is not None and (
-                            landed.scheme != "https" or landed.netloc != "www.instagram.com"
-                            or urllib.parse.unquote(landed.path) != "/explore/tags/" + expected_query + "/"
-                            or landed.query or landed.fragment
-                        ):
-                            reason = "REELS_PAGE_UNUSABLE"
-                        elif navigation.status in (401, 403):
-                            reason = "REELS_LOGIN_REQUIRED"
-                        elif navigation.status != 200:
-                            reason = "REELS_PAGE_UNUSABLE"
-                        # These are verbatim third-party UI selectors, not domain vocabulary.
-                        elif await page.locator('form[action*="/accounts/login"]').count():
-                            reason = "REELS_LOGIN_REQUIRED"
-                        elif await page.locator('iframe[src*="captcha"], input[name="captcha"]').count():
-                            reason = "REELS_CHALLENGE"
-                        if reason:
-                            raise ConnectorCapabilityUnavailableException(reason + ": The Reels page is unavailable; no absence was measured.")
-
-                await require_available_page()
 
                 for _ in range(max(scrolls, 0)):
                     await page.mouse.wheel(0, 2400)
                     await page.wait_for_timeout(1800)
-                    await require_available_page()
                 await settle_response_reads()
-                await require_available_page()
 
             finally:
                 try:
