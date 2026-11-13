@@ -27,7 +27,9 @@ Submitting before every required sibling is `STAGED` returns `BLOCKED` / `HOST_S
    mission id, `queries=[]` and `result_limit=20`), the exact queries, `result_limit`, `lifetime_seconds`
    and `authorized: true`. Keep `request_id`, `relay_url` and `tab_script`.
 2. Open `relay_url` in a tab of your own tab group. One relay tab may serve every source and run in a
-   session: navigate it to each new `relay_url`. Each relay accepts only its own request.
+   session: navigate it to the next `relay_url` only after the current relay shows `STAGED`. The open relay
+   page is what receives the answer, so leaving it earlier loses that answer. Each relay accepts only its own
+   request.
 3. On the relay, find the button "Open search: <query>" and click it. A new tab opens on the approved search
    URL. With several queries, open them a few seconds apart.
 4. Re-read your tab list: tab ids change, and a tab the requester touched can leave your group.
