@@ -19,7 +19,7 @@ def require_isolated_config():
     if not config._ENV_ISOLATED or config.reveal_secret(config.settings.DATABASE_URL) != 'sqlite:///:memory:':
         raise ValueError('ISOLATED_IN_MEMORY_SQLITE_REQUIRED')
     if any(config.reveal_secret(getattr(config.settings, name)) for name in (
-        'YOUTUBE_API_KEY', 'THREADS_APP_SECRET', 'INSTAGRAM_APP_SECRET',
+        'YOUTUBE_API_KEY', 'THREADS_APP_SECRET',
         'IGNIS_ENCRYPTION_KEY', 'PLAYWRIGHT_PROXY_SERVER')):
         raise ValueError('OFFLINE_EMPTY_CREDENTIAL_CONFIG_REQUIRED')
 

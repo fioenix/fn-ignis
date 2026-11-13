@@ -40,8 +40,10 @@ Check `research.md` for file:line references before each task; line numbers are 
     have a kept test or live path.
   - Kept `TikTokAuthManager`: the live `TikTokPlugin` types it.
   - Kept the `instagram`/`instagram_browser` keys in `server.py` `_PLATFORM_CREDENTIAL_KEYS`: they read stored rows.
-- [ ] T007 Remove the `INSTAGRAM_*` settings and the `.env.example` Instagram block, with tests and fixtures that name
+- [x] T007 Remove the `INSTAGRAM_*` settings and the `.env.example` Instagram block, with tests and fixtures that name
   them (FR-004).
+  - The example file is `env.example` (no leading dot). Also removed `INSTAGRAM_APP_SECRET` from
+    `scripts/verify_follow_up_root_offline.py`, whose `getattr(settings, ...)` would otherwise raise.
 - [ ] T008 Update `test_repo_conventions.py` allowlists and `docs/PROJECT_REVIEW_CONTEXT.md`; check README, USER_GUIDE
   and AGENTS.md for claims that the removed code exists (FR-006, FR-009).
 - [ ] T009 Verify SC-001–SC-004 with the plan's targeted commands; record results here.

@@ -24,7 +24,7 @@ ENV_GUARD.start()
 SECRET_GUARD.start()
 os.environ.update(DATABASE_URL="sqlite:///:memory:", IGNIS_ENV_ISOLATED="0",
                   IGNIS_ENV_FILE="", YOUTUBE_API_KEY="", IGNIS_ENCRYPTION_KEY="",
-                  THREADS_APP_SECRET="", INSTAGRAM_APP_SECRET="")
+                  THREADS_APP_SECRET="")
 
 from ignis.application.use_cases import host_browser_search as host  # noqa: E402
 from ignis.domain import watchlist_period as periods  # noqa: E402

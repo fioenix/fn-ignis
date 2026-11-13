@@ -12,14 +12,13 @@ from pydantic import SecretStr
 
 from ignis.config import Settings, reveal_secret
 
-# Every setting whose value is credential material. THREADS_APP_ID / INSTAGRAM_APP_ID are OAuth
-# client_ids, which are public by design, and the redirect URIs and API versions are not secrets.
+# Every setting whose value is credential material. THREADS_APP_ID is an OAuth
+# client_id, which are public by design, and the redirect URIs and API versions are not secrets.
 SECRET_SETTINGS = [
     "DATABASE_URL",
     "YOUTUBE_API_KEY",
     "IGNIS_ENCRYPTION_KEY",
     "THREADS_APP_SECRET",
-    "INSTAGRAM_APP_SECRET",
     "PLAYWRIGHT_PROXY_SERVER",
 ]
 

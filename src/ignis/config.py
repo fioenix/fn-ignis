@@ -90,13 +90,6 @@ class Settings(BaseSettings):
     THREADS_REDIRECT_URI: str = Field(default="", description="Registered OAuth redirect URI for the Threads app")
     THREADS_API_VERSION: str = Field(default="v1.0", description="Threads Graph API version prefix")
 
-    # Instagram Graph API (Official, for Reels ingress)
-    INSTAGRAM_USER_ID: str = Field(default="", description="Instagram Business/Creator account ID used for Reels Graph API ingress")
-    INSTAGRAM_APP_ID: str = Field(default="", description="Instagram App ID (client_id) for Graph API OAuth 2.0")
-    INSTAGRAM_APP_SECRET: SecretStr = Field(default=SecretStr(""), description="Instagram App Secret (client_secret) used for long-lived token exchange")
-    INSTAGRAM_REDIRECT_URI: str = Field(default="", description="Registered OAuth redirect URI for the Instagram app")
-    INSTAGRAM_API_VERSION: str = Field(default="v23.0", description="Instagram Graph API version prefix")
-
     # Security & Encryption
     IGNIS_ENCRYPTION_KEY: SecretStr = Field(
         default=SecretStr(""),
