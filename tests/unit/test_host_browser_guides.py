@@ -71,3 +71,21 @@ def test_the_relay_guide_names_every_live_run_failure():
                     "This tab was not opened by the relay", "expires_at", "Wrong account or profile",
                     "page locale is unsupported"):
         assert symptom in relay, symptom
+
+
+def test_relay_guide_ships_the_pre_check_and_the_relay_tab_rule():
+    relay = _packaged("ignis_browser_relay")
+    assert "One relay tab may serve every source and run" in relay
+    assert "only after the current relay shows `STAGED`" in relay
+    assert "querySelectorAll('CARDS')" in relay and "never wait in a loop" in relay
+
+
+@pytest.mark.parametrize("name", ["ignis_tiktok_browser", "ignis_threads_browser", "ignis_instagram_browser"])
+def test_each_source_guide_names_its_pre_check_card_selector(name):
+    assert "Pre-check card selector (relay step 5)" in _packaged(name)
+
+
+def test_tiktok_guide_pre_check_selector_matches_the_extractor():
+    script = resources.files("ignis.infrastructure.connectors.host_browser").joinpath("tiktok_search.js")
+    card = script.read_text(encoding="utf-8").split("const CARD = '", 1)[1].split("'", 1)[0]
+    assert f"`{card}`" in _packaged("ignis_tiktok_browser")

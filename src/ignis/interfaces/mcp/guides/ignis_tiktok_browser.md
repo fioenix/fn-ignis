@@ -3,6 +3,8 @@
 Use with the `ignis_browser_relay` guide, which holds the shared steps and failure table.
 
 - `source: "tiktok"`. The search opens `https://www.tiktok.com/search/video?q=<query>`.
+- Pre-check card selector (relay step 5): `div[data-e2e="search_top-item"], div[data-e2e="search_video-item"]`
+  (the extractor's card selector).
 - Transport: the tab script posts the answer to its relay opener and returns
   `{posted, status, records}` synchronously. If it returns
   `{posted: false, reason: 'This tab was not opened by the relay'}`, reopen the search from the relay button.

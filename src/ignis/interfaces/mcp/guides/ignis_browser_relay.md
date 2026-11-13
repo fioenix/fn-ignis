@@ -26,12 +26,23 @@ Submitting before every required sibling is `STAGED` returns `BLOCKED` / `HOST_S
 1. Call `prepare_host_browser_search` with `source`, `mode` (`TACTICAL`, or `MISSION` with a confirmed
    mission id, `queries=[]` and `result_limit=20`), the exact queries, `result_limit`, `lifetime_seconds`
    and `authorized: true`. Keep `request_id`, `relay_url` and `tab_script`.
-2. Open `relay_url` in a tab of your own tab group.
+2. Open `relay_url` in a tab of your own tab group. One relay tab may serve every source and run in a
+   session: navigate it to the next `relay_url` only after the current relay shows `STAGED`. The open relay
+   page is what receives the answer, so leaving it earlier loses that answer. Each relay accepts only its own
+   request.
 3. On the relay, find the button "Open search: <query>" and click it. A new tab opens on the approved search
    URL. With several queries, open them a few seconds apart.
 4. Re-read your tab list: tab ids change, and a tab the requester touched can leave your group.
-5. Wait for results to load. Optionally check the page language, that result cards exist and that no
-   sign-in wall shows; a wall or challenge means the source is unavailable for this run.
+5. Wait for results to load. Optionally evaluate this read-only check in the search tab, with the card
+   selector from the source guide in place of `CARDS`:
+
+   ```js
+   ({lang: document.documentElement.lang, cards: document.querySelectorAll('CARDS').length,
+     signIn: !!document.querySelector('input[type="password"]')})
+   ```
+
+   `signIn: true` or a challenge means the source is unavailable for this run. With no cards, check once
+   more after a few seconds, then run the tab script on what is there; never wait in a loop.
 6. Evaluate `tab_script` once, verbatim, in that search tab. Never run it twice.
 7. Read the relay page: `STAGED — Task listener closed` means the answer is staged. Close task-created tabs
    only after `STAGED` or after submit, never immediately after `posted: true`.

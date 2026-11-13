@@ -3,6 +3,8 @@
 Use with the `ignis_browser_relay` guide, which holds the shared steps and failure table.
 
 - `source: "threads"`. The search opens `https://www.threads.com/search?q=<query>` (the Top sample).
+- Pre-check card selector (relay step 5): `a[href*="/post/"]:has(time[datetime])` (post links with a
+  time, as the extractor reads them; it keeps only fully rendered cards, so records can be fewer).
 - Transport: the tab script encrypts the answer and, 100 ms later, navigates the same tab to the relay's
   `/receive` page. The script is asynchronous, so the evaluator can return `{}`. Wait about two seconds and
   confirm the relay shows `STAGED` or the tab is on `/receive`. Never run the script a second time.
