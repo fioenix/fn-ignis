@@ -360,3 +360,5 @@ def test_packaged_scripts_stay_safe_to_compact():
             text = script.read_text()
             assert "`" not in text, script.name
             assert not any(line.rstrip().endswith("\\") for line in text.splitlines()), script.name
+            assert "/*" not in text, script.name
+            assert not set(text) & set("\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029"), script.name

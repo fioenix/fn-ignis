@@ -25,7 +25,8 @@ def _compact(script: str) -> str:
     """Drop indentation and whole-line comments: the host agent retypes the tab script verbatim.
 
     Line breaks stay, so automatic semicolon insertion is unchanged; the packaged scripts hold no
-    template literals or line continuations, which this would otherwise alter.
+    template literals, line continuations, block comments or other line separators, which this
+    would otherwise alter.
     """
     lines = (line.strip() for line in script.strip().splitlines())
     return "\n".join(line for line in lines if line and not line.startswith("//"))
