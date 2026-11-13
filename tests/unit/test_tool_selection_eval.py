@@ -68,6 +68,15 @@ def test_validate_refuses_unknown_tools_overlap_and_missing_responses(catalog):
     assert "expected 40-50 intents" in joined
 
 
+def test_validate_refuses_option_like_text_and_path_like_ids(catalog):
+    problems = validate(
+        IntentSet("t", [_intent(text="--plugin-dir=/tmp/x"), _intent(id="../../x")]), catalog.tool_names
+    )
+    joined = "\n".join(problems)
+    assert "X01: text must not start with '-'" in joined
+    assert "../../x: id must be letters, digits and hyphens" in joined
+
+
 def test_score_counts_first_call_trap_wrong_calls_and_terminal():
     row = score_intent(_intent(), ["verify_connectors_health", "diagnose_system_health"], capped=False)
     assert row["first_call_ok"] is False

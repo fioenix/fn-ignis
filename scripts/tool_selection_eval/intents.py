@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,7 @@ from typing import Any
 REPLY = "reply"
 JOURNEYS = ("tactical", "watchlist", "mission")
 MIN_INTENTS, MAX_INTENTS, MIN_TRAPS = 40, 50, 16
+INTENT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*$")
 
 
 @dataclass(frozen=True)
@@ -61,8 +63,13 @@ def validate(intent_set: IntentSet, tool_names: set[str]) -> list[str]:
         if intent_id in seen:
             problems.append(f"{intent_id}: duplicate id")
         seen.add(intent_id)
-        if not str(intent.get("text", "")).strip():
+        if not INTENT_ID.match(str(intent_id)):
+            problems.append(f"{intent_id}: id must be letters, digits and hyphens (it names files)")
+        text = str(intent.get("text", "")).strip()
+        if not text:
             problems.append(f"{intent_id}: empty text")
+        elif text.startswith("-"):
+            problems.append(f"{intent_id}: text must not start with '-' (the host CLI would read an option)")
         first = intent.get("acceptable_first") or []
         path = set(intent.get("acceptable_path") or [])
         trap_tools = set(intent.get("trap_tools") or [])

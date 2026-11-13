@@ -28,7 +28,7 @@ model.
 simulated server (FR-005); the host agent runs isolated from the maintainer's own configuration
 (FR-006); not in CI (FR-011).
 
-**Scale/Scope**: 46 intents × 3 on two models repeats, at most 8 tool calls per intent.
+**Scale/Scope**: 46 intents × 3 repeats on two models, at most 8 tool calls per intent.
 
 ## Design
 

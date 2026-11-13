@@ -60,5 +60,7 @@ scope or proposed a workspace.
 - Scripted responses stand in for the host-browser step a headless agent cannot run, and say so in
   a neutral note; they may make the host-browser path easier than it is in a real host.
 - The host runs with a short neutral system prompt, not Claude Desktop's or another host's.
+- The simulator republishes tools, prompts and instructions but not the server's resources, and
+  validates arguments with JSON Schema rather than the server's own validation and middleware.
 - First baseline (same day, 38 intents, 8 traps, no neutral reads) is superseded: one trap flip
   moved its trap metric by 12.5 points, and half its wrong calls were harmless orientation reads.

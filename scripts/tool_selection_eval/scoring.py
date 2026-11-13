@@ -79,7 +79,7 @@ def _rate(rows: list[dict[str, Any]], key: str) -> float | None:
 def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
     """Headline metrics of one run, as percentages where they are rates."""
     traps = [row for row in rows if row["trap"]]
-    terminal_calls = [row["calls_to_terminal"] for row in rows if row["calls_to_terminal"]]
+    terminal_calls = [row["calls_to_terminal"] for row in rows if row["calls_to_terminal"] is not None]
     return {
         "intents": len(rows),
         "first_call_accuracy": _rate(rows, "first_call_ok"),
