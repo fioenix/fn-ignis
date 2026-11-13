@@ -249,8 +249,8 @@ Bề mặt agent:
   Lượt chạy thật T029: 12 quan sát Instagram trong khoảng 65 giây.
   T014 và T032 chạy trong session mới: SC-001 đạt ở phần quy trình tìm kiếm trên wheel cuối, nhưng tính chặt thì còn
   hai bước ngoài skill (`date`, đọc ghi chú của lượt trước). SC-002 (sửa ngày 13/11/2026 thành "nhận mọi ô có chú
-  thích"): T029 được 12, T014 được 13, T032 được 9 trên 9 ô có chú thích; chỉ T029 có kiểm tra danh tính. SC-003 (≤60 giây, trung vị ba lượt): TikTok 58 giây, Instagram 59 giây đạt;
-  Threads 79 giây chưa đạt.
+  thích"): T029 được 12, T014 được 13, T032 được 9 trên 9 ô có chú thích; chỉ T029 có kiểm tra danh tính. SC-003 (trung vị ba lượt): TikTok 58 giây, Instagram 59 giây đạt mức ≤60 giây;
+  Threads 79 giây đạt mức ≤80 giây mà chủ sở hữu nới ngày 13/11/2026, vì agent phải chép lại script dài gấp đôi.
   Lượt chạy lặp (VAL-3 rút gọn, hai lượt mỗi nguồn): Jaccard TikTok 0,71, Threads 0,45; ghi trong `research.md`.
 - [ ] **ENG-2 — Gỡ code connector đã nghỉ** (M): Reels, Google Trends RSS, nhánh Explore và tìm kiếm headless của
   `TikTokPlugin`; xóa test tương ứng và thu hẹp phạm vi coverage SC-004.

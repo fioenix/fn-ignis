@@ -42,7 +42,8 @@ TACTICAL run per source as acceptance (owner-permitted sessions on the Finos pro
 
 **Project Type**: MCP server library plus agent skills
 
-**Performance Goals**: SC-003, median prepare-to-accepted at or under 60 s per source (TikTok baseline 40 s)
+**Performance Goals**: SC-003, median prepare-to-accepted at or under 60 s per source, except Threads at or under
+80 s (owner, 2026-11-13; TikTok baseline 40 s)
 
 **Constraints**: no clicks, typing or scrolling on platform pages; no bot-evasion tooling; one extractor run
 per tab; tool count stays 41 and tool names stay unchanged
