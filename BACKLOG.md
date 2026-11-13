@@ -242,13 +242,15 @@ Bề mặt agent:
 - [x] **BUG-2 — Insight maturity đếm "N topic clusters" trên toàn geo**, không phải cụm của mission
   (`_assess_maturity` dùng `len(clusters)` của `top_clusters_use_case`) — merge 12/11/2026 (PR #141): đếm cụm
   riêng trong tín hiệu của mission; mission thật giờ ghi 8 cụm thay vì 16.
-- [~] **SPEC-025 — Bộ skill host-browser và Instagram qua host browser** — chủ sở hữu yêu cầu ngày 11/11/2026.
-  Đã merge 12–13/11/2026 (PR #139, #143, #144, #146–#155): mỗi nền tảng một skill (`ignis-tiktok-browser`, `ignis-threads-browser`,
+- [x] **SPEC-025 — Bộ skill host-browser và Instagram qua host browser** — chủ sở hữu yêu cầu ngày 11/11/2026.
+  Đã merge 12–13/11/2026 (PR #139, #143, #144, #146–#157): mỗi nền tảng một skill (`ignis-tiktok-browser`, `ignis-threads-browser`,
   `ignis-instagram-browser`) với guide relay dùng chung; ngày đăng TikTok lấy từ video id; Instagram thu chú
   thích từ lưới tìm kiếm theo từ khóa, cả TACTICAL lẫn MISSION, chỉ nhận bản ghi khi locale trang là `en`.
   Lượt chạy thật T029: 12 quan sát Instagram trong khoảng 65 giây.
-  Còn mở: T014 (chạy trong session mới, SC-001) và T032 (chạy lại quickstart trên wheel cuối, ghi SC-001..SC-003).
-  SC-003 (≤60 giây) đang trượt: TikTok 69 giây, Threads 79 giây, Instagram khoảng 65 giây.
+  T014 và T032 chạy trong session mới: SC-001 đạt ở phần quy trình tìm kiếm trên wheel cuối, nhưng tính chặt thì còn
+  hai bước ngoài skill (`date`, đọc ghi chú của lượt trước). SC-002 (sửa ngày 13/11/2026 thành "nhận mọi ô có chú
+  thích"): T029 được 12, T014 được 13, T032 được 9 trên 9 ô có chú thích; chỉ T029 có kiểm tra danh tính. SC-003 (≤60 giây, trung vị ba lượt): TikTok 58 giây, Instagram 59 giây đạt;
+  Threads 79 giây chưa đạt.
   Lượt chạy lặp (VAL-3 rút gọn, hai lượt mỗi nguồn): Jaccard TikTok 0,71, Threads 0,45; ghi trong `research.md`.
 - [ ] **ENG-2 — Gỡ code connector đã nghỉ** (M): Reels, Google Trends RSS, nhánh Explore và tìm kiếm headless của
   `TikTokPlugin`; xóa test tương ứng và thu hẹp phạm vi coverage SC-004.

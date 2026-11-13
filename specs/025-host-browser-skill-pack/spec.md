@@ -60,6 +60,16 @@ in the order the live run proved, and recovers from each known failure without a
   chat 2026-11-12). Covers the T020 spike and the T029 live acceptance; the platform-page boundary is unchanged.
 - Q: T020 transport for Instagram? → A: `fragment_receive`, as for Threads: a tab opened from a local page by a
   button click loses `window.opener` once Instagram loads (agent decided; basis: T020 spike in `research.md`).
+
+### Session 2026-11-13
+
+- Q: SC-002 when the grid shows fewer than 10 captioned tiles (T032: 9 of 24)? → A: SC-002 counts every visible
+  captioned tile as accepted, without identity; 10 is the typical figure, not a floor (owner decided, chat
+  2026-11-13).
+- Q: Does a period comparison across the TikTok date change (first collection day → publish day) mix bases
+  silently? → A: No. PR 148 moved TikTok to collection path `tiktok-public-grid-v4`, a distinct path identity, so a
+  comparison across the upgrade reports `collection_path_changed` or `collection_path_mixed` (owner chose to
+  verify, chat 2026-11-13; basis: `watchlist_period._path_gate`, `tests/unit/test_collection_path_comparability.py`).
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - One skill runs a TikTok or Threads search end to end (Priority: P1)
@@ -150,8 +160,9 @@ remedy; a review against `research.md` finds none missing.
 
 - **SC-001**: A fresh agent given only the skill completes TikTok and Threads TACTICAL searches to
   `ACCEPTED` with zero steps outside the skill, in one attempt each.
-- **SC-002**: An Instagram TACTICAL search on the G3 keyword returns at least 10 accepted observations
-  with zero author identifiers in stored excerpts.
+- **SC-002**: An Instagram TACTICAL search on the G3 keyword accepts every visible tile that carries a
+  caption, with zero author identifiers in stored excerpts (about 10 or more is typical; the grid decides how
+  many tiles have captions).
 - **SC-003**: Median wall time from prepare to accepted stays at or under 60 seconds per source
   (live baseline: about 40 seconds for TikTok).
 

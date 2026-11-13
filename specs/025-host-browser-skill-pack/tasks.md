@@ -68,7 +68,7 @@ views never mix the two date bases under one collection path.
 
 ## Phase 6: User Story 2 — Instagram keyword search through the host browser (P2)
 
-**Goal**: an Instagram TACTICAL search returns ≥10 accepted caption observations with no author identity (SC-002).
+**Goal**: an Instagram TACTICAL search accepts every visible captioned tile with no author identity (SC-002).
 **Independent test**: quickstart step 4.
 
 - [x] T020 [US2] Gate: before any live Instagram step (T020, T029), ask the owner to authorize a real Instagram session on the Finos profile (AGENTS.md section 8) and record the answer in `spec.md` Clarifications; without a yes, stop Phase 6 and do not call `prepare_host_browser_search` with `authorized: true` for `instagram`. Then spike (read-only, live): on the Finos profile, open the keyword grid from a relay-opened tab and confirm whether `window.opener` survives Instagram's navigation; choose the transport (opener or fragment) and record it in `specs/025-host-browser-skill-pack/research.md`
@@ -99,7 +99,7 @@ the descriptor carries `connector_surface`; a mission stores the validated handl
 
 - [x] T030 [P] Update `docs/USER_GUIDE.md` and `docs/USER_GUIDE.vi.md` host-browser sections to name the three sources and the skills
 - [x] T031 [P] Record Spec 025 status in `BACKLOG.md` (SPEC-025, MEA-1)
-- [ ] T032 Run quickstart steps 1–6 once more on the final wheel; record SC-001..SC-003 results in `specs/025-host-browser-skill-pack/research.md`
+- [x] T032 Run quickstart steps 1–6 once more on the final wheel; record SC-001..SC-003 results in `specs/025-host-browser-skill-pack/research.md` (2026-11-13: SC-001 met for the procedure, strictly two steps outside the skill; SC-002 9 of 9 captioned tiles; SC-003 Threads median 79 s over)
 
 ## Dependencies
 
