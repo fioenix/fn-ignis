@@ -85,15 +85,19 @@ def sim_config(intents_path: Path, intent_id: str, log_path: Path, cap: int) -> 
     }
 
 
-def read_calls(log_path: Path) -> tuple[list[str], bool]:
+def read_calls(log_path: Path) -> tuple[list[str], bool, bool]:
+    """Return the tool calls, whether the cap was hit, and whether the simulator started."""
     if not log_path.exists():
-        return [], False
+        return [], False, False
     entries = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line]
-    return [entry["tool"] for entry in entries], any(entry["outcome"] == "cap" for entry in entries)
+    started = any(entry["outcome"] == "started" for entry in entries)
+    calls = [entry for entry in entries if entry["outcome"] != "started"]
+    return [entry["tool"] for entry in calls], any(entry["outcome"] == "cap" for entry in calls), started
 
 
-def run_intent(args: argparse.Namespace, intents_path: Path, intent: dict[str, Any], run_dir: Path) -> dict[str, Any]:
-    log_path = run_dir / f"{intent['id']}.calls.jsonl"
+def _host_attempt(
+    args: argparse.Namespace, intents_path: Path, intent: dict[str, Any], log_path: Path
+) -> tuple[dict[str, Any], int]:
     log_path.unlink(missing_ok=True)
     with tempfile.TemporaryDirectory(prefix="ignis-eval-") as workdir:
         config_path = Path(workdir) / "mcp.json"
@@ -110,22 +114,49 @@ def run_intent(args: argparse.Namespace, intents_path: Path, intent: dict[str, A
         result = json.loads(completed.stdout)
     except json.JSONDecodeError:
         result = {"is_error": True, "result": completed.stderr[-2000:] or completed.stdout[-2000:]}
+    result["stderr_tail"] = completed.stderr[-2000:]
+    return result, completed.returncode
+
+
+def run_intent(
+    args: argparse.Namespace,
+    intents_path: Path,
+    intent: dict[str, Any],
+    run_dir: Path,
+    neutral: frozenset[str],
+) -> dict[str, Any]:
+    log_path = run_dir / f"{intent['id']}.calls.jsonl"
+    # A simulator that never connected is an infrastructure fault, not agent behaviour: retry once.
+    for attempt in (1, 2):
+        result, returncode = _host_attempt(args, intents_path, intent, log_path)
+        calls, capped, started = read_calls(log_path)
+        if started:
+            break
+    result["attempts"] = attempt
     (run_dir / f"{intent['id']}.host.json").write_text(json.dumps(result, ensure_ascii=False, indent=1))
-    calls, capped = read_calls(log_path)
-    row = score_intent(intent, calls, capped)
-    row["host_error"] = bool(result.get("is_error")) or completed.returncode != 0
+    row = score_intent(intent, calls, capped, neutral)
+    row["host_error"] = bool(result.get("is_error")) or returncode != 0 or not started
+    if not started:
+        result["result"] = f"simulated server never started: {result.get('result', '')}"
     row["reply"] = str(result.get("result", ""))[:600]
     row["cost_usd"] = result.get("total_cost_usd")
+    row["attempts"] = attempt
     return row
 
 
-def run_once(args: argparse.Namespace, intents_path: Path, intents: list[dict[str, Any]], run_dir: Path) -> list[dict[str, Any]]:
+def run_once(
+    args: argparse.Namespace,
+    intents_path: Path,
+    intents: list[dict[str, Any]],
+    run_dir: Path,
+    neutral: frozenset[str],
+) -> list[dict[str, Any]]:
     run_dir.mkdir(parents=True, exist_ok=True)
-    first = run_intent(args, intents_path, intents[0], run_dir)
+    first = run_intent(args, intents_path, intents[0], run_dir, neutral)
     if first["host_error"]:
         raise SystemExit(f"Host agent failed on the first intent; no baseline recorded: {first['reply']}")
     with ThreadPoolExecutor(max_workers=args.jobs) as pool:
-        rest = list(pool.map(lambda intent: run_intent(args, intents_path, intent, run_dir), intents[1:]))
+        rest = list(pool.map(lambda intent: run_intent(args, intents_path, intent, run_dir, neutral), intents[1:]))
     rows = [first, *rest]
     failed = [row["id"] for row in rows if row["host_error"]]
     if failed:
@@ -145,16 +176,17 @@ def render_markdown(report: dict[str, Any]) -> str:
         "",
         "## Headline metrics per run",
         "",
-        "| Run | First call % | Trap first call % | Trap wrong first | Tactical % | Watchlist % | Mission % | Mean wrong calls | Terminal reach % | Median calls to terminal |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| Run | First call % | Trap first call % | Trap wrong first | Trap call % | Tactical % | Watchlist % | Mission % | Mean wrong calls | Mean neutral calls | Terminal reach % | Median calls to terminal |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for index, run in enumerate(report["runs"], start=1):
         metrics = run["metrics"]
         journeys = metrics["first_call_accuracy_by_journey"]
         lines.append(
             f"| {index} | {metrics['first_call_accuracy']} | {metrics['trap_first_call_accuracy']} | "
-            f"{metrics['trap_first_call_wrong']} | {journeys['tactical']} | {journeys['watchlist']} | "
-            f"{journeys['mission']} | {metrics['mean_wrong_calls']} | {metrics['terminal_reach_rate']} | "
+            f"{metrics['trap_first_call_wrong']} | {metrics['trap_call_rate']} | {journeys['tactical']} | "
+            f"{journeys['watchlist']} | {journeys['mission']} | {metrics['mean_wrong_calls']} | "
+            f"{metrics['mean_neutral_calls']} | {metrics['terminal_reach_rate']} | "
             f"{metrics['median_calls_to_terminal']} |"
         )
     stable = report["stability"]
@@ -166,11 +198,11 @@ def render_markdown(report: dict[str, Any]) -> str:
     else:
         verdict = "stable" if stable["stable"] else f"UNSTABLE on {stable['unstable_metrics']}"
         lines.append(f"- Verdict against the 10-point bar: **{verdict}**")
-    lines += ["", "## Per intent (last run)", "", "| Intent | Trap | First call | OK | Wrong tools | Terminal | Calls |", "| --- | --- | --- | --- | --- | --- | --- |"]
+    lines += ["", "## Per intent (last run)", "", "| Intent | Trap | Decisive first call | OK | Trap calls | Wrong tools | Terminal | Calls |", "| --- | --- | --- | --- | --- | --- | --- | --- |"]
     for row in report["runs"][-1]["rows"]:
         lines.append(
             f"| {row['id']} | {'yes' if row['trap'] else ''} | {row['first_call'] or 'reply'} | "
-            f"{'yes' if row['first_call_ok'] else 'NO'} | {', '.join(row['wrong_tools'])} | "
+            f"{'yes' if row['first_call_ok'] else 'NO'} | {', '.join(row['trap_calls'])} | {', '.join(row['wrong_tools'])} | "
             f"{'yes' if row['reached_terminal'] else 'no'}{' (cap)' if row['capped'] else ''} | {' → '.join(row['calls'])} |"
         )
     return "\n".join(lines) + "\n"
@@ -203,10 +235,10 @@ def main() -> None:
             raise SystemExit(f"No intent matches {args.only}")
 
     started = datetime.now(timezone.utc)
-    out_dir = Path(args.out) if args.out else REPO_ROOT / "reports" / "tool_selection_eval" / started.strftime("%Y%m%dT%H%M%SZ")
+    out_dir = Path(args.out).resolve() if args.out else REPO_ROOT / "reports" / "tool_selection_eval" / started.strftime("%Y%m%dT%H%M%SZ")
     runs = []
     for repeat in range(1, args.repeats + 1):
-        rows = run_once(args, intents_path, intents, out_dir / f"run-{repeat}")
+        rows = run_once(args, intents_path, intents, out_dir / f"run-{repeat}", intent_set.neutral_tools)
         runs.append({"metrics": aggregate(rows), "rows": rows})
         print(f"run {repeat}: {json.dumps(runs[-1]['metrics'], ensure_ascii=False)}", flush=True)
     report = {

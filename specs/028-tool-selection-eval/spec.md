@@ -112,10 +112,11 @@ line.
 
 ### Functional Requirements
 
-- **FR-001**: The intent set MUST hold 30–40 intents spread over three journeys: tactical
+- **FR-001**: The intent set MUST hold 40–50 intents spread over three journeys: tactical
   collection (one bounded source question), watchlist follow-up (save, run, period view) and
-  Market mission (brief, ingress, qualification, claims, report). At least 8 intents MUST be
-  traps, including "find market opportunities" and "show my Threads".
+  Market mission (brief, ingress, qualification, claims, report). At least 16 intents MUST be
+  traps, including "find market opportunities" and "show my Threads", so one trap intent moves
+  the trap metric by at most about 6 points.
 - **FR-002**: Each intent MUST declare its journey, whether it is a trap, the acceptable first
   tools (or "no tool"), tools that count as trap calls, its terminal state and the scripted
   handler responses it needs.
@@ -128,9 +129,13 @@ line.
   endpoint; every handler is simulated.
 - **FR-006**: The host agent MUST run without the maintainer's own MCP servers, plugins, hooks,
   memory or built-in file and shell tools, so only the Ignis catalog is available to it.
-- **FR-007**: The eval MUST score first-call accuracy, wrong calls per intent, and calls to the
-  terminal state, overall, per journey and for traps, and cap each intent at a fixed number of
-  tool calls.
+- **FR-007**: The eval MUST score first-call accuracy, the share of intents with any trap-tool
+  call, wrong calls per intent, and calls to the terminal state, overall, per journey and for
+  traps, and cap each intent at a fixed number of tool calls.
+- **FR-007a**: A declared set of read-only orientation tools (listing missions or workspaces,
+  reading a watchlist, auth status, health, logs, lexicons, runtime config) MUST count as neutral:
+  never wrong, skipped when finding the first call that commits to a path, and answered with
+  shared default responses. A neutral tool cannot be a trap tool.
 - **FR-008**: The eval MUST support repeated runs and report each headline metric's spread, with
   an unstable verdict above 10 percentage points.
 - **FR-009**: Each run MUST record the host model, the catalog fingerprint and the intent-set
@@ -141,6 +146,7 @@ line.
 
 ### Key Entities
 
+- **Neutral tool**: a read-only orientation tool that never counts as wrong.
 - **Intent**: one user request with its journey, trap flag, acceptable first tools, trap tools,
   terminal state and scripted responses.
 - **Run**: one pass of the host agent over the intent set, with model, catalog fingerprint and
@@ -153,12 +159,13 @@ line.
 ### Measurable Outcomes
 
 - **SC-001**: One command produces a baseline report over the whole intent set in under 30 minutes.
-- **SC-002**: The report gives first-call accuracy overall, per journey and for traps, wrong calls
-  per intent, and the share of intents that reach their terminal state with the median calls taken.
+- **SC-002**: The report gives first-call accuracy overall, per journey and for traps, the
+  trap-call rate, wrong and neutral calls per intent, and the share of intents that reach their
+  terminal state with the median calls taken.
 - **SC-003**: Three repeated runs give a spread for each headline metric and a stability verdict
   against the 10-point bar.
-- **SC-004**: A baseline is recorded for the current catalog, so AGX-2 can test its target of at
-  least a 50% drop in wrong first calls on trap intents.
+- **SC-004**: A baseline is recorded for the current catalog on two host models, so AGX-2 can
+  test its target of at least a 50% drop in wrong first calls on trap intents.
 - **SC-005**: Zero real sources, stores or sessions are touched during a run.
 
 ## Assumptions
@@ -180,3 +187,9 @@ line.
 - Q: Which model plays the host agent that selects tools? → A: Claude Code headless on the
   owner's subscription, measuring real host behaviour including multi-step runs (owner, chat
   13/11/2026).
+- Q: The first baseline (13/11/2026, Sonnet, 38 intents, 8 traps) spread 25 points on trap
+  first-call accuracy, and 23 of 46 "wrong" calls were harmless orientation reads. Cancel, or fix
+  the scoring and rerun? → A: Fix and rerun: neutral orientation reads, a trap-call rate, at least
+  16 trap intents, and a second, smaller host model (owner, chat 13/11/2026). The intent range
+  moves from 30–40 to 40–50 to hold the extra traps (agent decided; basis: one flip in 8 traps is
+  12.5 points, above the 10-point bar by construction).

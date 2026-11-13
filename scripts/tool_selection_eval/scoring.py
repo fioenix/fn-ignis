@@ -8,13 +8,32 @@ from typing import Any
 from scripts.tool_selection_eval.intents import JOURNEYS, REPLY
 
 STABILITY_BAR_POINTS = 10.0
-RATE_METRICS = ("first_call_accuracy", "trap_first_call_accuracy", "terminal_reach_rate")
+RATE_METRICS = (
+    "first_call_accuracy",
+    "trap_first_call_accuracy",
+    "trap_call_rate",
+    "terminal_reach_rate",
+)
 
 
-def score_intent(intent: dict[str, Any], calls: list[str], capped: bool) -> dict[str, Any]:
-    """Score one transcript: `calls` is the ordered list of tool names the agent called."""
-    first = calls[0] if calls else None
-    path = set(intent["acceptable_path"])
+def decisive_first(intent: dict[str, Any], calls: list[str], neutral: frozenset[str]) -> str | None:
+    """First call that commits to a path: a neutral read counts only if the intent asks for it."""
+    for name in calls:
+        if name not in neutral or name in intent["acceptable_first"]:
+            return name
+    return None
+
+
+def score_intent(
+    intent: dict[str, Any], calls: list[str], capped: bool, neutral: frozenset[str] = frozenset()
+) -> dict[str, Any]:
+    """Score one transcript: `calls` is the ordered list of tool names the agent called.
+
+    Neutral tools are read-only orientation calls (listing missions, reading a watchlist); they
+    never count as wrong and are skipped when finding the decisive first call.
+    """
+    first = decisive_first(intent, calls, neutral)
+    path = set(intent["acceptable_path"]) | neutral
     trap_tools = set(intent.get("trap_tools") or [])
     terminal = intent["terminal"]
     if first is None:
@@ -36,11 +55,14 @@ def score_intent(intent: dict[str, Any], calls: list[str], capped: bool) -> dict
         "journey": intent["journey"],
         "trap": bool(intent.get("trap")),
         "first_call": first,
+        "raw_first_call": calls[0] if calls else None,
+        "neutral_calls": sum(1 for name in calls if name in neutral and name not in intent["acceptable_path"]),
         "first_call_ok": first_ok,
         "first_call_trap": first in trap_tools,
         "wrong_calls": len(wrong),
         "wrong_tools": wrong,
         "trap_calls": [name for name in calls if name in trap_tools],
+        "any_trap_call": any(name in trap_tools for name in calls),
         "reached_terminal": reached,
         "calls_to_terminal": calls_to_terminal,
         "capped": capped,
@@ -63,11 +85,15 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "first_call_accuracy": _rate(rows, "first_call_ok"),
         "trap_first_call_accuracy": _rate(traps, "first_call_ok"),
         "trap_first_call_wrong": sum(1 for row in traps if not row["first_call_ok"]),
+        "trap_call_rate": _rate(rows, "any_trap_call"),
         "first_call_accuracy_by_journey": {
             journey: _rate([row for row in rows if row["journey"] == journey], "first_call_ok")
             for journey in JOURNEYS
         },
         "mean_wrong_calls": round(sum(row["wrong_calls"] for row in rows) / len(rows), 2)
+        if rows
+        else None,
+        "mean_neutral_calls": round(sum(row["neutral_calls"] for row in rows) / len(rows), 2)
         if rows
         else None,
         "terminal_reach_rate": _rate(rows, "reached_terminal"),

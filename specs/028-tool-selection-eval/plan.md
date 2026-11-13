@@ -5,7 +5,7 @@
 ## Summary
 
 A maintainer-run eval that puts a real host agent (Claude Code headless) in front of the live Ignis
-tool catalog with simulated handlers, feeds it 38 user intents over three journeys, and scores the
+tool catalog with simulated handlers, feeds it 46 user intents over three journeys, and scores the
 tool calls it makes. It adds no MCP tool, no product behaviour and no dependency. The deliverable is
 the eval, its model-free unit tests, and a recorded baseline for AGX-2, AGX-3 and AGX-7.
 
@@ -28,7 +28,7 @@ model.
 simulated server (FR-005); the host agent runs isolated from the maintainer's own configuration
 (FR-006); not in CI (FR-011).
 
-**Scale/Scope**: 38 intents × 3 repeats, at most 8 tool calls per intent.
+**Scale/Scope**: 46 intents × 3 on two models repeats, at most 8 tool calls per intent.
 
 ## Design
 
@@ -80,18 +80,22 @@ overrides it and the report records it.
 
 ### Scoring (FR-007, FR-008)
 
-Per intent: `first_call_ok` (first call in the acceptable set, or no call when "no tool" is
-acceptable), `first_call_trap` (first call in the trap set), `wrong_calls` (calls outside the
-acceptable path set), `reached_terminal` and `calls_to_terminal`. Per run: first-call accuracy
-overall, per journey and on traps; mean wrong calls; terminal-reach rate; median calls to terminal.
-Over repeats: min, max and spread in percentage points for the four rate metrics; unstable when any
-spread exceeds 10.
+Per intent: the decisive first call is the first call that is not a neutral read, unless the
+intent lists that read as acceptable first. `first_call_ok` (decisive first call in the acceptable
+set, or none when "no tool" is acceptable), `first_call_trap`, `any_trap_call` (a trap tool
+anywhere in the run), `neutral_calls`, `wrong_calls` (calls outside the acceptable path and the
+neutral set), `reached_terminal` and `calls_to_terminal`. Per run: first-call accuracy overall,
+per journey and on traps; trap-call rate; mean wrong and neutral calls; terminal-reach rate; median
+calls to terminal. Over repeats: min, max and spread in percentage points for the four rate
+metrics (first call, trap first call, trap-call rate, terminal reach); unstable when any spread
+exceeds 10.
 
 ### Intent set (FR-001–FR-003)
 
-38 intents: 14 tactical, 11 watchlist and 13 mission, 8 of them traps (among them "find market
+46 intents: 17 tactical, 13 watchlist and 16 mission, 16 of them traps (among them "find market
 opportunities" and "show my Threads"). Mostly Vietnamese with diacritics, five in English and three
-untoned Vietnamese. Each intent names `acceptable_first`, `acceptable_path`,
+untoned Vietnamese. The set also declares nine neutral orientation tools with shared default
+responses; an intent's own response for a tool overrides the default. Each intent names `acceptable_first`, `acceptable_path`,
 `trap_tools`, `terminal` (a tool call or `reply`) and `responses`. A unit test refuses an intent
 that names a tool missing from the live catalog.
 

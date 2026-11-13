@@ -25,8 +25,16 @@ CAP_REACHED = {"status": "ERROR", "message": "Rate limit reached for this sessio
 class Simulator:
     """Answer tool calls for one intent from its scripted responses."""
 
-    def __init__(self, intent: dict[str, Any], catalog: Catalog, cap: int, log_path: Path) -> None:
+    def __init__(
+        self,
+        intent: dict[str, Any],
+        catalog: Catalog,
+        cap: int,
+        log_path: Path,
+        defaults: dict[str, list[dict[str, Any]]] | None = None,
+    ) -> None:
         self.intent = intent
+        self.defaults = defaults or {}
         self.catalog = catalog
         self.cap = cap
         self.log_path = log_path
@@ -34,7 +42,7 @@ class Simulator:
         self._consumed: dict[str, int] = {}
 
     def _scripted(self, name: str) -> dict[str, Any]:
-        scripted = self.intent.get("responses", {}).get(name)
+        scripted = self.intent.get("responses", {}).get(name) or self.defaults.get(name)
         if not scripted:
             return UNSCRIPTED
         index = self._consumed.get(name, 0)
@@ -113,8 +121,15 @@ def build_server(simulator: Simulator):
 async def _serve(args: argparse.Namespace) -> None:
     from mcp.server.stdio import stdio_server
 
-    intent = load_intents(Path(args.intents)).by_id(args.intent_id)
-    simulator = Simulator(intent, await load_catalog(), args.cap, Path(args.log))
+    intent_set = load_intents(Path(args.intents))
+    simulator = Simulator(
+        intent_set.by_id(args.intent_id),
+        await load_catalog(),
+        args.cap,
+        Path(args.log),
+        defaults=intent_set.neutral_responses,
+    )
+    simulator._log({"n": 0, "tool": None, "outcome": "started"})
     server = build_server(simulator)
     async with stdio_server() as (read_stream, write_stream):
         await server.run(read_stream, write_stream, server.create_initialization_options())
