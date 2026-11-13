@@ -167,8 +167,8 @@ remedy; a review against `research.md` finds none missing.
 - **SC-002**: An Instagram TACTICAL search on the G3 keyword accepts every visible tile that carries a
   caption, with zero author identifiers in stored excerpts (about 10 or more is typical; the grid decides how
   many tiles have captions).
-- **SC-003**: Median wall time from prepare to accepted stays at or under 60 seconds per source, and at
-  or under 80 seconds for Threads (live baseline: about 40 seconds for TikTok).
+- **SC-003**: Median wall time from prepare to accepted stays at or under 60 seconds per source, except
+  Threads at or under 80 seconds (live baseline: about 40 seconds for TikTok).
 
 ## Assumptions
 
