@@ -70,6 +70,10 @@ in the order the live run proved, and recovers from each known failure without a
   silently? → A: No. PR 148 moved TikTok to collection path `tiktok-public-grid-v4`, a distinct path identity, so a
   comparison across the upgrade reports `collection_path_changed` or `collection_path_mixed` (owner chose to
   verify, chat 2026-11-13; basis: `watchlist_period._path_gate`, `tests/unit/test_collection_path_comparability.py`).
+- Q: Threads misses SC-003's 60 s (three-run median 79 s). Optimise or relax? → A: Relax Threads to ≤80 s (owner
+  decided, chat 2026-11-13). Basis: the T032 transcript shows the agent retyping a tab script twice TikTok's length
+  (about 28 s) plus about seven tool round trips; PR 160's compaction saves about 3 s; a larger cut needs a
+  transport redesign that no longer has the agent retype the script.
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - One skill runs a TikTok or Threads search end to end (Priority: P1)
@@ -163,8 +167,8 @@ remedy; a review against `research.md` finds none missing.
 - **SC-002**: An Instagram TACTICAL search on the G3 keyword accepts every visible tile that carries a
   caption, with zero author identifiers in stored excerpts (about 10 or more is typical; the grid decides how
   many tiles have captions).
-- **SC-003**: Median wall time from prepare to accepted stays at or under 60 seconds per source
-  (live baseline: about 40 seconds for TikTok).
+- **SC-003**: Median wall time from prepare to accepted stays at or under 60 seconds per source, and at
+  or under 80 seconds for Threads (live baseline: about 40 seconds for TikTok).
 
 ## Assumptions
 

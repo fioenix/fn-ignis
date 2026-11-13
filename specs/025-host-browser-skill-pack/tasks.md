@@ -99,7 +99,7 @@ the descriptor carries `connector_surface`; a mission stores the validated handl
 
 - [x] T030 [P] Update `docs/USER_GUIDE.md` and `docs/USER_GUIDE.vi.md` host-browser sections to name the three sources and the skills
 - [x] T031 [P] Record Spec 025 status in `BACKLOG.md` (SPEC-025, MEA-1)
-- [x] T032 Run quickstart steps 1–6 once more on the final wheel; record SC-001..SC-003 results in `specs/025-host-browser-skill-pack/research.md` (2026-11-13: SC-001 met for the procedure, strictly two steps outside the skill; SC-002 9 of 9 captioned tiles; SC-003 Threads median 79 s over)
+- [x] T032 Run quickstart steps 1–6 once more on the final wheel; record SC-001..SC-003 results in `specs/025-host-browser-skill-pack/research.md` (2026-11-13: SC-001 met for the procedure, strictly two steps outside the skill; SC-002 9 of 9 captioned tiles; SC-003 Threads median 79 s, within the ≤80 s Threads target set 2026-11-13)
 
 ## Dependencies
 

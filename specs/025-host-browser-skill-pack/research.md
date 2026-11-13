@@ -149,7 +149,12 @@ Success criteria across the three runs per source (T014 coordinator or T029, T01
 - SC-002 (reworded 2026-11-13: every visible captioned tile): T029 accepted 12, T014 13 and this run 9 of the
   9 captioned tiles among 24. The excerpt identity check exists only for T029; neither fresh session reported one.
 - SC-003 medians: TikTok 58 s (69, 51, 58) and Instagram 59 s (about 65, 59, 58) are within 60 s; Threads
-  79 s (79, 79, 69) is not.
+  79 s (79, 79, 69) missed 60 s and meets the ≤80 s Threads target the owner set on 2026-11-13.
+
+Where the Threads time goes (T032 transcript): retyping the 8,621-character tab script took about 28 s (3,805
+output tokens; TikTok's 4,046 took about 14 s); about seven tool round trips at 4–6 s each, about 9 s of page
+load and about 4 s waiting for `/receive` make up the rest. PR 160 compacts the script by about 10% for Threads
+and 23% for TikTok.
 
 ## T016 TikTok rendered date versus video id (2026-11-12)
 
