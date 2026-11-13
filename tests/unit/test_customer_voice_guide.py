@@ -80,4 +80,5 @@ def test_quotations_always_sit_in_a_code_span_longer_than_their_backticks():
     text = _flat()
     assert "Put every quotation in a code span" in text
     assert "longer than the longest run of backticks inside it" in text
+    assert "collapse every line break inside it to a space" in text
     assert "or escape `[ ] ! < >`" not in text

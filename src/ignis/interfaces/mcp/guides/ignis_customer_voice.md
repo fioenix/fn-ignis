@@ -57,10 +57,11 @@ write instead. Write it in the person's language. It holds, in this order:
    (`ACCEPTED`, `DEGRADED`, unavailable, `ERROR`), items read and items kept.
 3. Groups of quotations by what they talk about, named in the person's words. Each quotation is verbatim,
    short, and followed by its source and link. Put every quotation in a code span, so no quoted link, bare
-   URL or image renders: open and close it with a backtick run longer than the longest run of backticks
-   inside it, and add a space inside both ends when the quotation starts or ends with a backtick. Never
-   turn a quoted URL into a link or image. The link to cite is
-   the observation link for a caption or a Threads post; for a comment, the video link and its `comment_id`.
+   URL or image renders: first collapse every line break inside it to a space, then open and close it
+   with a backtick run longer than the longest run of backticks inside it, and add a space inside both
+   ends when the quotation starts or ends with a backtick. Never turn a quoted URL into a link or image.
+   The link to cite is the observation link for a caption or a Threads post; for a comment, the video
+   link and its `comment_id`.
    Never add an author, account, handle or profile link; `@mentions` stay masked as they arrived.
 4. What the sample cannot say: it is a bounded visible sample from two platforms on one day, repeat runs
    overlap only partly, and counts of quotations are not shares of opinion. TikTok captions are often
