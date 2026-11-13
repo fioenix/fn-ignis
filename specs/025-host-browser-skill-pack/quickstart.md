@@ -9,7 +9,7 @@ research profile (Finos for the owner) and that profile is signed in to TikTok, 
    relay shows `STAGED` → `submit_host_browser_search` returns `ACCEPTED`.
 3. Record per source: wall time from prepare to accepted (SC-003), accepted count, steps outside the skill
    (SC-001 expects zero).
-4. Instagram: confirm at least 10 accepted observations and no handle, profile link or author attribution
+4. Instagram: confirm every visible captioned tile is accepted and no handle, profile link or author attribution
    in any excerpt (SC-002).
 5. TikTok after FR-007: pick three accepted videos, open each page, compare the rendered date with
    `published_at`; record the comparison in `research.md`.
