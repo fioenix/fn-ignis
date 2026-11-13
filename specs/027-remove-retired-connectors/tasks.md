@@ -44,6 +44,9 @@ Check `research.md` for file:line references before each task; line numbers are 
   them (FR-004).
   - The example file is `env.example` (no leading dot). Also removed `INSTAGRAM_APP_SECRET` from
     `scripts/verify_follow_up_root_offline.py`, whose `getattr(settings, ...)` would otherwise raise.
-- [ ] T008 Update `test_repo_conventions.py` allowlists and `docs/PROJECT_REVIEW_CONTEXT.md`; check README, USER_GUIDE
+- [x] T008 Update `test_repo_conventions.py` allowlists and `docs/PROJECT_REVIEW_CONTEXT.md`; check README, USER_GUIDE
   and AGENTS.md for claims that the removed code exists (FR-006, FR-009).
+  - The allowlist entries were removed in T001 and T004. `PROJECT_REVIEW_CONTEXT.md` item 3 now lists five constants.
+  - README, USER_GUIDE (both languages) and AGENTS.md only state that Spec 022 retired the sources, which stays true;
+    no edit needed.
 - [ ] T009 Verify SC-001–SC-004 with the plan's targeted commands; record results here.
