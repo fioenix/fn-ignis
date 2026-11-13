@@ -308,7 +308,7 @@ yêu cầu ra khỏi lượt chạy; các bài đó được lưu không kèm da
 
 **Tiếng nói khách hàng trong mười phút.** Đưa agent một từ khóa và hỏi người ta đang nói gì về nó. Guide
 `ignis-customer-voice` (prompt `voice_of_customer_audit`, resource `fn-ignis://guide/ignis-customer-voice`)
-chạy một lượt tìm TikTok và một lượt tìm Threads, đọc 20 bình luận dưới mỗi video trong năm video TikTok đầu,
+chạy một lượt tìm TikTok và một lượt tìm Threads, đọc tối đa 20 bình luận dưới mỗi video trong năm video TikTok đầu,
 rồi ghi file `reports/customer-voice-<từ-khóa>-<thời-điểm>.md`. File gom trích dẫn theo điều chúng nói tới, mỗi
 trích dẫn kèm link, và ghi số item đã đọc và đã giữ của từng nguồn. File không thêm tác giả, không gắn nhãn cảm
 xúc, ý định hay nỗi đau. YouTube không nằm trong lượt này vì YouTube không có tìm kiếm tactical. File là bối

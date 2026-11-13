@@ -310,7 +310,7 @@ Instagram posts cannot be excluded from a run; they are stored without identity 
 
 **Customer voice in ten minutes.** Give your agent one keyword and ask what people say about it. The
 `ignis-customer-voice` guide (prompt `voice_of_customer_audit`, resource `fn-ignis://guide/ignis-customer-voice`)
-runs one TikTok and one Threads search, reads 20 comments under each of the first five TikTok videos, and writes
+runs one TikTok and one Threads search, reads up to 20 comments under each of the first five TikTok videos, and writes
 `reports/customer-voice-<keyword>-<time>.md`: quotations grouped by what they talk about, each with its link, and
 items read and kept per source. It adds no author and no sentiment, intent or pain label. YouTube is not part of
 it, because YouTube has no tactical search. The file is attention context, not a verdict; a decision needs a
