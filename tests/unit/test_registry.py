@@ -29,7 +29,6 @@ class _BasePlugin(IConnectorPlugin):
         self.fetch_calls = 0
         self.search_calls: List[List[str]] = []
         self.search_limits: List[int] = []
-        self.suggestion_calls = 0
 
     @property
     def platform(self) -> PlatformType:
@@ -61,10 +60,6 @@ class VideoGridPlugin(_BasePlugin):
         self.search_calls.append(list(keywords))
         self.search_limits.append(limit)
         return [TrendSignal(platform=self._platform, raw_title=f"grid: {keywords[0]}", metric_value=2.0, geo_code=geo)]
-
-    async def fetch_suggestions(self, keywords, geo=GeoCode.VN) -> List[dict]:
-        self.suggestion_calls += 1
-        return [{"term": f"{keywords[0]} review", "platform": "tiktok"}]
 
 
 class CreativeCenterPlugin(_BasePlugin):
