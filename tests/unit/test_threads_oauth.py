@@ -10,7 +10,7 @@ from ignis.domain.exceptions import (
 )
 from ignis.config import settings as crypto_settings
 from ignis.infrastructure.auth.crypto import CryptoService, generate_new_key
-from ignis.infrastructure.auth.meta_oauth import InstagramAuthManager, ThreadsAuthManager
+from ignis.infrastructure.auth.meta_oauth import ThreadsAuthManager
 
 FIXED_KEY = generate_new_key()
 
@@ -314,29 +314,3 @@ def test_build_authorization_url_includes_scopes_and_state():
     assert "response_type=code" in url
     assert "threads_keyword_search" in url
     assert "state=csrf-token" in url
-
-
-# --- Instagram variant reuses the same lifecycle with ig_* grant types ---
-
-
-def test_instagram_manager_overrides_platform_and_grant_types():
-    assert InstagramAuthManager.PLATFORM_NAME == "instagram"
-    assert InstagramAuthManager.EXCHANGE_GRANT_TYPE == "ig_exchange_token"
-    assert InstagramAuthManager.REFRESH_GRANT_TYPE == "ig_refresh_token"
-    assert InstagramAuthManager.REFRESH_THRESHOLD_DAYS == 10
-
-
-@pytest.mark.asyncio
-async def test_instagram_refresh_uses_ig_grant_type():
-    repo = AsyncMock()
-    stored = _stored(days_remaining=5)
-    stored["platform"] = "instagram"
-    repo.get_platform_credentials.return_value = stored
-    mgr = InstagramAuthManager(repository=repo, crypto_service=CryptoService(secret_key=FIXED_KEY))
-
-    with patch("httpx.AsyncClient.get", return_value=_resp(200, {"access_token": "IG_REFRESHED"})) as mock_get:
-        result = await mgr.refresh_token_if_needed()
-
-    assert result["refreshed"] is True
-    assert mock_get.call_args.kwargs["params"]["grant_type"] == "ig_refresh_token"
-    assert repo.save_platform_credentials.await_args.kwargs["platform"] == "instagram"

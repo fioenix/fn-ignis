@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
-from ignis.infrastructure.connectors import browser_support, meta_browser_ingress
+from ignis.infrastructure.connectors import meta_browser_ingress
 from ignis.infrastructure.connectors.threads.threads_plugin import ThreadsPlugin
 
 
@@ -97,22 +97,6 @@ async def test_health_scopes_cookies_or_refuses_retired_threads(platform, reques
     plugin._browser_storage_state = AsyncMock(return_value=state)
     assert await plugin.is_healthy() is False
     assert requests == []
-
-
-@pytest.mark.asyncio
-async def test_public_surface_still_follows_redirects(monkeypatch):
-    captured = []
-    client_type = httpx.AsyncClient
-
-    def respond(request):
-        captured.append(request)
-        return (httpx.Response(302, headers={"location": "/final"})
-                if request.url.path == "/start" else httpx.Response(200))
-
-    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: client_type(
-        transport=httpx.MockTransport(respond), **kw))
-    assert await browser_support.surface_reachable("https://public.test/start") is True
-    assert [r.url.path for r in captured] == ["/start", "/final"]
 
 
 @pytest.mark.asyncio

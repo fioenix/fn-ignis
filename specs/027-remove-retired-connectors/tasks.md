@@ -29,9 +29,17 @@ Check `research.md` for file:line references before each task; line numbers are 
   - Added `test_retired_tiktok_collection_refuses_like_threads` for the new refusals.
   - Kept the loader assertion of `test_the_retired_live_term_does_not_come_back_through_the_database`; only its plugin
     half went.
-- [ ] T006 Remove orphans: `browser_support.py`, the Reels/Explore-only `meta_browser_ingress` helpers,
+- [x] T006 Remove orphans: `browser_support.py`, the Reels/Explore-only `meta_browser_ingress` helpers,
   `InstagramAuthManager` and `DEFAULT_INSTAGRAM_SCOPES`, unused auth managers, `fetch_suggestions_across_all` if it has
   no caller left (FR-003).
+  - Removed `browser_support.py`, `InstagramAuthManager`, `DEFAULT_INSTAGRAM_SCOPES`, `InstagramBrowserAuthManager` (no
+    live code constructs or types it) and `registry.fetch_suggestions_across_all`, with their tests. Base-class tests
+    in `test_meta_browser_auth.py` and the `meta_auth` launch site now use `ThreadsBrowserAuthManager`.
+  - Kept `meta_browser_ingress.py` unchanged: `collect_json_payloads` (Threads refusal, `test_threads_relay_search.py`),
+    `extract_records` (kept helper test) and `build_cookie_header` (used by `extract_token_from_storage`) all still
+    have a kept test or live path.
+  - Kept `TikTokAuthManager`: the live `TikTokPlugin` types it.
+  - Kept the `instagram`/`instagram_browser` keys in `server.py` `_PLATFORM_CREDENTIAL_KEYS`: they read stored rows.
 - [ ] T007 Remove the `INSTAGRAM_*` settings and the `.env.example` Instagram block, with tests and fixtures that name
   them (FR-004).
 - [ ] T008 Update `test_repo_conventions.py` allowlists and `docs/PROJECT_REVIEW_CONTEXT.md`; check README, USER_GUIDE

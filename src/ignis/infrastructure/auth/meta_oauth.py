@@ -22,12 +22,6 @@ DEFAULT_THREADS_SCOPES = [
 ]
 
 
-DEFAULT_INSTAGRAM_SCOPES = [
-    "instagram_business_basic",
-    "instagram_business_manage_insights",
-]
-
-
 class ThreadsAuthManager:
     """
     Official Meta Threads Graph API OAuth 2.0 credential lifecycle manager.
@@ -362,8 +356,8 @@ class ThreadsAuthManager:
     def keyword_search_verdict_key(self) -> str:
         """Where this platform's keyword-search verdict is stored.
 
-        Scoped by platform because InstagramAuthManager subclasses this one; a shared key would
-        let one platform's grant decide the other's routing.
+        Scoped by platform so that a subclass for another platform cannot let one platform's grant
+        decide the other's routing.
         """
         return f"{self.PLATFORM_NAME}_keyword_search_access"
 
@@ -571,26 +565,3 @@ class ThreadsAuthManager:
         if not expires_at:
             return False
         return expires_at <= datetime.now(timezone.utc)
-
-
-class InstagramAuthManager(ThreadsAuthManager):
-    """
-    Instagram Graph API OAuth 2.0 manager for the Reels ingress connector.
-
-    Identical lifecycle to Threads (code -> short-lived -> 60-day long-lived -> refresh),
-    but against Instagram's own OAuth hosts and `ig_*` grant types.
-    """
-
-    PLATFORM_NAME = "instagram"
-
-    AUTHORIZE_URL = "https://api.instagram.com/oauth/authorize"
-    TOKEN_EXCHANGE_URL = "https://api.instagram.com/oauth/access_token"
-    LONG_LIVED_TOKEN_URL = "https://graph.instagram.com/access_token"
-    REFRESH_TOKEN_URL = "https://graph.instagram.com/refresh_access_token"
-
-    EXCHANGE_GRANT_TYPE = "ig_exchange_token"
-    REFRESH_GRANT_TYPE = "ig_refresh_token"
-    DEFAULT_SCOPES = DEFAULT_INSTAGRAM_SCOPES
-    APP_ID_SETTING = "INSTAGRAM_APP_ID"
-    APP_SECRET_SETTING = "INSTAGRAM_APP_SECRET"
-    REDIRECT_URI_SETTING = "INSTAGRAM_REDIRECT_URI"

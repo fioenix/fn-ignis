@@ -64,7 +64,7 @@ def test_threads_suggestions_browser_launch_and_relay_projection_are_removed():
 @pytest.mark.parametrize("site", ["meta_auth", "tiktok_auth", "meta_capture", "comments"])
 async def test_retained_sites_pass_only_original_non_hiding_launch_arguments(monkeypatch, site):
     from unittest.mock import AsyncMock, MagicMock
-    from ignis.infrastructure.auth.meta_browser_auth import InstagramBrowserAuthManager
+    from ignis.infrastructure.auth.meta_browser_auth import ThreadsBrowserAuthManager
     from ignis.infrastructure.auth.tiktok_auth import TikTokAuthManager
     from ignis.infrastructure.connectors.meta_browser_ingress import collect_json_payloads
     from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin
@@ -82,7 +82,7 @@ async def test_retained_sites_pass_only_original_non_hiding_launch_arguments(mon
     plugin = TikTokPlugin(auth_manager=auth)
     async def invoke():
         if site == "meta_auth":
-            await InstagramBrowserAuthManager().authenticate_interactive()
+            await ThreadsBrowserAuthManager().authenticate_interactive()
         elif site == "tiktok_auth":
             await TikTokAuthManager().authenticate_interactive()
         elif site == "meta_capture":

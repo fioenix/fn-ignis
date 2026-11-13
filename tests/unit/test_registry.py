@@ -239,19 +239,6 @@ async def test_target_platforms_filter_selects_both_tiktok_probes():
     assert google.search_calls == []
 
 
-@pytest.mark.asyncio
-async def test_fetch_suggestions_filters_by_platform_not_plugin_id():
-    grid, creative, google = VideoGridPlugin(), CreativeCenterPlugin(), GooglePlugin()
-    registry = _registry(grid, creative, google)
-
-    suggestions = await registry.fetch_suggestions_across_all(
-        keywords=["ai agent"], target_platforms=[PlatformType.TIKTOK]
-    )
-
-    assert grid.suggestion_calls == 1
-    assert suggestions == [{"term": "ai agent review", "platform": "tiktok"}]
-
-
 # --- Health reporting ---
 
 
