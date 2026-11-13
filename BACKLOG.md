@@ -170,8 +170,8 @@ Bề mặt agent:
   nhất 50%.
   Cập nhật 14/11/2026: đã viết lại năm mô tả ở Spec 029. Năm mô tả gồm bốn tool trên và
   `verify_connectors_health`. Kết quả gộp 3 lần chạy nằm ở `specs/029-tool-description-accuracy/result.md`:
-  - Lượt gọi đầu sai trên bẫy: Sonnet giảm từ 12/48 xuống 5/48 (−58%, đạt); Haiku giảm từ 11/48 xuống
-    7/48 (−36%, chưa đạt).
+  - Lượt gọi đầu sai trên bẫy, đo trên bản cuối: Sonnet giảm từ 12/48 xuống 6/48 (−50%, vừa đạt); Haiku
+    giảm từ 11/48 xuống 7/48 (−36%, chưa đạt).
   - Ý định thường không bị ảnh hưởng.
   Còn M16: cả hai model vẫn gọi `get_mission_analysis` để xin đề xuất từ một mission Attention. Lực kéo
   còn lại có vẻ đến từ tên tool. Đổi tên hay ẩn tool là việc chủ sở hữu quyết (OWN-4, AGX-7).
