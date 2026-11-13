@@ -40,37 +40,6 @@ THREADS_PAYLOAD = {
     }
 }
 
-REELS_PAYLOAD = {
-    "data": {
-        "recent": {
-            "sections": [
-                {
-                    "layout_content": {
-                        "medias": [
-                            {
-                                "media": {
-                                    "pk": "18000000000009",
-                                    "code": "C9abcDEF",
-                                    "media_type": 2,
-                                    "caption": {"text": "Review máy in tem đơn hàng cho shop online"},
-                                    "like_count": 1820,
-                                    "comment_count": 140,
-                                    "play_count": 96400,
-                                    "taken_at": 1788410000,
-                                    "user": {"username": "ecom_tools"},
-                                    "clips_metadata": {
-                                        "music_info": {"music_asset_info": {"title": "Trending Audio 01"}}
-                                    },
-                                }
-                            }
-                        ]
-                    }
-                }
-            ]
-        }
-    }
-}
-
 
 # --- Shared extraction helpers ---
 
