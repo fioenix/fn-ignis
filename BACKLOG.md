@@ -255,12 +255,15 @@ Bề mặt agent:
   thích"): T029 được 12, T014 được 13, T032 được 9 trên 9 ô có chú thích; chỉ T029 có kiểm tra danh tính. SC-003 (trung vị ba lượt): TikTok 58 giây, Instagram 59 giây đạt mức ≤60 giây;
   Threads 79 giây đạt mức ≤80 giây mà chủ sở hữu nới ngày 13/11/2026, vì agent phải chép lại script dài gấp đôi.
   Lượt chạy lặp (VAL-3 rút gọn, hai lượt mỗi nguồn): Jaccard TikTok 0,71, Threads 0,45; ghi trong `research.md`.
-- [ ] **ENG-2 — Gỡ code connector đã nghỉ** (M): Reels, Google Trends RSS, nhánh Explore và tìm kiếm headless của
-  `TikTokPlugin`; xóa test tương ứng và thu hẹp phạm vi coverage SC-004.
-  - Giữ giá trị enum `PlatformType` và đường đọc cho dòng cũ.
-  - Trước khi gỡ, grep lại `follow_up_provider_bridge.py:375`.
-  - Gỡ Reels OAuth (`meta_oauth.py`) chạm tầng connector, nên hỏi chủ sở hữu.
-  - Vẫn đủ 41 tool.
+- [x] **ENG-2 — Gỡ code connector đã nghỉ** — đóng 13/11/2026 (Spec 027, PR #166): gỡ Reels, Google Trends RSS,
+  Creative Center, nhánh Explore, tìm kiếm headless và gợi ý của `TikTokPlugin`, cùng phần mồ côi kéo theo
+  (`browser_support.py`, `InstagramAuthManager`, `InstagramBrowserAuthManager`, `fetch_suggestions_across_all`, năm
+  biến `INSTAGRAM_*`); thu hẹp SC-004. `src` bớt 2.230 dòng; vẫn 41 tool, schema giống hệt `main`. Chủ sở hữu duyệt
+  gỡ Reels OAuth trong chat. Giữ `ThreadsPlugin`, `ThreadsAuthManager`, seed `sql/` và đường đọc dòng cũ.
+- [ ] **ENG-11 — Dọn phần còn sót sau Spec 027** (S, nợ nhỏ, sửa khi chạm tới): nhánh `is_reels` trong
+  `collect_json_payloads` (`meta_browser_ingress.py`) không còn caller sống; trong test, fake `fetch_suggestions` và
+  `suggestion_calls` ở `test_registry.py`, tên test `test_cookie_scope` chỉ còn một tham số, tên "eight sites" ở
+  `test_browser_launch_flag_policy.py`, một lỗi ngữ pháp trong comment `test_settings_do_not_leak_secrets.py`.
 - [ ] **ENG-3 — ADR `Proposed`: PostgreSQL có còn là backend của sản phẩm không** (S). Ba lựa chọn: (a) giữ cả
   hai và làm ENG-9; (b) đóng băng PostgreSQL, chỉ còn đọc và nâng cấp kiểm trong CI; (c) bỏ sau khi có đường
   export. Hiện mỗi story trả tiền persistence hai lần, cộng 4 service trong CI. Chủ sở hữu đặt trạng thái. Phụ thuộc ENG-4.
