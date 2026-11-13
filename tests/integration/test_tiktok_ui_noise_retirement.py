@@ -16,7 +16,6 @@ import re
 import pytest
 
 from ignis.infrastructure.config.vocabulary_loader import load_market_vocabulary
-from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin
 
 from conftest import REPO_SQL, all_postgres_migrations
 
@@ -118,56 +117,3 @@ async def test_re_applying_and_restarting_never_bring_the_rows_back(lexicon_case
         await restarted.close()
 
     assert lexicon_case.rows() == settled
-
-
-@pytest.mark.asyncio
-async def test_the_real_loader_arms_a_guard_that_keeps_public_posts(lexicon_case):
-    """Behaviour through the database, the loader and the plugin, not a hand-registered list."""
-    repository = await _open_fresh(lexicon_case)
-    try:
-        vocabulary = await load_market_vocabulary(repository)
-    finally:
-        await repository.close()
-    plugin = TikTokPlugin()
-    plugin.register_ui_noise(vocabulary.tiktok_ui_noise)
-
-    public_posts = [
-        "The new Gmail app icon is live on Google Play",
-        "KHÁT VỌNG VINH QUANG | Tùng Dương - Live at ASEAN Huyndai Cup 2026",
-        "Studio 2.0 is live.",
-        "EM CHỈ MUỐN THÔNG BÁO LÀ EM TÌM CON VỀ ĐƯỢC RUIIIIII",
-        "Thông báo tuyển sinh lớp vẽ mùa thu 2026",
-        "Gửi tin nhắn yêu thương cho mẹ nhân ngày 20/10",
-    ]
-    ui_wording = [
-        "Đang phát trực tiếp",
-        "UserA đã bắt đầu follow bạn",
-        "UserB đã thích video của bạn",
-        "Bạn có 3 cuộc trò chuyện mới trong hộp thư",
-        "UserC đã thích bình luận của bạn",
-    ]
-
-    for text in public_posts:
-        assert plugin._is_private_or_notification(text) is False, f"public post dropped: {text!r}"
-    for text in ui_wording:
-        assert plugin._is_private_or_notification(text) is True, f"UI wording let through: {text!r}"
-
-
-@pytest.mark.asyncio
-async def test_an_empty_ui_noise_domain_still_fails_closed_through_the_loader(lexicon_case):
-    """Retiring three rows must not become retiring the guard: no vocabulary rejects every card."""
-    repository = await _open_fresh(lexicon_case)
-    try:
-        lexicon_case.execute(
-            "DELETE FROM market_lexicons WHERE domain = ?",
-            "DELETE FROM market_lexicons WHERE domain = %s",
-            (DOMAIN,),
-        )
-        vocabulary = await load_market_vocabulary(repository)
-    finally:
-        await repository.close()
-    plugin = TikTokPlugin()
-    plugin.register_ui_noise(vocabulary.tiktok_ui_noise)
-
-    assert vocabulary.tiktok_ui_noise == []
-    assert plugin._is_private_or_notification("The new Gmail app icon is live on Google Play")

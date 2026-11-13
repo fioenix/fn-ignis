@@ -841,26 +841,3 @@ class ConnectorPluginRegistry:
                 if keyword not in queries:
                     queries.append(keyword)
         return fresh
-
-    async def fetch_suggestions_across_all(
-        self,
-        keywords: List[str],
-        geo: GeoCode = GeoCode.VN,
-        target_platforms: Optional[List[PlatformType]] = None,
-    ) -> List[Dict[str, Any]]:
-        """Collect search suggestions across all capable plugins."""
-        all_suggestions: List[Dict[str, Any]] = []
-        for plugin in self._plugins.values():
-            if target_platforms and plugin.platform not in target_platforms:
-                continue
-            try:
-                sugs = await plugin.fetch_suggestions(keywords=keywords, geo=geo)
-                if sugs:
-                    all_suggestions.extend(sugs)
-            except Exception as e:
-                logger.warning(
-                    "Error fetching suggestions from %s: %s",
-                    plugin.name,
-                    sanitize_pii_text(str(e)),
-                )
-        return all_suggestions

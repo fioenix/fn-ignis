@@ -1,12 +1,10 @@
-import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from ignis.config import settings
-from ignis.domain.value_objects import GeoCode, IngressScope, Timeframe
+from ignis.domain.value_objects import IngressScope
 from ignis.infrastructure.cache.insights_cache import InsightsTTLCache
-from ignis.infrastructure.connectors.reels.reels_plugin import ReelsPlugin
 from ignis.infrastructure.connectors.threads.threads_plugin import ThreadsPlugin
 
 THREADS_LIST = {
@@ -22,22 +20,6 @@ THREADS_LIST = {
     ]
 }
 
-REELS_LIST = {
-    "data": [
-        {
-            "id": "18000000000001",
-            "caption": "Workflow tự động hóa kho vận cho shop thời trang",
-            "media_type": "VIDEO",
-            "media_product_type": "REELS",
-            "permalink": "https://www.instagram.com/reel/C9abcDEF/",
-            "timestamp": "2026-09-02T02:15:00+0000",
-            "like_count": 830,
-            "comments_count": 61,
-            "username": "logistics_vn",
-        }
-    ]
-}
-
 THREADS_INSIGHTS = {
     "data": [
         {"name": "views", "total_value": {"value": 48200}},
@@ -46,45 +28,10 @@ THREADS_INSIGHTS = {
     ]
 }
 
-REELS_INSIGHTS = {
-    "data": [
-        {"name": "plays", "total_value": {"value": 91500}},
-        {"name": "reach", "total_value": {"value": 60400}},
-    ]
-}
-
-
-def _resp(payload):
-    resp = MagicMock()
-    resp.status_code = 200
-    resp.json.return_value = payload
-    resp.text = json.dumps(payload)
-    return resp
-
-
 def _auth_manager(token: str = "LONG_LIVED_TOKEN") -> AsyncMock:
     mgr = AsyncMock()
     mgr.get_access_token.return_value = token
     return mgr
-
-
-class _CountingGraph:
-    """Mocked httpx GET that records how many insights calls actually went out."""
-
-    def __init__(self, list_payload, insights_payload):
-        self.list_payload = list_payload
-        self.insights_payload = insights_payload
-        self.insights_calls = 0
-
-    @property
-    def get(self):
-        async def _get(url, params=None, **kwargs):
-            if "/insights" in url:
-                self.insights_calls += 1
-                return _resp(self.insights_payload)
-            return _resp(self.list_payload)
-
-        return _get
 
 
 # --- Cache primitive ---
@@ -139,22 +86,6 @@ def test_mutating_a_returned_dict_does_not_corrupt_the_cached_entry():
 
 
 # --- Plugin-level N+1 suppression ---
-
-
-@pytest.mark.asyncio
-async def test_reels_second_pass_within_the_ttl_issues_no_insights_request():
-    plugin = ReelsPlugin(auth_manager=_auth_manager(), ig_user_id="17841400000000000")
-    graph = _CountingGraph(REELS_LIST, REELS_INSIGHTS)
-
-    with patch("httpx.AsyncClient.get", side_effect=graph.get):
-        first = await plugin.fetch_signals(geo=GeoCode.VN, timeframe=Timeframe.LAST_7D, limit=25, scope=IngressScope.OWN_PROFILE)
-        assert graph.insights_calls == 1
-
-        second = await plugin.fetch_signals(geo=GeoCode.VN, timeframe=Timeframe.LAST_7D, limit=25, scope=IngressScope.OWN_PROFILE)
-
-    assert graph.insights_calls == 1
-    assert first[0].metric_value == 91500.0
-    assert second[0].metadata["reach"] == 60400
 
 
 @pytest.mark.asyncio

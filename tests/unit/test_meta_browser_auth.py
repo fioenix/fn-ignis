@@ -5,13 +5,11 @@ from unittest.mock import AsyncMock
 import pytest
 
 from ignis.infrastructure.auth.meta_browser_auth import (
-    InstagramBrowserAuthManager,
     ThreadsBrowserAuthManager,
 )
 
 MANAGERS = [
     (ThreadsBrowserAuthManager, "threads_browser"),
-    (InstagramBrowserAuthManager, "instagram_browser"),
 ]
 
 
@@ -88,7 +86,7 @@ async def test_auth_status_reports_not_connected_without_session():
     repo = AsyncMock()
     repo.get_platform_credentials.return_value = None
 
-    status = await InstagramBrowserAuthManager(repository=repo).get_auth_status()
+    status = await ThreadsBrowserAuthManager(repository=repo).get_auth_status()
     assert status["status"] == "NOT_CONNECTED"
     assert status["authenticated"] is False
 
@@ -128,13 +126,13 @@ async def test_poll_times_out_when_the_user_never_signs_in():
 @pytest.mark.asyncio
 async def test_persist_stores_session_and_writes_an_audit_event():
     repo = AsyncMock()
-    mgr = InstagramBrowserAuthManager(repository=repo)
+    mgr = ThreadsBrowserAuthManager(repository=repo)
     expires_at = datetime.now(timezone.utc) + timedelta(days=30)
 
     await mgr._persist({"cookies": [{"name": "sessionid", "value": "s"}]}, expires_at)
 
     kwargs = repo.save_platform_credentials.await_args.kwargs
-    assert kwargs["platform"] == "instagram_browser"
+    assert kwargs["platform"] == "threads_browser"
     assert kwargs["auth_type"] == "session_cookies"
     assert kwargs["expires_at"] == expires_at
     assert repo.log_event.await_args.kwargs["event_type"] == "BROWSER_SESSION_CAPTURED"

@@ -1001,12 +1001,11 @@ async def test_tightened_new_assignment_ceiling_does_not_reset_previous_allocati
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("plugin_type", ["creative", "grid"])
+@pytest.mark.parametrize("plugin_type", ["grid"])
 async def test_child_keeps_exact_plugin_and_verified_platform(tmp_path, plugin_type):
-    from ignis.infrastructure.connectors.tiktok.creative_center_plugin import TikTokCreativeCenterPlugin
     from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin
 
-    plugin_class = TikTokCreativeCenterPlugin if plugin_type == "creative" else TikTokPlugin
+    plugin_class = TikTokPlugin
     # Read canonical property metadata without constructing any authentication manager.
     plugin = object.__new__(plugin_class)
     repository, mission, follow, _, _ = await ready(

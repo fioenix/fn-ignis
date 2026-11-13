@@ -360,12 +360,12 @@ Ordered by how much a reviewer's conclusions would change if they did not know a
 2. **The taxonomy does not cover an open listening question.** 78% of clusters are
    `unclassified`. The taxonomy is shaped for market verticals; Google Trends VN daily is news
    and entertainment. This is a product-scope question, not a bug — see §7.
-3. **Six vocabulary constants remain in `src/`**, tracked in
+3. **Five vocabulary constants remain in `src/`**, tracked in
    `tests/unit/test_repo_conventions.py`: `VI_CORE_WORDS` and `TECH_LOAN_WORDS`
    (`language_detector.py`) are real language vocabulary; `RATE_LIMIT_HINTS`,
-   `AUTH_SENSITIVE_PLATFORMS`, `VIDEO_PLATFORMS` (`strategic_reasoner.py`) and
-   `BROWSER_API_MARKERS` (`reels_plugin.py`) are arguably platform enums rather than domain
-   terms. The gate records them rather than blocking them; deciding which are exempt is open.
+   `AUTH_SENSITIVE_PLATFORMS` and `VIDEO_PLATFORMS` (`strategic_reasoner.py`) are arguably
+   platform enums rather than domain terms. A sixth, `BROWSER_API_MARKERS`, left with the
+   Reels connector (Spec 027, 2026-11-13). The gate records them rather than blocking them; deciding which are exempt is open.
 4. **The supply score cannot tell "no data" from "nobody watched".** `view_factor = 0.0` when
    `loc_views == 0`, and that is also what a keyword with zero retrieved videos produces. Two of
    the five keywords in §4 sat at n=0 through all three runs; their index is a demand reading

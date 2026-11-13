@@ -217,12 +217,3 @@ class ThreadsBrowserAuthManager(MetaBrowserAuthManager):
     LOGIN_URL = "https://www.threads.net/login"
     HOME_URL = "https://www.threads.net/"
     SESSION_COOKIE_NAMES = ("sessionid", "ds_user_id")
-
-
-class InstagramBrowserAuthManager(MetaBrowserAuthManager):
-    """1-click Instagram session capture backing public Reels/hashtag ingress."""
-
-    PLATFORM_NAME = "instagram_browser"
-    LOGIN_URL = "https://www.instagram.com/accounts/login/"
-    HOME_URL = "https://www.instagram.com/"
-    SESSION_COOKIE_NAMES = ("sessionid", "ds_user_id")

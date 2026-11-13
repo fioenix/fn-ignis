@@ -210,9 +210,10 @@ jobs:
         run: |
           uv run pytest tests/ -v -n 4 --dist loadgroup --cov=ignis --cov-report=term-missing
 
-      # SC-004 promises at least 85% coverage for the Repository, the RSS Plugin, the YouTube
-      # Plugin and the Registry. The step above measures the whole package and prints it; this one
-      # reads that same .coverage data restricted to the four things the criterion names, and exits
+      # SC-004 promises at least 85% coverage for the Repository, the YouTube Plugin and the
+      # Registry (the RSS Plugin left the scope with its code, Spec 027). The step above measures
+      # the whole package and prints it; this one reads that same .coverage data restricted to the
+      # three things the criterion names, and exits
       # non-zero below the floor. Until 22/09/2026 the threshold was printed and never enforced, so
       # coverage could fall without any build going red.
       #

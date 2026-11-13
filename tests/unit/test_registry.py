@@ -239,19 +239,6 @@ async def test_target_platforms_filter_selects_both_tiktok_probes():
     assert google.search_calls == []
 
 
-@pytest.mark.asyncio
-async def test_fetch_suggestions_filters_by_platform_not_plugin_id():
-    grid, creative, google = VideoGridPlugin(), CreativeCenterPlugin(), GooglePlugin()
-    registry = _registry(grid, creative, google)
-
-    suggestions = await registry.fetch_suggestions_across_all(
-        keywords=["ai agent"], target_platforms=[PlatformType.TIKTOK]
-    )
-
-    assert grid.suggestion_calls == 1
-    assert suggestions == [{"term": "ai agent review", "platform": "tiktok"}]
-
-
 # --- Health reporting ---
 
 
@@ -627,7 +614,6 @@ async def test_the_list_only_search_keeps_its_contract():
 # --- Review 0d70e9b: an empty answer is a measured zero only when the surface attests it ran ------
 
 from tests.unit.test_meta_browser_ingress import REELS_PAYLOAD  # noqa: E402
-from ignis.infrastructure.connectors.reels.reels_plugin import ReelsPlugin  # noqa: E402
 from ignis.infrastructure.connectors.threads.threads_plugin import ThreadsPlugin  # noqa: E402
 
 BROWSER_STATE = {"cookies": [{"name": "sessionid", "value": "unit-test"}]}
@@ -645,7 +631,6 @@ def _session_plugin(plugin_class):
 @pytest.mark.parametrize(
     "plugin_class, module",
     [
-        (ReelsPlugin, "ignis.infrastructure.connectors.reels.reels_plugin"),
         (ThreadsPlugin, "ignis.infrastructure.connectors.threads.threads_plugin"),
     ],
 )
@@ -675,13 +660,12 @@ async def test_an_empty_answer_without_an_attestation_is_degraded_not_measured()
 @pytest.mark.parametrize(
     "plugin_class, module",
     [
-        (ReelsPlugin, "ignis.infrastructure.connectors.reels.reels_plugin"),
         (ThreadsPlugin, "ignis.infrastructure.connectors.threads.threads_plugin"),
     ],
 )
 @pytest.mark.asyncio
 async def test_a_browser_surface_attests_the_keywords_it_actually_queried(plugin_class, module):
-    """Reels retains its keyword cap; Threads never dispatches the retired internal path."""
+    """Threads never dispatches the retired internal path."""
     from unittest.mock import patch
 
     keywords = [f"topic{index}" for index in range(1, 23)]
@@ -691,12 +675,8 @@ async def test_a_browser_surface_attests_the_keywords_it_actually_queried(plugin
         result = await registry.search_with_outcomes(keywords=keywords)
 
     [outcome] = result.outcomes
-    if plugin_class is ThreadsPlugin:
-        assert outcome.status is ChannelHealthStatus.DEGRADED and outcome.queried_keywords == ()
-        assert "HOST_BROWSER_REQUIRED" in outcome.note
-    else:
-        assert outcome.status is ChannelHealthStatus.HEALTHY
-        assert outcome.queried_keywords == tuple(keywords[:20])
+    assert outcome.status is ChannelHealthStatus.DEGRADED and outcome.queried_keywords == ()
+    assert "HOST_BROWSER_REQUIRED" in outcome.note
 
 
 # --- Follow-up review: the window each surface attests is the one the platform filtered by -------
@@ -766,7 +746,6 @@ async def test_retired_threads_attests_no_query_or_window_and_never_uses_graph()
 @pytest.mark.parametrize(
     "plugin_class, module",
     [
-        (ReelsPlugin, "ignis.infrastructure.connectors.reels.reels_plugin"),
         (ThreadsPlugin, "ignis.infrastructure.connectors.threads.threads_plugin"),
     ],
 )
@@ -781,7 +760,7 @@ async def test_a_browser_surface_attests_no_window_because_it_filters_by_none(pl
 
     [outcome] = result.outcomes
     assert outcome.queried_window is None
-    assert outcome.status is (ChannelHealthStatus.DEGRADED if plugin_class is ThreadsPlugin else ChannelHealthStatus.HEALTHY)
+    assert outcome.status is ChannelHealthStatus.DEGRADED
 
 
 @pytest.mark.asyncio

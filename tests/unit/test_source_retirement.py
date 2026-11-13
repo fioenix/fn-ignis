@@ -205,16 +205,13 @@ async def test_host_scope_refuses_an_optional_retired_surface_before_resolving()
 async def test_setup_diagnostics_never_probe_rss(monkeypatch):
     from ignis.interfaces.cli import setup_bundle
     from ignis.infrastructure import persistence
-    from ignis.infrastructure.connectors.google_trends.rss_plugin import GoogleTrendsRssPlugin
 
     repo = SimpleNamespace(get_domain_lexicons=AsyncMock(return_value=[]), close=AsyncMock())
     monkeypatch.setattr(persistence, 'create_repository', lambda: repo)
     monkeypatch.setattr(setup_bundle, '_read_back_research_workspaces', AsyncMock(return_value=[]))
-    probe = AsyncMock(return_value=True)
-    monkeypatch.setattr(GoogleTrendsRssPlugin, 'is_healthy', probe)
     result = await setup_bundle.run_synthetic_diagnostics()
-    probe.assert_not_awaited()
     assert 'google_rss' not in result
+    assert 'google_rss' not in Path(setup_bundle.__file__).read_text()
 
 
 

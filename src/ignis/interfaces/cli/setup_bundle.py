@@ -397,7 +397,6 @@ def auto_provision(json_output: bool = False, *, client: str = "all", env_file: 
     
     print("\n🩺 Diagnostics:")
     print(f"  • DB Pool / SQLite: {diag.get('database')}")
-    print(f"  • Google Trends RSS: {diag.get('google_rss')}")
     print(f"  • Seed Lexicons: {diag.get('lexicon_count')} terms loaded")
     if discovery_error:
         print(f"  • MCP catalog: {discovery_error}")

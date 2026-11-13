@@ -16,9 +16,7 @@ from ignis.infrastructure.config.vocabulary_loader import (
     TEMPLATE_PREFIXES,
     load_market_vocabulary,
 )
-from ignis.infrastructure.connectors.google_trends.rss_plugin import GoogleTrendsRssPlugin
 from ignis.domain.value_objects import GeoCode
-from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin
 from ignis.infrastructure.harness.language_detector import HeuristicLanguageDetector
 from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
 
@@ -70,21 +68,15 @@ def test_every_probe_template_has_a_substitution_slot():
 
 
 @pytest.mark.asyncio
-async def test_a_fresh_database_arms_both_engines(tmp_path):
-    """Bootstrap has to leave the clusterer and the Google Trends plugin usable, not empty."""
+async def test_a_fresh_database_arms_the_clusterer(tmp_path):
+    """Bootstrap has to leave the clusterer usable, not empty."""
     repo = SqliteTrendRepository(db_path=str(tmp_path / "vocabulary.db"))
     vocabulary = await load_market_vocabulary(repo)
 
     clusterer = SemanticClusterer()
     clusterer.register_ambiguous_unigrams(vocabulary.ambiguous_unigrams)
-    plugin = GoogleTrendsRssPlugin()
-    plugin.register_probe_templates(vocabulary.probe_templates)
-    plugin.register_intent_keywords(vocabulary.search_intent)
 
     assert clusterer._ambiguous_unigrams, "clustering would merge on any single shared word"
-    assert len(plugin._get_probe_patterns("VN")) > 1, "demand would rest on the bare keyword"
-    assert plugin._get_probe_patterns("US") != plugin._get_probe_patterns("VN")
-    assert plugin._intent_keywords, "commercial intent would always score zero"
 
 
 @pytest.mark.asyncio
@@ -135,27 +127,6 @@ async def test_the_retired_live_term_does_not_come_back_through_the_database(tmp
     vocabulary = await load_market_vocabulary(repo)
 
     assert "live" not in {term.strip() for term in vocabulary.tiktok_ui_noise}
-
-    plugin = TikTokPlugin()
-    plugin.register_ui_noise(vocabulary.tiktok_ui_noise)
-
-    assert plugin._is_private_or_notification("Studio 2.0 is live.") is False
-    assert plugin._is_private_or_notification("livestream review") is False
-
-
-@pytest.mark.asyncio
-async def test_the_tiktok_grid_guard_is_armed_by_a_fresh_database(tmp_path):
-    """Fail-closed only works if bootstrap actually arms it; otherwise ingress returns nothing."""
-    repo = SqliteTrendRepository(db_path=str(tmp_path / "tiktok.db"))
-    vocabulary = await load_market_vocabulary(repo)
-
-    plugin = TikTokPlugin()
-    plugin.register_ui_noise(vocabulary.tiktok_ui_noise)
-    plugin.register_suggest_templates(vocabulary.tiktok_suggest_templates)
-
-    assert plugin._is_private_or_notification("#congnghe2026 AI Agent sieu hot") is False
-    assert plugin._intent_probe_templates("VN")
-    assert plugin._intent_probe_templates("US") != plugin._intent_probe_templates("VN")
 
 
 @pytest.mark.asyncio

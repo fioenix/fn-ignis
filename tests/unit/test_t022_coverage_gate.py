@@ -1,7 +1,7 @@
 """A coverage threshold that is printed and never enforced is a number, not a promise.
 
-SC-004 has promised at least 85% coverage for the Repository, the RSS Plugin, the YouTube Plugin
-and the Registry since the feature was specified. Until 22/09/2026 CI measured coverage and printed
+SC-004 has promised at least 85% coverage for the Repository, the YouTube Plugin and the Registry
+since the feature was specified; the RSS Plugin left the scope when its code was deleted (Spec 027). Until 22/09/2026 CI measured coverage and printed
 it: the 2026-09-13 run measured 73%, a later Timescale-backed run measured 75%, and both builds
 were green. Nothing connected the promise to an exit code.
 
@@ -28,12 +28,11 @@ CI_WORKFLOW = REPO / ".github" / "workflows" / "ci.yml"
 
 REQUIRED_FLOOR = 85.0
 
-# The four names in SC-004, and the file patterns each one resolves to. Written here independently
+# The three names in SC-004, and the file patterns each one resolves to. Written here independently
 # of the config so that a change to the config has to be made twice, deliberately, and explained.
 SC004_SCOPE = {
     "*/ignis/infrastructure/persistence/*",
     "*/ignis/infrastructure/connectors/registry.py",
-    "*/ignis/infrastructure/connectors/google_trends/*",
     "*/ignis/infrastructure/connectors/youtube/*",
 }
 
@@ -42,7 +41,6 @@ SC004_SCOPE = {
 SCOPE_WITNESSES = {
     "Repository": "src/ignis/infrastructure/persistence/sqlite_repository.py",
     "Registry": "src/ignis/infrastructure/connectors/registry.py",
-    "RSS Plugin": "src/ignis/infrastructure/connectors/google_trends/rss_plugin.py",
     "YouTube Plugin": "src/ignis/infrastructure/connectors/youtube/youtube_plugin.py",
 }
 
@@ -80,8 +78,8 @@ def test_the_gate_config_exists():
     )
 
 
-def test_the_scope_is_exactly_the_four_things_sc004_promises():
-    """Repository, RSS Plugin, YouTube Plugin, Registry. Not more, not fewer."""
+def test_the_scope_is_exactly_the_three_things_sc004_promises():
+    """Repository, YouTube Plugin, Registry. Not more, not fewer."""
     configured = _include_patterns()
 
     unexpected = configured - SC004_SCOPE
@@ -181,7 +179,6 @@ def test_no_pragma_no_cover_was_added_to_the_promised_scope():
     offenders = []
     for module in (
         REPO / "src/ignis/infrastructure/persistence",
-        REPO / "src/ignis/infrastructure/connectors/google_trends",
         REPO / "src/ignis/infrastructure/connectors/youtube",
     ):
         for path in module.rglob("*.py"):

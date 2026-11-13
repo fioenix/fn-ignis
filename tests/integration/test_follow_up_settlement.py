@@ -198,7 +198,7 @@ async def _persist_before_ingress_process(directory):
     assert config._ENV_ISOLATED
     assert config._ENV_FILES == (str(Path(directory) / 'crash-test.env'),)
     assert not any(config.reveal_secret(getattr(config.settings, name)) for name in (
-        'YOUTUBE_API_KEY', 'THREADS_APP_SECRET', 'INSTAGRAM_APP_SECRET',
+        'YOUTUBE_API_KEY', 'THREADS_APP_SECRET',
         'IGNIS_ENCRYPTION_KEY', 'PLAYWRIGHT_PROXY_SERVER'))
     directory = Path(directory)
     (directory / 'child-phase.json').write_text(json.dumps({'phase': 'typed-setup-start'}))
@@ -247,7 +247,7 @@ async def test_owned_process_death_retains_unknown_writer_and_allocation(tmp_pat
     # Use a test-owned inert configuration, independent of the parent installation or env path.
     isolated_env = tmp_path / 'crash-test.env'
     isolated_env.write_text('DATABASE_URL=sqlite:///ignis.db\nYOUTUBE_API_KEY=\n'
-                            'THREADS_APP_SECRET=\nINSTAGRAM_APP_SECRET=\n'
+                            'THREADS_APP_SECRET=\n'
                             'IGNIS_ENCRYPTION_KEY=\nPLAYWRIGHT_PROXY_SERVER=\n')
     env['IGNIS_ENV_ISOLATED'] = '1'
     env['IGNIS_ENV_FILE'] = str(isolated_env)
@@ -686,7 +686,7 @@ async def _persist_native_before_ingress_process(directory):
     directory = Path(directory)
     assert config._ENV_ISOLATED and config._ENV_FILES == (str(directory / 'crash-test.env'),)
     assert not any(config.reveal_secret(getattr(config.settings, name)) for name in (
-        'YOUTUBE_API_KEY', 'THREADS_APP_SECRET', 'INSTAGRAM_APP_SECRET',
+        'YOUTUBE_API_KEY', 'THREADS_APP_SECRET',
         'IGNIS_ENCRYPTION_KEY', 'PLAYWRIGHT_PROXY_SERVER'))
     descriptor = json.loads((directory / 'native-connection.json').read_text())
     repository = PostgresTimescaleRepository(descriptor['dsn'], min_pool_size=1, max_pool_size=2)
@@ -740,7 +740,7 @@ async def test_postgres_owned_process_death_retains_unknown_writer_and_allocatio
     descriptor.chmod(0o600)
     isolated = tmp_path / 'crash-test.env'
     isolated.write_text('DATABASE_URL=sqlite:///:memory:\nYOUTUBE_API_KEY=\nTHREADS_APP_SECRET=\n'
-        'INSTAGRAM_APP_SECRET=\nIGNIS_ENCRYPTION_KEY=\nPLAYWRIGHT_PROXY_SERVER=\n')
+        'IGNIS_ENCRYPTION_KEY=\nPLAYWRIGHT_PROXY_SERVER=\n')
     root = Path(__file__).resolve().parents[2]
     env = {key: os.environ[key] for key in ('PATH',) if key in os.environ}
     env.update(IGNIS_ENV_ISOLATED='1', IGNIS_ENV_FILE=str(isolated),

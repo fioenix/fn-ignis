@@ -35,13 +35,11 @@ SRC_NON_ASCII_ALLOWLIST = {
     "ignis/infrastructure/clustering/semantic_clusterer.py",
     # Third-party UI selectors that must match TikTok's rendered text verbatim.
     "ignis/infrastructure/auth/tiktok_auth.py",
-    "ignis/infrastructure/connectors/tiktok/creative_center_plugin.py",
     "ignis/infrastructure/connectors/meta_browser_ingress.py",
 }
 
 # Vocabulary constants that predate the Data-Driven Vocabulary Protocol.
 KNOWN_VOCABULARY_CONSTANTS = {
-    ("ignis/infrastructure/connectors/reels/reels_plugin.py", "BROWSER_API_MARKERS"),
     ("ignis/infrastructure/harness/strategic_reasoner.py", "RATE_LIMIT_HINTS"),
     ("ignis/infrastructure/harness/strategic_reasoner.py", "AUTH_SENSITIVE_PLATFORMS"),
     ("ignis/infrastructure/harness/strategic_reasoner.py", "VIDEO_PLATFORMS"),

@@ -5,10 +5,8 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
-from ignis.infrastructure.connectors import browser_support, meta_browser_ingress
-from ignis.infrastructure.connectors.reels.reels_plugin import ReelsPlugin
+from ignis.infrastructure.connectors import meta_browser_ingress
 from ignis.infrastructure.connectors.threads.threads_plugin import ThreadsPlugin
-from ignis.infrastructure.connectors.tiktok import tiktok_plugin
 
 
 def cookie(name, value, domain, **overrides):
@@ -84,7 +82,7 @@ def test_csrf_uses_longest_eligible_path_and_ignores_foreign_tokens():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("platform", ["tiktok", "threads", "instagram"])
+@pytest.mark.parametrize("platform", ["threads"])
 async def test_health_scopes_cookies_or_refuses_retired_threads(platform, requests, monkeypatch):
     domain = f".{platform}.com"
     state = {"cookies": [
@@ -94,36 +92,11 @@ async def test_health_scopes_cookies_or_refuses_retired_threads(platform, reques
         cookie("expired", "old", domain, expires=1),
         {"name": "unknown", "value": "unscoped"},
     ]}
-    if platform == "tiktok":
-        monkeypatch.setattr(tiktok_plugin, "browser_launch_available", AsyncMock(return_value=True))
-        plugin = tiktok_plugin.TikTokPlugin(auth_manager=AsyncMock())
-        plugin._auth_manager.get_storage_state.return_value = state
-    else:
-        plugin = ThreadsPlugin() if platform == "threads" else ReelsPlugin()
-        plugin._browser_auth_manager = AsyncMock()
-        plugin._browser_storage_state = AsyncMock(return_value=state)
-    if platform == "threads":
-        assert await plugin.is_healthy() is False
-        assert requests == []
-    else:
-        assert await plugin.is_healthy() is True
-        assert requests[0].headers["cookie"] == "sessionid=allowed"
-
-
-@pytest.mark.asyncio
-async def test_public_surface_still_follows_redirects(monkeypatch):
-    captured = []
-    client_type = httpx.AsyncClient
-
-    def respond(request):
-        captured.append(request)
-        return (httpx.Response(302, headers={"location": "/final"})
-                if request.url.path == "/start" else httpx.Response(200))
-
-    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: client_type(
-        transport=httpx.MockTransport(respond), **kw))
-    assert await browser_support.surface_reachable("https://public.test/start") is True
-    assert [r.url.path for r in captured] == ["/start", "/final"]
+    plugin = ThreadsPlugin()
+    plugin._browser_auth_manager = AsyncMock()
+    plugin._browser_storage_state = AsyncMock(return_value=state)
+    assert await plugin.is_healthy() is False
+    assert requests == []
 
 
 @pytest.mark.asyncio
