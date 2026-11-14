@@ -15,7 +15,7 @@ def generate_mission_shortcode(title: str, geo: GeoCode = GeoCode.VN, timeframe:
     tf_clean = re.sub(r"[^0-9A-Z]", "", timeframe.upper())
     geo_clean = geo.value if hasattr(geo, "value") else str(geo)
     
-    hex_suffix = (str(uid)[:4]).upper() if uid else "01"
+    hex_suffix = (str(uid)[:8]).upper() if uid else "01"
     return f"{geo_clean}-{slug}-{tf_clean}-{hex_suffix}"
 
 
