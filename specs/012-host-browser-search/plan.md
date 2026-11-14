@@ -73,7 +73,8 @@ collector; session reuse/ownership must be verified through host tests, not infe
 
 Exact accepted replay returns the cached process-local receipt; differing or concurrent replay refuses.
 Once ingestion begins, any failure terminates the ticket. Existing run journal reports uncertain/partial
-persistence; require readback before replacement. Restart loses tickets and refuses stale submissions.
+persistence; require readback before replacement. Restart loses tickets and refuses stale submissions
+with the typed status `EXPIRED_ON_RESTART` (FR-014, 2026-11-14).
 No durable resume, automatic resubmission or exactly-once crash guarantee is promised.
 
 ## Project Structure
@@ -164,3 +165,12 @@ tier, routine or watchlist changes.
 - **Known limit**: a caption that itself contains `do … tạo với …` loses its tail, which errs towards
   privacy. The extractor's `innerText` fallback (no visible image label) is unchanged and not covered
   by this amendment.
+
+## Amendment 2026-11-14: ENG-6 (FR-014, FR-015)
+
+Direct path past `speckit-tasks` (Spec Kit depth gate): one seam in `HostBrowserSearchService` and the
+`diagnose_system_health` handler, known consumers (submit/cancel handlers, the relay guide, health
+readers), no migration, dependency or new input. The MCP tool signatures and descriptions are unchanged;
+the change adds one status value and one health field. Acceptance: red-first tests in
+`tests/unit/test_host_browser_search.py` and `tests/unit/test_host_browser_guides.py`, plus the posted
+code and security reviews.

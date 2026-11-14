@@ -120,6 +120,14 @@ mission use requires its confirmed source, query budget, authority, and evidence
   same-origin form. The script the host runs in the search tab returns only status and counts, so
   records never pass through the agent. Preparation also returns that script as `tab_script`, because
   browser tooling may refuse to read it back from the page.
+- **FR-014** (added 2026-11-14, ENG-6): A ticket an earlier server process issued MUST return the typed
+  status `EXPIRED_ON_RESTART` from submit and cancel when it is next accessed, instead of an untyped
+  refusal. It expires on access: no background janitor runs and no ticket is persisted. An id this
+  process could not have issued keeps the existing unknown-request refusal.
+- **FR-015** (added 2026-11-14, ENG-6): `diagnose_system_health` MUST report, for each source whose
+  attribution is localized, the attribution locales seeded in `market_lexicons` beside the page
+  locales the last accepted host-browser answer observed in this process, and which observed locales
+  have no seeded wording. Malformed vocabulary is reported as such, never raised.
 
 ### Key Entities
 
@@ -157,6 +165,21 @@ mission use requires its confirmed source, query budget, authority, and evidence
   to keyword expansion. Genuine keyword Trends time-series ingestion is outside this feature.
 
 ## Clarifications
+
+### Session 2026-11-14
+
+- Q: How does a restarted process recognise a ticket it never held, without durable storage? → A: Request ids
+  use the UUIDv7 layout, so their issue time is readable; an unknown v7 id issued at or before this service
+  started is `EXPIRED_ON_RESTART`, anything else stays `UNKNOWN_REQUEST`. The 2026-10-02 decision against
+  durable pending-task storage stands (agent decided; basis: BACKLOG ENG-6 "expire on access, no janitor";
+  the relay path stays a separate 256-bit secret, so the id's 74 random bits bind a ticket as before).
+- Q: Does an unseeded observed locale change the health `status`? → A: No. `status` keeps reflecting
+  circuit breakers; the locale gap adds a recommendation for sources whose records require attribution
+  wording (Instagram today), because TikTok's v4 extractor keeps captions and hashtags only (agent decided;
+  basis: ENG-6 struck the `en` seed for that reason; existing health consumers read `status`).
+- Q: Where is the observed page locale kept? → A: In the service's process memory, from the latest accepted
+  answer per source, validated codes only; it resets on restart and holds no record content (agent decided;
+  basis: no new persistence, Constitution VII).
 
 ### Session 2026-11-09
 

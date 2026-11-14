@@ -305,7 +305,9 @@ skill that walks one run step by step: `ignis-tiktok-browser`, `ignis-threads-br
 `ignis-instagram-browser`, with the shared relay steps in the `ignis_browser_relay` guide. The MCP server
 serves the same steps as prompts (`ignis_tiktok_browser`, `ignis_threads_browser`,
 `ignis_instagram_browser`) and as resources under `fn-ignis://guide/`. Instagram accepts records only when the page locale has seeded attribution
-wording (today `en`); other locales return `DEGRADED` with no observations. The grid names no account, so a requester's own
+wording (today `en`); other locales return `DEGRADED` with no observations. `diagnose_system_health`
+lists the seeded locales beside the page locale the last run observed, under `host_browser_attribution_locales`.
+A request prepared before the MCP server restarted returns `EXPIRED_ON_RESTART`; prepare a new one. The grid names no account, so a requester's own
 Instagram posts cannot be excluded from a run; they are stored without identity like any other post.
 
 **Customer voice in ten minutes.** Give your agent one keyword and ask what people say about it. The

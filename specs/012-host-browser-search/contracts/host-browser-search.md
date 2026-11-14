@@ -51,4 +51,5 @@ partial failures. Unknown platform timeframe never attests mission window; unkno
 
 Opaque IDs prevent binding/replay mistakes, not forged-data authenticity. Authorized host is trusted
 collector; not a generic file-import endpoint. Ownership/session properties require host tests.
-Same live process required for tickets; restart refuses. Installed-wheel discovery/round-trip is a gate.
+Same live process required for tickets; restart refuses with status `EXPIRED_ON_RESTART` on next access
+(FR-014). Installed-wheel discovery/round-trip is a gate.
