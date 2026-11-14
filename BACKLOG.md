@@ -286,13 +286,14 @@ Bề mặt agent:
   trợ nâng cấp". `v0.10.0` và `v0.11.0` đã phát hành mà chưa kiểm việc này. Chạy qua heavy-job lock; không đụng store thật.
 - [ ] **ENG-5 — Tách `server.py`** thành composition, handler theo nhóm và wrapper (M). Trước khi tách, thêm test
   snapshot cho schema của 41 tool, và re-export tên cũ cho 192 chỗ test đang tham chiếu. Dừng nếu snapshot có diff.
-- [ ] **ENG-6 — Độ bền của host-browser** (S–M):
-  - `diagnose_system_health` báo các locale ghi công đã seed so với locale của trang.
+- [x] **ENG-6 — Độ bền của host-browser** (S–M) — đóng 14/11/2026 trong PR #174 (spec 012 FR-014, FR-015):
+  - `diagnose_system_health` báo các locale ghi công đã seed so với locale của trang, trong mục
+    `host_browser_attribution_locales`.
   - ~~Seed mẫu ghi công `en`.~~ Không cần: từ `tiktok-public-grid-v3` extractor chỉ giữ phần caption và hashtag,
     nên ngôn ngữ giao diện không còn chặn bản ghi (`docs/USER_GUIDE.md`, migration 038); lượt chạy 11/11 đạt `HEALTHY`.
   - Ticket còn treo khi server khởi động lại trả trạng thái có kiểu `EXPIRED_ON_RESTART`; hết hạn khi truy cập,
-    không có janitor chạy nền.
-  - Muốn chứng minh trên trang thật cần phiên thật (OWN-3).
+    không có janitor chạy nền. Request id theo bố cục UUIDv7 để process mới đọc được thời điểm cấp.
+  - Còn mở: chứng minh trên trang thật cần phiên thật (OWN-3).
 - [x] **ENG-7 — Test chống lệch manifest** — đã có sẵn, đóng 11/11/2026: `tests/unit/test_tool_manifests_drift.py`
   kiểm `hermes_manifest.json`, `.hermes/tools.json` và `openclaw.json` khớp 41 tool của `list_tools()`;
   `test_public_distribution_contract.py` kiểm `server.json` ghi SQLite mặc định là tạm. Chuyên gia đánh giá thiếu.
