@@ -3,18 +3,21 @@
 import asyncio
 import copy
 import json
+import re
+import secrets
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
 from importlib.resources import files
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from ignis.domain.host_browser_search import HostSearchQuery, HostSearchRequest
 from ignis.infrastructure.caller_storage import current_caller_storage
 from ignis.domain.source_identity import identity_free_source_url
 from ignis.infrastructure.security.pii_sanitizer import mask_author_identity_text
 from ignis.infrastructure.connectors.host_browser.relay import LoopbackRelay
-from ignis.domain.host_browser_sources import get_source
+from ignis.domain.host_browser_sources import get_source, host_source_names
 from ignis.infrastructure.connectors.host_browser.action_labels import action_labels_from_rows, seeded_action_labels
 from ignis.infrastructure.connectors.host_browser.attribution_locales import attribution_locales_from_rows, seeded_attribution_locales
 from ignis.infrastructure.connectors.host_browser.validator import validate_answer
@@ -68,11 +71,43 @@ class AttributionVocabularyMissing(ValueError):
     """Preparation refused: without attribution templates, excerpts would keep the poster's name."""
 
 
+class HostSearchExpiredOnRestart(ValueError):
+    """A ticket issued by an earlier server process: its relay and staged answer are gone."""
+
+    def __init__(self, request_id: str) -> None:
+        super().__init__("EXPIRED_ON_RESTART")
+        self.host_search_failure = dict(
+            status="EXPIRED_ON_RESTART", request_id=request_id, reason_code="HOST_SEARCH_EXPIRED_ON_RESTART",
+            next_step=("The MCP server restarted after this request was prepared; prepare a new request. "
+                       "For a mission, read its journal and evidence frame first"))
+
+
+def _issue_request_id() -> str:
+    """UUIDv7 layout (RFC 9562): the issue time lets a later process recognise a lost ticket."""
+    millis = time.time_ns() // 1_000_000
+    value = (millis & (2**48 - 1)) << 80 | 7 << 76 | secrets.randbits(12) << 64 | 2 << 62 | secrets.randbits(62)
+    return str(UUID(int=value))
+
+
+def _issued_millis(request_id) -> int | None:
+    """Issue time of an id this service family issued, or None for any other string."""
+    try:
+        parsed = UUID(request_id)
+    except (TypeError, ValueError, AttributeError):
+        return None
+    if parsed.version != 7 or str(parsed) != request_id:
+        return None
+    return parsed.int >> 80
+
+
 class HostBrowserSearchService:
     """Process-local tickets. Restart invalidates requests; no durable resume promised."""
 
     def __init__(self, attribution_templates=None, *, threads_attribution_templates=None) -> None:
         self._tickets: dict[str, dict] = {}
+        # Tickets are process-local; an id issued before this instance started belongs to a lost process.
+        self._started_millis = time.time_ns() // 1_000_000
+        self._observed_locales: dict[str, dict] = {}
         self._groups: dict[tuple, _MissionGroup] = {}
         self._lock = threading.RLock()
         # Tactical preparation opens no database, so it starts from the shipped seed (Spec 012).
@@ -126,7 +161,7 @@ class HostBrowserSearchService:
             raise ValueError("Lifetime must be finite and at most one hour")
         now = datetime.now(timezone.utc)
         request = HostSearchRequest(
-            request_id=str(uuid4()), host_task_ref=host_task_ref, session_ref=session_ref, mode=mode, source=source,
+            request_id=_issue_request_id(), host_task_ref=host_task_ref, session_ref=session_ref, mode=mode, source=source,
             issued_at=now, expires_at=now + timedelta(seconds=lifetime_seconds),
             queries=tuple(HostSearchQuery(query_id=str(uuid4()), query=query,
                           search_url=descriptor.search_url(query),
@@ -180,6 +215,10 @@ class HostBrowserSearchService:
 
     def _ticket(self, request_id: str) -> dict:
         if request_id not in self._tickets:
+            issued = _issued_millis(request_id)
+            # Expire on access: no janitor runs; equal milliseconds count as the earlier process.
+            if issued is not None and issued <= self._started_millis:
+                raise HostSearchExpiredOnRestart(request_id)
             raise ValueError("UNKNOWN_REQUEST")
         return self._tickets[request_id]
 
@@ -228,6 +267,7 @@ class HostBrowserSearchService:
                     raise
                 # Only mission policy input stays transient in memory; receipts are always masked.
                 ticket.update(state="STAGED", payload=None, receipt=receipt, author_records=author_records)
+                self._observe_locales(ticket["request"].source, payload)
                 return dict(status="STAGED", request_id=request_id)
         finally:
             # Never join a server callback while holding the ticket lock.
@@ -564,6 +604,34 @@ class HostBrowserSearchService:
                 if not worker.done():
                     await _settle(worker)
         return dict(status="CANCELLED", request_id=request_id)
+
+    def _observe_locales(self, source, payload) -> None:
+        """Keep only the validated page-locale codes of the latest accepted answer, for health."""
+        locales = sorted({item.get("locale") for item in payload.get("answers", ())
+                          if re.fullmatch(r"[a-z]{2,8}|unsupported", str(item.get("locale")))})
+        if locales:
+            self._observed_locales[source] = dict(locales=locales,
+                                                  observed_at=datetime.now(timezone.utc).isoformat())
+
+    def observed_page_locales(self) -> dict:
+        with self._lock:
+            return copy.deepcopy(self._observed_locales)
+
+    @staticmethod
+    def attribution_locale_report(rows, observed) -> dict:
+        """Seeded attribution locales per localized source beside the page locales a probe last saw."""
+        report = {}
+        for source in (name for name in host_source_names() if get_source(name).localized_attribution):
+            try:
+                seeded = sorted(attribution_locales_from_rows(rows, source))
+            except ValueError:
+                report[source] = dict(error="INVALID_ATTRIBUTION_VOCABULARY")
+                continue
+            seen = observed.get(source, {})
+            locales = list(seen.get("locales", ()))
+            report[source] = dict(seeded=seeded, observed=locales, observed_at=seen.get("observed_at"),
+                                  unseeded=[code for code in locales if code != "unsupported" and code not in seeded])
+        return report
 
     def request_mode(self, request_id):
         """Non-authorizing routing hint; never returns bindings, receipts or record contents."""

@@ -69,7 +69,7 @@ def test_the_relay_guide_names_every_live_run_failure():
     relay = _packaged("ignis_browser_relay")
     for symptom in ("No such file or directory", "not in the same group", "Evaluator returns `{}`",
                     "This tab was not opened by the relay", "expires_at", "Wrong account or profile",
-                    "page locale is unsupported"):
+                    "page locale is unsupported", "EXPIRED_ON_RESTART", "attribution wording is unobserved"):
         assert symptom in relay, symptom
 
 

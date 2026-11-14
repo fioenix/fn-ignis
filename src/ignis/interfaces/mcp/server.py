@@ -34,7 +34,9 @@ from ignis.application.use_cases.execute_mission import ExecuteMissionUseCase
 from ignis.application.use_cases.host_browser_search import (
     AttributionVocabularyMissing,
     HostBrowserSearchService,
+    HostSearchExpiredOnRestart,
 )
+from ignis.domain.host_browser_sources import get_source
 from ignis.application.use_cases.get_evidence_qualification_batch import (
     DEFAULT_BATCH_LIMIT,
     GetEvidenceQualificationBatchUseCase,
@@ -760,7 +762,9 @@ async def handle_cancel_host_browser_search(request_id: str, host_task_ref: str,
         if _host_browser_search_service.mode(request_id, host_task_ref, session_ref) == "MISSION":
             return await _host_browser_search_service.cancel_mission(request_id, host_task_ref, session_ref)
         return _host_browser_search_service.cancel(request_id, host_task_ref, session_ref)
-    except ValueError:
+    except ValueError as exc:
+        if isinstance(exc, HostSearchExpiredOnRestart):
+            return exc.host_search_failure
         return {"status": "BLOCKED", "reason_code": "HOST_SEARCH_CANNOT_CANCEL"}
 
 
@@ -1677,6 +1681,25 @@ async def handle_diagnose_system_health() -> str:
         "recent_errors": recent_errors,
         "recommendations": []
     }
+
+    # Seeded attribution wording per locale beside the page locale a host-browser probe last observed.
+    try:
+        lexicon_rows = await repo.get_domain_lexicons()
+    except Exception:
+        lexicon_rows = None
+    if lexicon_rows is None:
+        diagnostics["host_browser_attribution_locales"] = {"error": "VOCABULARY_UNAVAILABLE"}
+    else:
+        locales = _host_browser_search_service.attribution_locale_report(
+            lexicon_rows, _host_browser_search_service.observed_page_locales())
+        diagnostics["host_browser_attribution_locales"] = locales
+        for source, entry in locales.items():
+            descriptor = get_source(source)
+            if descriptor.locale_requires_attribution and entry.get("unseeded"):
+                diagnostics["recommendations"].append(
+                    f"{descriptor.display_name} page locale {', '.join(repr(code) for code in entry['unseeded'])} "
+                    "observed by the last host-browser probe has no seeded attribution wording in market_lexicons; "
+                    "that locale yields no observations until it is seeded.")
 
     for plat, info in health_status.items():
         if plat == "threads":

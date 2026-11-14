@@ -70,4 +70,6 @@ Submitting before every required sibling is `STAGED` returns `BLOCKED` / `HOST_S
 | Relay never stages | `expires_at` passed | `cancel_host_browser_search`, then prepare a new request |
 | A rejected payload | Relay closed | Prepare a new request before staging again |
 | Wrong account or profile | The page shows another signed-in account | Stop and ask the requester which profile to use |
+| Submit or cancel returns `EXPIRED_ON_RESTART` | The MCP server restarted after the request was prepared | The ticket and its staged answer are gone; prepare a new request. For a mission, read its journal and evidence frame first |
+| Instagram returns `DEGRADED` with "attribution wording is unobserved for locale" | `diagnose_system_health` lists the locale under `host_browser_attribution_locales.instagram.unseeded` | No observations come from that locale until its attribution wording is seeded; report the source as unavailable for this run |
 | Threads returns `DEGRADED` with "page locale is unsupported" | The search tab's `<html lang>` is missing or malformed | The source is unavailable for this run; report it and move on. A valid language without seeded labels still passes, with counters unknown |

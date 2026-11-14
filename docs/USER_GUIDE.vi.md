@@ -303,7 +303,9 @@ Mỗi nguồn có một agent skill hướng dẫn từng bước của một l�
 `ignis_browser_relay`. MCP server cũng cung cấp các bước này dưới dạng prompt
 (`ignis_tiktok_browser`, `ignis_threads_browser`, `ignis_instagram_browser`) và resource trong `fn-ignis://guide/`. Instagram chỉ nhận bản ghi
 khi ngôn ngữ của trang đã có mẫu câu ghi công trong seed (hiện chỉ có `en`); ngôn ngữ khác trả `DEGRADED`
-và không có quan sát nào. Lưới không ghi tên tài khoản, nên không loại được bài Instagram của chính người
+và không có quan sát nào. `diagnose_system_health` liệt kê các ngôn ngữ đã có mẫu câu ghi công bên cạnh
+ngôn ngữ trang mà lượt chạy gần nhất ghi nhận, trong mục `host_browser_attribution_locales`. Yêu cầu đã chuẩn bị
+trước khi MCP server khởi động lại sẽ trả `EXPIRED_ON_RESTART`; hãy chuẩn bị yêu cầu mới. Lưới không ghi tên tài khoản, nên không loại được bài Instagram của chính người
 yêu cầu ra khỏi lượt chạy; các bài đó được lưu không kèm danh tính như mọi bài khác.
 
 **Tiếng nói khách hàng trong mười phút.** Đưa agent một từ khóa và hỏi người ta đang nói gì về nó. Guide

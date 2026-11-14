@@ -362,3 +362,118 @@ def test_packaged_scripts_stay_safe_to_compact():
             assert not any(line.rstrip().endswith("\\") for line in text.splitlines()), script.name
             assert "/*" not in text, script.name
             assert not set(text) & set("\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029"), script.name
+
+
+# --- ENG-6: restart expiry and attribution-locale health ---
+
+
+def _restarted(service):
+    """A new service instance is what a restarted MCP server holds: an empty ticket table."""
+    service.close()
+    restarted = service_type()()
+    return restarted
+
+
+def test_a_ticket_left_pending_across_restart_expires_on_access(service):
+    request = prepare(service)
+    restarted = _restarted(service)
+    try:
+        for call in (restarted.submit, restarted.cancel, restarted.mode):
+            with pytest.raises(ValueError, match="EXPIRED_ON_RESTART") as error:
+                call(request["request_id"], "task-1", "chrome-1")
+            failure = error.value.host_search_failure
+            assert failure["status"] == "EXPIRED_ON_RESTART"
+            assert failure["request_id"] == request["request_id"]
+            assert "observations" not in failure
+    finally:
+        restarted.close()
+
+
+def test_restart_expiry_never_claims_an_id_this_process_could_not_have_issued(service):
+    from uuid import uuid4
+    for request_id in (str(uuid4()), "not-a-uuid", ""):
+        with pytest.raises(ValueError, match="UNKNOWN_REQUEST"):
+            service.submit(request_id, "task-1", "chrome-1")
+
+
+def test_a_staged_answer_lost_to_restart_is_not_accepted(service):
+    request = prepare(service)
+    service.stage(request["request_id"], answer(request))
+    restarted = _restarted(service)
+    try:
+        with pytest.raises(ValueError, match="EXPIRED_ON_RESTART"):
+            restarted.submit(request["request_id"], "task-1", "chrome-1")
+    finally:
+        restarted.close()
+
+
+@pytest.mark.asyncio
+async def test_mcp_handlers_return_the_typed_restart_status(service, monkeypatch):
+    from ignis.interfaces.mcp import server
+    request = prepare(service)
+    restarted = _restarted(service)
+    monkeypatch.setattr(server, "_host_browser_search_service", restarted)
+    try:
+        submitted = await server.handle_submit_host_browser_search(request["request_id"], "task-1", "chrome-1")
+        cancelled = await server.handle_cancel_host_browser_search(request["request_id"], "task-1", "chrome-1")
+        assert submitted["status"] == cancelled["status"] == "EXPIRED_ON_RESTART"
+        assert submitted["reason_code"] == "HOST_SEARCH_EXPIRED_ON_RESTART"
+    finally:
+        restarted.close()
+
+
+def test_a_staged_answer_records_the_page_locale_it_observed(service):
+    assert service.observed_page_locales() == {}
+    request = prepare(service)
+    payload = answer(request)
+    payload["answers"][0]["locale"] = "en"
+    service.stage(request["request_id"], payload)
+    observed = service.observed_page_locales()["tiktok"]
+    assert observed["locales"] == ["en"]
+    assert datetime.fromisoformat(observed["observed_at"]).tzinfo is not None
+
+
+def test_a_rejected_answer_records_no_page_locale(service):
+    request = prepare(service)
+    payload = answer(request, host_task_ref="other-task")
+    with pytest.raises(ValueError):
+        service.stage(request["request_id"], payload)
+    assert service.observed_page_locales() == {}
+
+
+def test_locale_report_compares_seeded_vocabulary_with_the_observed_page_locale(service):
+    rows = [dict(domain="tiktok_attribution_vi", term="do {author} tạo với", category="ui_attribution"),
+            dict(domain="instagram_attribution_vi", term="Ảnh của {author} vào", category="ui_attribution")]
+    observed = {"instagram": {"locales": ["en", "unsupported"], "observed_at": "2026-11-14T00:00:00+00:00"}}
+    report = service.attribution_locale_report(rows, observed)
+    assert report["tiktok"] == dict(seeded=["vi"], observed=[], observed_at=None, unseeded=[])
+    assert report["instagram"] == dict(seeded=["vi"], observed=["en", "unsupported"],
+                                       observed_at="2026-11-14T00:00:00+00:00", unseeded=["en"])
+    assert "threads" not in report
+
+
+def test_locale_report_flags_malformed_vocabulary_instead_of_failing(service):
+    rows = [dict(domain="instagram_attribution_vi", term="no placeholder", category="ui_attribution")]
+    report = service.attribution_locale_report(rows, {})
+    assert report["instagram"] == dict(error="INVALID_ATTRIBUTION_VOCABULARY")
+    assert report["tiktok"]["seeded"] == []
+
+
+@pytest.mark.asyncio
+async def test_health_reports_seeded_and_observed_attribution_locales(service, monkeypatch):
+    from unittest.mock import AsyncMock, Mock
+    from ignis.interfaces.mcp import server
+    repo = Mock()
+    repo.get_recent_logs = AsyncMock(return_value=[])
+    repo.get_domain_lexicons = AsyncMock(return_value=[
+        dict(domain="instagram_attribution_vi", term="Ảnh của {author} vào", category="ui_attribution")])
+    registry = Mock()
+    registry.get_health_status.return_value = {}
+    monkeypatch.setattr(server, "get_components", lambda: {"registry": registry, "repository": repo})
+    monkeypatch.setattr(server, "_host_browser_search_service", service)
+    service._observed_locales["instagram"] = {"locales": ["en"], "observed_at": "2026-11-14T00:00:00+00:00"}
+    import json
+    diagnostics = json.loads(await server.handle_diagnose_system_health())
+    assert diagnostics["status"] == "HEALTHY"
+    assert diagnostics["host_browser_attribution_locales"]["instagram"]["unseeded"] == ["en"]
+    assert any("Instagram" in item and "'en'" in item for item in diagnostics["recommendations"])
