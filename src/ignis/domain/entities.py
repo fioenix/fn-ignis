@@ -16,7 +16,9 @@ def generate_mission_shortcode(title: str, geo: GeoCode = GeoCode.VN, timeframe:
     geo_clean = geo.value if hasattr(geo, "value") else str(geo)
     
     hex_suffix = (str(uid)[:8]).upper() if uid else "01"
-    return f"{geo_clean}-{slug}-{tf_clean}-{hex_suffix}"
+    # PostgreSQL stores shortcode as VARCHAR(50); trim the readable prefix, never the unique suffix.
+    prefix = f"{geo_clean}-{slug}-{tf_clean}"[: 50 - len(hex_suffix) - 1].rstrip("-")
+    return f"{prefix}-{hex_suffix}"
 
 
 @dataclass
